@@ -1,0 +1,101 @@
+name: 测试
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_QPA_PLATFORM: offscreen
+
+jobs:
+  test:
+    name: 测试 (Linux)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统 Qt 与构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            cmake \
+            ninja-build \
+            g++ \
+            qt6-base-dev \
+            libqt6sql6-sqlite \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libfontconfig1-dev
+
+      - name: 打印实际使用的 Qt 版本
+        run: dpkg-query -W -f='${Package} ${Version}\n' qt6-base-dev
+
+      - name: 配置
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DLYCODE_BUILD_TESTS=ON
+
+      - name: 构建
+        run: cmake --build build --parallel
+
+      - name: 运行测试
+        run: ctest --test-dir build --output-on-failure
+
+      - name: 上传测试截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-screenshots
+          path: build/tests/ui-screenshots
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test-windows:
+    name: 测试 (Windows)
+    runs-on: windows-latest
+
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.0"
+          arch: win64_msvc2022_64
+          cache: true
+          modules: ""
+
+      - name: 配置
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DLYCODE_BUILD_TESTS=ON
+
+      - name: 构建（含测试目标）
+        run: cmake --build build --config RelWithDebInfo --parallel
+
+      - name: 运行可跨平台的测试
+        run: >
+          ctest --test-dir build -C RelWithDebInfo --output-on-failure
+          -E "test_agent_runtime|test_ui_flow"
+
+      - name: 上传测试截图
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-screenshots-windows
+          path: build/tests/ui-screenshots
+          if-no-files-found: ignore
+          retention-days: 7

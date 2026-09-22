@@ -25,9 +25,15 @@ using namespace lycode::mcp;
 namespace {
 
 /// 假服务器可执行文件与本测试在同一目录。
+///
+/// Windows 上文件名带 `.exe`。CreateProcess 在没有扩展名时会自动补 `.exe`，
+/// 但依赖这个隐式行为不够明确——显式拼出来，两个平台都确定。
 QString fakeServerPath() {
-    return QDir(QCoreApplication::applicationDirPath())
-        .filePath(QStringLiteral("fake_mcp_server"));
+    QString name = QStringLiteral("fake_mcp_server");
+#ifdef Q_OS_WIN
+    name += QStringLiteral(".exe");
+#endif
+    return QDir(QCoreApplication::applicationDirPath()).filePath(name);
 }
 
 ServerConfig fakeConfig(const QString &id = QStringLiteral("fake")) {

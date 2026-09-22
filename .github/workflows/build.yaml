@@ -1,0 +1,71 @@
+name: 构建
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 构建 (Linux)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统 Qt 与构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            cmake \
+            ninja-build \
+            g++ \
+            qt6-base-dev \
+            libqt6sql6-sqlite \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libfontconfig1-dev
+
+      - name: 打印实际使用的 Qt 版本
+        run: |
+          # 把版本打出来，便于对照"本地 6.8.0 上能过、CI 上为什么不行"。
+          dpkg-query -W -f='${Package} ${Version}\n' qt6-base-dev
+
+      - name: 配置
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DLYCODE_BUILD_TESTS=OFF
+
+      - name: 构建
+        run: cmake --build build --parallel
+
+  build-windows:
+    name: 构建 (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.0"
+          arch: win64_msvc2022_64
+          cache: true
+          modules: ""
+
+      - name: 配置
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DLYCODE_BUILD_TESTS=OFF
+
+      - name: 构建
+        run: cmake --build build --config RelWithDebInfo --parallel
