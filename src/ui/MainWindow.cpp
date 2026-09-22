@@ -19,6 +19,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileDialog>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QKeySequence>
@@ -71,9 +72,15 @@ QString contextUsageText(const QJsonObject &usage) {
         return {};
     }
     // 用 k/M 缩写而不是原始数字，状态栏空间有限。
+    // 超过 100 万时用 M：1000000 写成 "1000.0k" 既长又难读，写成 "1.0M" 一眼就懂。
     const auto compact = [](int value) {
-        return value >= 1000 ? QStringLiteral("%1k").arg(value / 1000.0, 0, 'f', 1)
-                             : QString::number(value);
+        if (value >= 1000000) {
+            return QStringLiteral("%1M").arg(value / 1000000.0, 0, 'f', 1);
+        }
+        if (value >= 1000) {
+            return QStringLiteral("%1k").arg(value / 1000.0, 0, 'f', 1);
+        }
+        return QString::number(value);
     };
     return QStringLiteral("上下文 %1 / %2").arg(compact(used), compact(max));
 }
@@ -209,6 +216,13 @@ void MainWindow::buildUi() {
     contextLabel_ = new QLabel;
     contextLabel_->setObjectName(QStringLiteral("contextLabel"));
     contextLabel_->setFont(Theme::instance().font(FontRole::UiXs));
+    // 预留最宽可能的文案宽度：否则用户把窗口调到 200 万时最后一位会被裁掉
+    // （QLabel 在布局里可以被压缩到 sizeHint 以下）。用字体度量而不是写死像素，
+    // 这样界面字号变化也仍然够用。
+    contextLabel_->setMinimumWidth(
+        QFontMetrics(contextLabel_->font())
+                .horizontalAdvance(QStringLiteral("上下文 000.0 / 2000.0M")) +
+        8);
     headerLayout->addWidget(contextLabel_);
 
     contextBar_ = new QProgressBar;
@@ -546,7 +560,20 @@ void MainWindow::loadWorkspaceSessions() {
 }
 
 void MainWindow::refreshContextUsage() {
-    const QJsonObject usage = runtime_.session().contextUsage;
+    QJsonObject usage = runtime_.session().contextUsage;
+
+    // 没有会话时 session 里没有用量快照，但用户仍然需要看到"改完设置到底生效没有"。
+    // 用有效模型元信息（含覆盖）兜底展示分母，已用记为 0。
+    if (usage.isEmpty() && currentModel_.isValid()) {
+        const ModelInfo info =
+            providers_.effectiveModelInfo(currentModel_.providerId, currentModel_.modelId);
+        if (info.contextWindow > 0) {
+            usage.insert(QStringLiteral("usedTokens"), 0);
+            usage.insert(QStringLiteral("maxTokens"), info.contextWindow);
+            usage.insert(QStringLiteral("percent"), 0.0);
+        }
+    }
+
     const int percent = static_cast<int>(json::number(usage, QStringLiteral("percent")));
 
     contextBar_->setValue(qBound(0, percent, 100));
@@ -1022,6 +1049,13 @@ void MainWindow::onSettingsRequested() {
     // 模型能力覆盖（上下文窗口、最大输出、思考档位）交给注册表统一应用，
     // 这样 resolve/allModels 的每个调用点都自动拿到有效值。
     providers_.setModelOverrides(settings_.modelOverrides);
+    // 覆盖改了 → 上下文窗口可能变了 → 必须重新测量并通知 UI。
+    // 少了这一步，用户改完"上下文窗口"后界面仍显示旧值（只能等下一个 turn
+    // 结束才刷新），看起来就像设置没生效。
+    // 覆盖改了 → 上下文窗口可能变了 → 必须重新测量并通知 UI。
+    // 少了这一步，用户改完"上下文窗口"后界面仍显示旧值（只能等下一个 turn
+    // 结束才刷新），看起来就像设置没生效。
+    runtime_.remeasureContext();
     applySettingsToUi();
     saveSettings();
 

@@ -120,6 +120,13 @@ public:
     // ── 会话配置 ────────────────────────────────────────────────────────────
     void setMode(SessionMode mode);
     void setModel(const ModelSelection &model);
+
+    /// 重新测量上下文用量并通知 UI。
+    ///
+    /// 外部改了会影响上下文窗口的东西之后必须调用它：用户在设置页调整
+    /// "上下文窗口/最大输出"、或换了模型，都会改变分母。不调用的话界面会一直
+    /// 显示旧值，看起来像"设置没生效"（只能等下一个 turn 结束才刷新）。
+    void remeasureContext();
     PermissionGate *permissionGate() { return &permissionGate_; }
 
     // ── 状态查询 ────────────────────────────────────────────────────────────

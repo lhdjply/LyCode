@@ -1312,6 +1312,18 @@ void AgentRuntime::setModel(const ModelSelection &model) {
     session_.modelId = model.modelId;
     session_.providerId = model.providerId;
     session_.updatedAtMs = nowMs();
+    // 换模型就换了上下文窗口，分母必须立刻跟着变。
+    refreshContextUsage();
+    persistSession();
+    emit sessionChanged(session_);
+}
+
+void AgentRuntime::remeasureContext() {
+    if (!hasSession()) {
+        return;
+    }
+    refreshContextUsage();
+    session_.updatedAtMs = nowMs();
     persistSession();
     emit sessionChanged(session_);
 }

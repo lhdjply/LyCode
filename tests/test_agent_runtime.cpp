@@ -52,6 +52,7 @@ private slots:
     void httpErrorFailsTheTurn();
     void reasoningLevelReachesProviderRequest();
     void contextWindowOverrideDrivesUsage();
+    void setModelRefreshesContextWindow();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -95,7 +96,7 @@ bool TestAgentRuntime::setupRuntime(SessionMode mode, PermissionMode permissionM
     config.kind = ProviderKind::OpenAICompatible;
     config.baseUrl = gateway_->baseUrl();
     config.apiKey = QStringLiteral("test-key");
-    config.models = {QStringLiteral("test-model")};
+    config.models = {QStringLiteral("test-model"), QStringLiteral("wide-model")};
     config.enabled = true;
     config.availability = AccountAvailability::Available;
     providers_->replaceAll({config});
@@ -477,6 +478,32 @@ void TestAgentRuntime::contextWindowOverrideDrivesUsage() {
                                         QStringLiteral("percent"));
     QVERIFY(percent > 0.0);
     QVERIFY(percent <= 100.0);
+
+    providers_->setModelOverrides({});
+}
+
+void TestAgentRuntime::setModelRefreshesContextWindow() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 新建会话时就已经按当前模型算好分母。
+    QCOMPARE(json::integer(runtime_->session().contextUsage, QStringLiteral("maxTokens")),
+             128000);
+
+    // 给另一个模型配一个更大的窗口，然后只切换模型、**不发任何消息**。
+    ModelOptionOverride override;
+    override.contextWindow = 500000;
+    providers_->setModelOverrides(
+        {{modelOptionKey(QStringLiteral("test"), QStringLiteral("wide-model")), override}});
+
+    ModelSelection wide;
+    wide.providerId = QStringLiteral("test");
+    wide.modelId = QStringLiteral("wide-model");
+    runtime_->setModel(wide);
+
+    // 分母必须立刻变，而不是等下一个 turn 结束才刷新。
+    QCOMPARE(json::integer(runtime_->session().contextUsage, QStringLiteral("maxTokens")),
+             500000);
+    QCOMPARE(gateway_->requestCount(), 0);
 
     providers_->setModelOverrides({});
 }

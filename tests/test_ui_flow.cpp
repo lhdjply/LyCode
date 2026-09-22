@@ -13,6 +13,8 @@
 //              → 权限门 → 权限弹窗 → 真实 Bash 执行 → 回填 → 最终回复
 #include <QtTest>
 
+#include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QGroupBox>
 #include <QDir>
@@ -23,12 +25,15 @@
 #include <QFontMetrics>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QMenu>
+#include <QMenuBar>
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
 #include <QHeaderView>
 #include <QTabWidget>
+#include <QTimer>
 #include <QTableWidget>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -360,6 +365,73 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     QVERIFY2(settingsDialog.grab().save(settingsShot), qPrintable(settingsShot));
 
     settingsDialog.close();
+
+    // ── 回归：改完"上下文窗口"后工具条必须立刻更新 ─────────────────────────
+    // 曾经的缺陷是改完设置没有任何东西触发重新测量，界面一直显示旧值
+    // （128.0k），用户会认为设置没生效——只能等下一个 turn 结束才刷新。
+    // 这里走的是真实路径：菜单 → 设置对话框 → 修改 → 确定。
+    QAction *settingsAction = nullptr;
+    for (QAction *menuAction : window.menuBar()->actions()) {
+        QMenu *menu = menuAction->menu();
+        if (menu == nullptr) {
+            continue;
+        }
+        for (QAction *action : menu->actions()) {
+            if (action->text().contains(QStringLiteral("设置"))) {
+                settingsAction = action;
+                break;
+            }
+        }
+        if (settingsAction != nullptr) {
+            break;
+        }
+    }
+    QVERIFY2(settingsAction != nullptr, "菜单里应当有「设置…」项");
+
+    // 设置对话框是模态的（exec() 会开嵌套事件循环），所以用 singleShot
+    // 在它打开之后去操作它。这块代码跑在嵌套循环里，不是另一个线程。
+    bool settingsEdited = false;
+    QTimer::singleShot(300, [&]() {
+        auto *modal = qobject_cast<SettingsDialog *>(QApplication::activeModalWidget());
+        if (modal == nullptr) {
+            return;
+        }
+        if (auto *modalTabs = modal->findChild<QTabWidget *>()) {
+            modalTabs->setCurrentIndex(1);
+        }
+        auto *modalTable =
+            modal->findChild<QTableWidget *>(QStringLiteral("modelCapabilityTable"));
+        if (modalTable == nullptr || modalTable->rowCount() == 0) {
+            return;
+        }
+        auto *spin = modalTable->findChild<QSpinBox *>(QStringLiteral("modelContextSpin_0"));
+        if (spin == nullptr) {
+            return;
+        }
+        spin->setValue(1000000);
+        settingsEdited = true;
+        modal->accept();
+    });
+
+    settingsAction->trigger();  // 阻塞，直到上面的 lambda 把对话框关掉
+
+    QVERIFY2(settingsEdited, "未能在设置对话框里修改上下文窗口");
+    QVERIFY2(contextLabel->text().contains(QStringLiteral("1.0M")),
+             qPrintable(QStringLiteral("改完设置后工具条应立即显示新分母（1.0M），实际：") +
+                        contextLabel->text()));
+
+    // 留一张"改完设置立刻生效"的截图作为证据。
+    const QString afterSettingsShot =
+        screenshotDir() + QStringLiteral("/06-after-context-change.png");
+    QVERIFY2(window.grab().copy(0, 0, window.width(), 90).save(afterSettingsShot),
+             qPrintable(afterSettingsShot));
+
+    // 设置必须真的落盘，重启后还在。
+    AppSettings reloaded;
+    QVERIFY(AppConfig::load(&reloaded, &configError));
+    QCOMPARE(reloaded.modelOverride(QStringLiteral("smoke"), QStringLiteral("smoke-model"))
+                 .contextWindow,
+             1000000);
 
     // 会话应当已落盘（标题取自首条用户输入）。
     QVERIFY(QFile::exists(dataDir_->path() + QStringLiteral("/qt/sessions.db")));
