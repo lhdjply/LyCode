@@ -1,0 +1,975 @@
+// ZCode Qt — 工具系统基础设施实现
+//
+// 本文件只放"与具体工具无关"的部分：枚举转换、工具基类默认行为、
+// 执行上下文（路径安全）、注册表。具体工具在各自的 .cpp 里。
+//
+// 设计约束（来自 Tool.h 的契约，实现时不得偏离）：
+//   * 策略完全由声明式 metadata 驱动，这里不出现任何工具名分支。
+//   * 每个工具的 execute 必须恰好回调一次（各工具用统一的成功/失败出口保证）。
+#include "tools/Tool.h"
+
+#include "core/Json.h"
+#include "tools/TodoStore.h"
+#include "tools/ToolUtils.h"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QHash>
+#include <QJsonValue>
+#include <QLoggingCategory>
+#include <QSaveFile>
+
+#include <algorithm>
+
+#include "tools/BashTool.h"
+#include "tools/EditTool.h"
+#include "tools/GlobTool.h"
+#include "tools/GrepTool.h"
+#include "tools/ReadTool.h"
+#include "tools/TodoTool.h"
+#include "tools/WriteTool.h"
+
+namespace zcode {
+namespace {
+
+Q_LOGGING_CATEGORY(log, "zcode.tool.base")
+
+// ── 枚举 ↔ 字面量 ────────────────────────────────────────────────────────────
+// 与 Types.cpp 一样用表驱动，保证 to/from 两个方向不会各自漂移。
+template <typename Enum>
+struct EnumName {
+    Enum value;
+    const char *name;
+};
+
+constexpr EnumName<SideEffectScope> kScopes[] = {
+    {SideEffectScope::None, "none"},
+    {SideEffectScope::Workspace, "workspace"},
+    {SideEffectScope::Git, "git"},
+    {SideEffectScope::Network, "network"},
+    {SideEffectScope::System, "system"},
+    {SideEffectScope::Session, "session"},
+    {SideEffectScope::UserInteraction, "userInteraction"},
+};
+
+template <typename Enum, size_t N>
+QString nameOf(const EnumName<Enum> (&table)[N], Enum value, const QString &fallback) {
+    for (const auto &entry : table) {
+        if (entry.value == value) {
+            return QString::fromLatin1(entry.name);
+        }
+    }
+    qCWarning(log) << "未知枚举值，使用回退名:" << fallback;
+    return fallback;
+}
+
+template <typename Enum, size_t N>
+Enum valueOf(const EnumName<Enum> (&table)[N], const QString &text, Enum fallback) {
+    for (const auto &entry : table) {
+        if (text == QLatin1String(entry.name)) {
+            return entry.value;
+        }
+    }
+    if (!text.isEmpty()) {
+        qCWarning(log) << "未知枚举字面量，使用回退值:" << text;
+    }
+    return fallback;
+}
+
+/// 规则内容为空时代表"匹配整个工具"，因此需要一个稳定的空串比较口径。
+bool sameRule(const PermissionRule &lhs, const PermissionRule &rhs) {
+    return lhs.toolName == rhs.toolName && lhs.ruleContent == rhs.ruleContent &&
+           lhs.behavior == rhs.behavior;
+}
+
+}  // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SideEffectScope
+// ─────────────────────────────────────────────────────────────────────────────
+
+QString toToken(SideEffectScope scope) {
+    return nameOf(kScopes, scope, QStringLiteral("none"));
+}
+
+SideEffectScope sideEffectScopeFromToken(const QString &value) {
+    return valueOf(kScopes, value, SideEffectScope::None);
+}
+
+bool sideEffectScopeWritesWorkspace(SideEffectScope scope) {
+    // 集合口径来自 Tool.h 注释：{Workspace, Git, System} 会改写工作区
+    // （System 之所以算，是因为 shell 命令可以改任何东西）。
+    switch (scope) {
+        case SideEffectScope::Workspace:
+        case SideEffectScope::Git:
+        case SideEffectScope::System:
+            return true;
+        case SideEffectScope::None:
+        case SideEffectScope::Network:
+        case SideEffectScope::Session:
+        case SideEffectScope::UserInteraction:
+            return false;
+    }
+    return false;
+}
+
+bool sideEffectScopeTouchesOutsideWorld(SideEffectScope scope) {
+    // Session / UserInteraction 只动会话内部状态，不碰外部世界。
+    return scope != SideEffectScope::None && scope != SideEffectScope::Session &&
+           scope != SideEffectScope::UserInteraction;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 权限类别推导
+// ─────────────────────────────────────────────────────────────────────────────
+
+PermissionKind permissionKindFor(const ToolMetadata &metadata) {
+    // 顺序很重要：只读优先，因为"读"与"写"的 UI 呈现完全不同；
+    // 之后按副作用范围推导，保证新增工具只要填对 scope 就能得到合理类别。
+    if (metadata.readOnly) {
+        return PermissionKind::Read;
+    }
+    switch (metadata.sideEffectScope) {
+        case SideEffectScope::System:
+            return PermissionKind::Execute;
+        case SideEffectScope::Network:
+            return PermissionKind::Network;
+        case SideEffectScope::Workspace:
+        case SideEffectScope::Git:
+            return PermissionKind::Write;
+        case SideEffectScope::None:
+        case SideEffectScope::Session:
+        case SideEffectScope::UserInteraction:
+            return PermissionKind::Other;
+    }
+    return PermissionKind::Other;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ToolResult
+// ─────────────────────────────────────────────────────────────────────────────
+
+ToolResult ToolResult::success(const QString &output, const QJsonObject &metadata) {
+    ToolResult result;
+    result.ok = true;
+    result.output = output;
+    result.metadata = metadata;
+    return result;
+}
+
+ToolResult ToolResult::failure(const QString &error, const QString &errorCode,
+                               const QJsonObject &metadata) {
+    ToolResult result;
+    result.ok = false;
+    result.error = error;
+    result.errorCode = errorCode;
+    result.metadata = metadata;
+    return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ToolContext
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool ToolContext::isCancelled() const {
+    return cancelled != nullptr && cancelled->load();
+}
+
+QString ToolContext::resolvePath(const QString &pathOrRelative) const {
+    if (pathOrRelative.isEmpty()) {
+        return {};
+    }
+
+    const QString base = !workingDirectory.isEmpty()
+                             ? workingDirectory
+                             : (!workspace.path.isEmpty() ? workspace.path : QString());
+    const QString workspacePath =
+        !workspace.path.isEmpty() ? QDir::cleanPath(workspace.path) : QString();
+
+    // 绝对路径直接用；相对路径挂到 base 下。
+    QString candidate = QDir::isAbsolutePath(pathOrRelative)
+                            ? QDir::cleanPath(pathOrRelative)
+                            : QDir::cleanPath(base + QLatin1Char('/') + pathOrRelative);
+    if (candidate.isEmpty()) {
+        return {};
+    }
+
+    // 归一化的关键：canonicalFilePath 会解析符号链接与 `..`，
+    // 但**只对已存在的路径有效**，写新文件时会返回空串。
+    // 所以从目标向上找到第一个存在的祖先做 canonical 化，再把剩余部件拼回去。
+    QString existing = candidate;
+    QStringList tail;
+    while (!existing.isEmpty() && !QFileInfo::exists(existing)) {
+        const QString name = QFileInfo(existing).fileName();
+        const QString parent = QFileInfo(existing).absolutePath();
+        if (parent == existing) {
+            break;  // 到达根仍不存在（理论不可达）
+        }
+        if (!name.isEmpty()) {
+            tail.prepend(name);
+        }
+        existing = parent;
+    }
+
+    QString normalized;
+    if (!existing.isEmpty() && QFileInfo::exists(existing)) {
+        const QString real = QFileInfo(existing).canonicalFilePath();
+        normalized = QDir::cleanPath(real.isEmpty() ? existing : real);
+    } else {
+        normalized = candidate;
+    }
+    for (const QString &part : tail) {
+        normalized = QDir::cleanPath(normalized + QLatin1Char('/') + part);
+    }
+
+    // 工作区为空时只做归一不校验（无边界可校验）。
+    if (workspacePath.isEmpty()) {
+        return normalized;
+    }
+
+    // 逃逸判定用 workspace 的 canonical 形式做基准，这样工作区本身
+    // 位于符号链接之下时不会误判。工作区若不存在（尚未创建），退回 cleanPath。
+    const QString realWorkspaceRaw = QFileInfo(workspacePath).canonicalFilePath();
+    const QString realWorkspace =
+        realWorkspaceRaw.isEmpty() ? workspacePath : QDir::cleanPath(realWorkspaceRaw);
+
+    // 同时接受"归一前"与"归一后"的工作区前缀：candidate 可能已经是
+    // workingDirectory 下的绝对路径，而 workingDirectory 可能与 workspace 不同。
+    const QString baseClean = !base.isEmpty() ? QDir::cleanPath(base) : QString();
+    const QString realBaseRaw = !baseClean.isEmpty() ? QFileInfo(baseClean).canonicalFilePath() : QString();
+    const QString realBase = realBaseRaw.isEmpty() ? baseClean : QDir::cleanPath(realBaseRaw);
+
+    const bool insideWorkspace = toolutil::pathWithin(realWorkspace, normalized) ||
+                                 toolutil::pathWithin(workspacePath, normalized);
+    const bool insideBase =
+        (!realBase.isEmpty() && toolutil::pathWithin(realBase, normalized)) ||
+        (!baseClean.isEmpty() && toolutil::pathWithin(baseClean, normalized));
+
+    if (!insideWorkspace && !insideBase) {
+        qCWarning(log) << "路径越界，已拒绝:" << toolutil::redactForLog(pathOrRelative)
+                       << "workspace=" << workspacePath;
+        return {};
+    }
+    return normalized;
+}
+
+QString ToolContext::displayPath(const QString &absolutePath) const {
+    if (absolutePath.isEmpty()) {
+        return absolutePath;
+    }
+    const QString normalized = QDir::cleanPath(absolutePath);
+    const QString root = !workspace.path.isEmpty() ? QDir::cleanPath(workspace.path) : QString();
+    if (root.isEmpty()) {
+        return normalized;
+    }
+    if (normalized == root) {
+        return QStringLiteral(".");
+    }
+    if (toolutil::pathWithin(root, normalized)) {
+        return normalized.mid(root.size() + 1);
+    }
+    return normalized;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool 基类
+// ─────────────────────────────────────────────────────────────────────────────
+
+Tool::~Tool() = default;
+
+QString Tool::permissionCapability() const {
+    return metadata().name;
+}
+
+QString Tool::ruleSubject(const QJsonObject &input) const {
+    // 顺序照抄 npm 版的候选键优先级：命令 > URL > 文件路径 > 通用路径 > 模式。
+    static const QStringList candidates = {
+        QStringLiteral("command"), QStringLiteral("url"), QStringLiteral("file_path"),
+        QStringLiteral("path"), QStringLiteral("pattern"),
+    };
+    for (const QString &key : candidates) {
+        const QString value = json::str(input, key);
+        if (!value.isEmpty()) {
+            return value;
+        }
+    }
+    return {};
+}
+
+QString Tool::title(const QJsonObject &input) const {
+    const QString subject = ruleSubject(input);
+    if (subject.isEmpty()) {
+        return metadata().name;
+    }
+    return metadata().name + QStringLiteral(": ") + toolutil::redactForLog(subject, 120);
+}
+
+QString Tool::permissionDescription(const QJsonObject &input) const {
+    const ToolMetadata meta = metadata();
+    const QString subject = ruleSubject(input);
+    if (subject.isEmpty()) {
+        return QStringLiteral("工具 %1 需要执行权限。").arg(meta.name);
+    }
+    return QStringLiteral("工具 %1 将要操作：%2").arg(meta.name, toolutil::redactForLog(subject, 200));
+}
+
+QList<PermissionRule> Tool::permissionRules(const QJsonObject &input) const {
+    // 两条粒度：本次调用的精确主体 + 一个更宽的"范围"（目录前缀 / 命令首词）。
+    // UI 的"始终允许"通常给后者，但精确主体在文件、命令混用场景下更安全。
+    const QString capability = permissionCapability();
+    const QString subject = ruleSubject(input);
+    if (capability.isEmpty() || subject.isEmpty()) {
+        return {};
+    }
+
+    PermissionRule exact;
+    exact.toolName = capability;
+    exact.ruleContent = subject;
+    exact.behavior = PermissionRuleBehavior::Allow;
+
+    PermissionRule scope;
+    scope.toolName = capability;
+    scope.behavior = PermissionRuleBehavior::Allow;
+    if (capability == QLatin1String("bash")) {
+        scope.ruleContent = toolutil::commandFirstWord(subject);
+    } else {
+        scope.ruleContent = toolutil::directoryPrefix(subject);
+    }
+
+    QList<PermissionRule> rules;
+    rules.append(exact);
+    if (!scope.ruleContent.isEmpty() && !sameRule(exact, scope)) {
+        rules.append(scope);
+    }
+    return rules;
+}
+
+QString Tool::validateInput(const QJsonObject &input) const {
+    const QJsonObject schema = inputSchema();
+    const QJsonArray required = schema.value(QStringLiteral("required")).toArray();
+    for (const QJsonValue &value : required) {
+        const QString key = value.toString();
+        if (key.isEmpty()) {
+            continue;
+        }
+        if (!json::has(input, key)) {
+            // 文案面向模型：明确指出缺哪个字段，模型下一轮才能自我修正。
+            return QStringLiteral("缺少必填参数 `%1`").arg(key);
+        }
+    }
+    return {};
+}
+
+ToolSpec Tool::spec() const {
+    const ToolMetadata meta = metadata();
+    ToolSpec toolSpec;
+    toolSpec.name = meta.name;
+    toolSpec.description = meta.description;
+    if (!meta.modelInstructions.isEmpty()) {
+        toolSpec.description += QStringLiteral("\n\n") + meta.modelInstructions;
+    }
+    toolSpec.inputSchema = inputSchema();
+    return toolSpec;
+}
+
+bool Tool::canRunInParallel() const {
+    // 判定顺序照抄 npm 版 canRunInParallel：
+    //   1. destructive 一律串行（破坏性操作并发执行无法审计）
+    //   2. concurrentSafe == true  → 可并发
+    //   3. concurrentSafe == false → 串行（默认值即 false，未显式声明者同样串行）
+    //   4. 唯一的例外：只读且无副作用，即使没声明 concurrentSafe 也安全并发。
+    //
+    // C++ 的 bool 无法区分"显式 false"与"未声明"，所以这里对未声明者取保守
+    // 语义（串行）。这样 TodoWrite（readOnly=true 但 scope=Session）不会被
+    // 误判为可并发——它确实在写会话状态。
+    const ToolMetadata meta = metadata();
+    if (meta.destructive) {
+        return false;
+    }
+    if (meta.concurrentSafe) {
+        return true;
+    }
+    return meta.readOnly && meta.sideEffectScope == SideEffectScope::None;
+}
+
+QString Tool::stringArg(const QJsonObject &input, const QString &key, const QString &fallback) {
+    return json::str(input, key, fallback);
+}
+
+bool Tool::boolArg(const QJsonObject &input, const QString &key, bool fallback) {
+    return json::boolean(input, key, fallback);
+}
+
+int Tool::intArg(const QJsonObject &input, const QString &key, int fallback) {
+    return json::integer(input, key, fallback);
+}
+
+QJsonArray Tool::arrayArg(const QJsonObject &input, const QString &key) {
+    return json::array(input, key);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ToolRegistry
+// ─────────────────────────────────────────────────────────────────────────────
+
+ToolRegistry::ToolRegistry() = default;
+ToolRegistry::~ToolRegistry() = default;
+
+ToolRegistry::ToolRegistry(ToolRegistry &&other) noexcept
+    : entries_(std::move(other.entries_)), index_(std::move(other.index_)) {
+    // 移动后清空源对象，避免它被继续使用（例如误以为还持有条目）。
+    other.entries_.clear();
+    other.index_.clear();
+}
+
+ToolRegistry &ToolRegistry::operator=(ToolRegistry &&other) noexcept {
+    if (this == &other) {
+        return *this;
+    }
+    entries_ = std::move(other.entries_);
+    index_ = std::move(other.index_);
+    other.entries_.clear();
+    other.index_.clear();
+    return *this;
+}
+
+Tool *ToolRegistry::add(Tool *tool, const QStringList &aliases) {
+    if (tool == nullptr) {
+        qCCritical(log) << "拒绝注册空工具指针";
+        return nullptr;
+    }
+    const QString name = tool->metadata().name;
+    if (name.isEmpty()) {
+        qCCritical(log) << "拒绝注册无名工具（metadata().name 为空）";
+        return nullptr;
+    }
+
+    Tool *replaced = nullptr;
+    Tool *existing = index_.value(name, nullptr);
+    if (existing != nullptr) {
+        // 同名覆盖：保留原位置（顺序稳定，模型看到的声明顺序不变）。
+        replaced = existing;
+        for (Entry &entry : entries_) {
+            if (entry.name == name) {
+                entry.tool = tool;
+                entry.aliases = aliases;
+                break;
+            }
+        }
+        qCInfo(log) << "工具被覆盖注册:" << name;
+    } else {
+        Entry entry;
+        entry.name = name;
+        entry.tool = tool;
+        entry.aliases = aliases;
+        entries_.append(entry);
+    }
+    index_.insert(name, tool);
+
+    for (const QString &alias : aliases) {
+        if (alias.isEmpty() || alias == name) {
+            continue;
+        }
+        if (index_.contains(alias)) {
+            // 别名不覆盖已有名字：否则一个别名可能悄悄遮蔽真实工具，
+            // 让模型的调用落到意料之外的工具上。
+            qCWarning(log) << "别名已被占用，忽略:" << alias << "→" << name;
+            continue;
+        }
+        index_.insert(alias, tool);
+    }
+    return replaced;
+}
+
+Tool *ToolRegistry::find(const QString &name) const {
+    return index_.value(name, nullptr);
+}
+
+bool ToolRegistry::contains(const QString &name) const {
+    return index_.contains(name);
+}
+
+QStringList ToolRegistry::names() const {
+    QStringList result;
+    result.reserve(entries_.size());
+    for (const Entry &entry : entries_) {
+        result.append(entry.name);
+    }
+    return result;
+}
+
+QList<ToolSpec> ToolRegistry::specs() const {
+    QList<ToolSpec> result;
+    for (const Entry &entry : entries_) {
+        if (entry.tool == nullptr) {
+            continue;
+        }
+        if (!entry.tool->metadata().providerVisible) {
+            continue;
+        }
+        result.append(entry.tool->spec());
+    }
+    return result;
+}
+
+QList<ToolSpec> ToolRegistry::specsFor(const QStringList &allowedNames) const {
+    QList<ToolSpec> result;
+    for (const Entry &entry : entries_) {
+        if (entry.tool == nullptr || !entry.tool->metadata().providerVisible) {
+            continue;
+        }
+        if (allowedNames.contains(entry.name)) {
+            result.append(entry.tool->spec());
+        }
+    }
+    return result;
+}
+
+QList<ToolSpec> ToolRegistry::specsExcluding(const QStringList &disallowedPatterns) const {
+    // 支持 `Name` 与 `Name(pattern)` 两种写法。由于此处只有名字、没有入参，
+    // `Name(pattern)` 的括号部分也按名字整体匹配（不做入参级过滤）。
+    QStringList blocked;
+    blocked.reserve(disallowedPatterns.size());
+    for (const QString &raw : disallowedPatterns) {
+        QString name = raw.trimmed();
+        const qsizetype open = name.indexOf(QLatin1Char('('));
+        if (open > 0) {
+            name = name.left(open);
+        }
+        if (!name.isEmpty()) {
+            blocked.append(name);
+        }
+    }
+
+    QList<ToolSpec> result;
+    for (const Entry &entry : entries_) {
+        if (entry.tool == nullptr || !entry.tool->metadata().providerVisible) {
+            continue;
+        }
+        if (blocked.contains(entry.name)) {
+            continue;
+        }
+        result.append(entry.tool->spec());
+    }
+    return result;
+}
+
+QList<Tool *> ToolRegistry::tools() const {
+    QList<Tool *> result;
+    result.reserve(entries_.size());
+    for (const Entry &entry : entries_) {
+        if (entry.tool != nullptr) {
+            result.append(entry.tool);
+        }
+    }
+    return result;
+}
+
+ToolRegistry ToolRegistry::createWithBuiltins() {
+    ToolRegistry registry;
+    // 主名固定，别名留待后续阶段（Task / 子 Agent 本阶段不实现）。
+    registry.add(new BashTool());
+    registry.add(new ReadTool());
+    registry.add(new WriteTool());
+    registry.add(new EditTool());
+    registry.add(new GlobTool());
+    registry.add(new GrepTool());
+    registry.add(new TodoReadTool());
+    registry.add(new TodoWriteTool());
+    qCInfo(log) << "已注册内置工具:" << registry.names().join(QStringLiteral(", "));
+    return registry;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// toolutil —— 内置工具共享辅助
+//
+// 故意实现在 Tool.cpp：工具层只需要一个必定被链接的基础翻译单元，
+// 测试与验证程序链接 Tool.cpp 即可获得全部共享辅助（见 ToolUtils.h 顶部说明）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace toolutil {
+namespace {
+
+Q_LOGGING_CATEGORY(utilLog, "zcode.tool.utils")
+
+/// 递归扫描时跳过的目录名。`build*` 用前缀匹配（build / build-tools / build-debug），
+/// 其余按名字精确匹配。
+const QStringList kSkipExact = {
+    QStringLiteral(".git"),         QStringLiteral(".hg"),        QStringLiteral(".svn"),
+    QStringLiteral("node_modules"), QStringLiteral(".cache"),    QStringLiteral("__pycache__"),
+    QStringLiteral(".venv"),        QStringLiteral("venv"),      QStringLiteral("dist"),
+    QStringLiteral("out"),          QStringLiteral("target"),    QStringLiteral(".next"),
+    QStringLiteral(".gradle"),      QStringLiteral(".idea"),     QStringLiteral(".tox"),
+};
+
+const QStringList kSkipPrefix = {
+    QStringLiteral("build"),
+    QStringLiteral("cmake-build-"),
+};
+
+/// 转义正则特殊字符（glob 的元字符在调用处单独处理）。
+QString escapeRegexChar(QChar ch) {
+    static const QString specials = QStringLiteral(R"(\.^$|()[]+?)");
+    if (specials.contains(ch)) {
+        return QStringLiteral("\\") + ch;
+    }
+    return QString(ch);
+}
+
+}  // namespace
+
+bool shouldSkipDirectory(const QString &dirName) {
+    if (dirName.isEmpty()) {
+        return false;
+    }
+    for (const QString &name : kSkipExact) {
+        if (dirName.compare(name, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    for (const QString &prefix : kSkipPrefix) {
+        if (dirName.startsWith(prefix, Qt::CaseInsensitive)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool looksBinary(const QByteArray &bytes) {
+    // 只扫描前 8KiB：文本文件里 NUL 出现在极靠后的位置几乎不可能，
+    // 而全量扫描大文件会白白浪费一次内存遍历。
+    const qsizetype index = bytes.indexOf('\0');
+    const qsizetype probe = std::min<qsizetype>(bytes.size(), 8192);
+    return index >= 0 && index < probe;
+}
+
+QString normalizeGlob(const QString &pattern) {
+    QString result = pattern;
+    result.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    while (result.startsWith(QStringLiteral("./"))) {
+        result.remove(0, 2);
+    }
+    return result;
+}
+
+QRegularExpression globToRegex(const QString &pattern, bool caseInsensitive) {
+    const QString source = normalizeGlob(pattern);
+    QString out;
+    out.reserve(source.size() * 2);
+
+    int i = 0;
+    const int n = source.size();
+    bool inClass = false;
+    while (i < n) {
+        const QChar ch = source.at(i);
+        if (inClass) {
+            // 字符类内部只处理转义与闭合，不做 glob 展开。
+            if (ch == QLatin1Char(']')) {
+                inClass = false;
+                out += QLatin1Char(']');
+            } else if (ch == QLatin1Char('\\')) {
+                out += QStringLiteral("\\\\");
+            } else {
+                out += ch;
+            }
+            ++i;
+            continue;
+        }
+        if (ch == QLatin1Char('*')) {
+            const bool doubleStar = (i + 1 < n) && source.at(i + 1) == QLatin1Char('*');
+            if (doubleStar) {
+                i += 2;
+                // `**/` 匹配"零个或多个目录层级"，这样 `**/*.txt` 也能命中文档根下的
+                // 文件（globstar 语义，也是使用者的直觉预期）。
+                if (i < n && source.at(i) == QLatin1Char('/')) {
+                    out += QStringLiteral("(?:.*/)?");
+                    ++i;
+                } else {
+                    out += QStringLiteral(".*");
+                }
+            } else {
+                out += QStringLiteral("[^/]*");
+                ++i;
+            }
+            continue;
+        }
+        if (ch == QLatin1Char('?')) {
+            out += QStringLiteral("[^/]");
+            ++i;
+            continue;
+        }
+        if (ch == QLatin1Char('{')) {
+            // `{a,b}` 简单展开；嵌套花括号不支持（glob 实践里几乎不出现）。
+            const int close = source.indexOf(QLatin1Char('}'), i + 1);
+            if (close < 0) {
+                out += QStringLiteral("\\{");
+                ++i;
+                continue;
+            }
+            const QString body = source.mid(i + 1, close - i - 1);
+            const QStringList alternatives = body.split(QLatin1Char(','), Qt::KeepEmptyParts);
+            QStringList escaped;
+            escaped.reserve(alternatives.size());
+            for (const QString &alt : alternatives) {
+                escaped.append(QRegularExpression::escape(alt));
+            }
+            out += QStringLiteral("(?:") + escaped.join(QLatin1Char('|')) + QLatin1Char(')');
+            i = close + 1;
+            continue;
+        }
+        if (ch == QLatin1Char('[')) {
+            // 字符类原样透传，但补一个 `!` → `^` 的 glob 习惯写法。
+            inClass = true;
+            out += QLatin1Char('[');
+            ++i;
+            if (i < n && (source.at(i) == QLatin1Char('!') || source.at(i) == QLatin1Char('^'))) {
+                out += QLatin1Char('^');
+                ++i;
+            }
+            continue;
+        }
+        if (ch == QLatin1Char('/')) {
+            out += QLatin1Char('/');
+            ++i;
+            continue;
+        }
+        out += escapeRegexChar(ch);
+        ++i;
+    }
+
+    QRegularExpression::PatternOptions options = QRegularExpression::NoPatternOption;
+    if (caseInsensitive) {
+        options |= QRegularExpression::CaseInsensitiveOption;
+    }
+    QRegularExpression regex(QStringLiteral("\\A(?:") + out + QStringLiteral(")\\z"), options);
+    if (!regex.isValid()) {
+        qCWarning(utilLog) << "glob 转换出的正则非法，按永不匹配处理:" << pattern
+                           << regex.errorString();
+        return QRegularExpression(QStringLiteral("(?!x)x"));
+    }
+    return regex;
+}
+
+bool globMatches(const QRegularExpression &regex, const QString &relativePath) {
+    return regex.match(relativePath).hasMatch();
+}
+
+QString joinPath(const QString &base, const QString &relative) {
+    if (base.isEmpty()) {
+        return relative;
+    }
+    if (relative.isEmpty()) {
+        return base;
+    }
+    QString left = base;
+    while (left.endsWith(QLatin1Char('/'))) {
+        left.chop(1);
+    }
+    QString right = relative;
+    while (right.startsWith(QLatin1Char('/'))) {
+        right.remove(0, 1);
+    }
+    return left + QLatin1Char('/') + right;
+}
+
+bool pathWithin(const QString &root, const QString &absolutePath) {
+    if (root.isEmpty()) {
+        return true;
+    }
+    QString normalizedRoot = root;
+    while (normalizedRoot.endsWith(QLatin1Char('/'))) {
+        normalizedRoot.chop(1);
+    }
+    if (absolutePath == normalizedRoot) {
+        return true;
+    }
+    return absolutePath.startsWith(normalizedRoot + QLatin1Char('/'));
+}
+
+QString commandFirstWord(const QString &command) {
+    const QString trimmed = command.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+    // 跳过 `FOO=1 npm test` 这类前置赋值，取真正的可执行名。
+    static const QRegularExpression whitespace(QStringLiteral("\\s+"));
+    static const QRegularExpression identifier(QStringLiteral("\\A[A-Za-z_][A-Za-z0-9_]*\\z"));
+    for (const QString &token : trimmed.split(whitespace, Qt::SkipEmptyParts)) {
+        if (token.contains(QLatin1Char('=')) && !token.contains(QLatin1Char('/'))) {
+            const QString name = token.section(QLatin1Char('='), 0, 0);
+            if (identifier.match(name).hasMatch()) {
+                continue;
+            }
+        }
+        return token;
+    }
+    return {};
+}
+
+QString directoryPrefix(const QString &path) {
+    if (path.isEmpty()) {
+        return {};
+    }
+    const QFileInfo info(path);
+    if (info.isDir()) {
+        QString dir = info.absoluteFilePath();
+        while (dir.endsWith(QLatin1Char('/')) && dir.size() > 1) {
+            dir.chop(1);
+        }
+        return dir;
+    }
+    const QString parent = info.absolutePath();
+    if (parent.isEmpty()) {
+        return path;
+    }
+    return parent;
+}
+
+QString redactForLog(const QString &value, int maxChars) {
+    if (maxChars <= 0 || value.size() <= maxChars) {
+        return value;
+    }
+    return value.left(maxChars) + QStringLiteral("…[+%1 chars]").arg(value.size() - maxChars);
+}
+
+bool shouldRejectForReadOnly(const ToolMetadata &metadata, const ToolContext &context) {
+    // 只读模式（plan/ask）下，写入集（Workspace/Git/System）一律拒绝。
+    // 注意判据是 metadata 的副作用范围，不是工具名——新增工具自动获得正确行为。
+    return context.readOnly && sideEffectScopeWritesWorkspace(metadata.sideEffectScope);
+}
+
+ToolResult readOnlyModeFailure(const ToolMetadata &metadata) {
+    ToolResult result = ToolResult::failure(
+        QStringLiteral("当前处于只读模式（plan/ask），工具 %1 具有写入副作用"
+                       "（sideEffectScope=%2），已被拒绝执行。"
+                       "请先请求用户退出只读模式。")
+            .arg(metadata.name, toToken(metadata.sideEffectScope)),
+        QStringLiteral("read_only_mode"));
+    result.metadata.insert(QStringLiteral("readOnly"), true);
+    return result;
+}
+
+bool writeFileAtomic(const QString &absolutePath, const QByteArray &bytes, QString *errorOut) {
+    QSaveFile file(absolutePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (errorOut != nullptr) {
+            *errorOut = file.errorString();
+        }
+        return false;
+    }
+    const qint64 written = file.write(bytes);
+    if (written != bytes.size()) {
+        if (errorOut != nullptr) {
+            *errorOut = QStringLiteral("写入字节数不符（期望 %1，实际 %2）")
+                            .arg(bytes.size())
+                            .arg(written);
+        }
+        file.cancelWriting();
+        return false;
+    }
+    if (!file.commit()) {
+        if (errorOut != nullptr) {
+            *errorOut = file.errorString();
+        }
+        return false;
+    }
+    return true;
+}
+
+QString mimeTypeForPath(const QString &path) {
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    static const QHash<QString, QString> table = {
+        {QStringLiteral("png"), QStringLiteral("image/png")},
+        {QStringLiteral("jpg"), QStringLiteral("image/jpeg")},
+        {QStringLiteral("jpeg"), QStringLiteral("image/jpeg")},
+        {QStringLiteral("gif"), QStringLiteral("image/gif")},
+        {QStringLiteral("webp"), QStringLiteral("image/webp")},
+        {QStringLiteral("bmp"), QStringLiteral("image/bmp")},
+        {QStringLiteral("svg"), QStringLiteral("image/svg+xml")},
+        {QStringLiteral("pdf"), QStringLiteral("application/pdf")},
+        {QStringLiteral("json"), QStringLiteral("application/json")},
+        {QStringLiteral("txt"), QStringLiteral("text/plain")},
+        {QStringLiteral("md"), QStringLiteral("text/markdown")},
+        {QStringLiteral("cpp"), QStringLiteral("text/x-c++src")},
+        {QStringLiteral("h"), QStringLiteral("text/x-c++hdr")},
+        {QStringLiteral("py"), QStringLiteral("text/x-python")},
+    };
+    return table.value(suffix, QStringLiteral("text/plain"));
+}
+
+QByteArray trimIncompleteUtf8(QByteArray bytes) {
+    // UTF-8 序列最长 4 字节。从尾部回退最多 3 个续接字节，
+    // 找到起始字节后判断它声明的长度是否已被完整包含。
+    int back = 0;
+    while (back < 3 && back < bytes.size()) {
+        const unsigned char ch = static_cast<unsigned char>(bytes.at(bytes.size() - 1 - back));
+        if ((ch & 0xC0) == 0x80) {
+            ++back;
+            continue;
+        }
+        int expected = 1;
+        if ((ch & 0x80) == 0x00) {
+            expected = 1;
+        } else if ((ch & 0xE0) == 0xC0) {
+            expected = 2;
+        } else if ((ch & 0xF0) == 0xE0) {
+            expected = 3;
+        } else if ((ch & 0xF8) == 0xF0) {
+            expected = 4;
+        }
+        if (expected > back + 1) {
+            bytes.chop(back + 1);
+        }
+        break;
+    }
+    return bytes;
+}
+
+QString chompTrailingNewlines(QString text) {
+    while (text.endsWith(QLatin1Char('\n'))) {
+        text.chop(1);
+    }
+    return text;
+}
+
+OutputBudget::OutputBudget(qint64 maxBytes) : maxBytes_(maxBytes > 0 ? maxBytes : 0) {}
+
+void OutputBudget::appendBytes(const QByteArray &bytes) {
+    totalBytes_ += bytes.size();
+    if (maxBytes_ <= 0) {
+        kept_ += bytes;
+        return;
+    }
+    if (kept_.size() >= maxBytes_) {
+        truncated_ = true;
+        return;
+    }
+    const qsizetype room = static_cast<qsizetype>(maxBytes_ - kept_.size());
+    if (bytes.size() <= room) {
+        kept_ += bytes;
+        return;
+    }
+    kept_ += bytes.left(room);
+    truncated_ = true;
+}
+
+void OutputBudget::append(const QString &chunk) {
+    appendBytes(chunk.toUtf8());
+}
+
+void OutputBudget::appendLine(const QString &line) {
+    append(line);
+    appendBytes(QByteArrayLiteral("\n"));
+}
+
+QString OutputBudget::text() const {
+    QString result = QString::fromUtf8(trimIncompleteUtf8(kept_));
+    if (truncated_) {
+        result += QStringLiteral("\n…[输出被截断：超过 %1 字节预算]").arg(maxBytes_);
+    }
+    return result;
+}
+
+}  // namespace toolutil
+
+}  // namespace zcode
