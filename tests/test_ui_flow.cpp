@@ -33,6 +33,7 @@
 #include <QSpinBox>
 #include <QHeaderView>
 #include <QTabWidget>
+#include <QTextBrowser>
 #include <QTimer>
 #include <QTableWidget>
 #include <QPushButton>
@@ -334,6 +335,35 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     const QString toolShot = screenshotDir() + QStringLiteral("/04-tool-card-expanded.png");
     QVERIFY2(cards.first()->grab().save(toolShot), qPrintable(toolShot));
 
+    // ── 回归：重启后必须能打开之前的会话 ───────────────────────────────────
+    // 曾经的缺陷：onSessionSelected 在 loadSession **之后**才 clear()，而
+    // loadSession 会为每条历史消息发 messageAdded，于是刚载入的历史被立刻抹掉。
+    // 用户看到的现象就是"关掉软件再打开，之前的会话打不开（点开是空的）"。
+    // 这里直接新建一个 MainWindow 模拟重启，走的是完全相同的启动路径。
+    {
+        MainWindow restarted;
+        restarted.resize(1280, 820);
+        restarted.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&restarted));
+
+        auto *restartedConversation =
+            restarted.findChild<ConversationView *>(QStringLiteral("conversation"));
+        QVERIFY(restartedConversation != nullptr);
+
+        QVERIFY2(waitFor([&]() { return restartedConversation->messageCount() >= 3; }, 8000),
+                 qPrintable(QStringLiteral("重启后应自动打开最近会话并显示历史消息，实际 %1 条")
+                                .arg(restartedConversation->messageCount())));
+        QCOMPARE(restartedConversation->messageCount(), 3);
+
+        // 历史里的工具卡片也要重建出来，而不是只剩纯文本。
+        QVERIFY2(!restartedConversation->findChildren<ToolCallWidget *>().isEmpty(),
+                 "重启后重建的对话流里应当恢复工具调用卡片");
+
+        const QString restartShot =
+            screenshotDir() + QStringLiteral("/07-reopened-session.png");
+        QVERIFY2(restarted.grab().save(restartShot), qPrintable(restartShot));
+    }
+
     // ── 设置页的「模型能力」编辑入口 ───────────────────────────────────────
     // 只验证了后端与工具条还不够：用户能不能在设置里改"上下文窗口/思考档位"，
     // 必须走一遍真实的对话框才作数。
@@ -470,6 +500,25 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     QCOMPARE(reloaded.modelOverride(QStringLiteral("smoke"), QStringLiteral("smoke-model"))
                  .contextWindow,
              1000000);
+
+    // ── 再验一次"正常关闭软件后重新打开" ───────────────────────────────────
+    // 上一段是"两个窗口并存"，这一段走真实的 closeEvent（会 closeSession +
+    // store.close()），然后再全新启动一次。这才是用户报的那个场景的完整路径。
+    window.close();
+    {
+        MainWindow reopened;
+        reopened.resize(1280, 820);
+        reopened.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&reopened));
+
+        auto *reopenedConversation =
+            reopened.findChild<ConversationView *>(QStringLiteral("conversation"));
+        QVERIFY(reopenedConversation != nullptr);
+        QVERIFY2(waitFor([&]() { return reopenedConversation->messageCount() >= 3; }, 8000),
+                 qPrintable(QStringLiteral("正常关闭后重新打开应能看到历史，实际 %1 条")
+                                .arg(reopenedConversation->messageCount())));
+        QVERIFY(!reopenedConversation->findChildren<ToolCallWidget *>().isEmpty());
+    }
 
     // 会话应当已落盘（标题取自首条用户输入）。
     QVERIFY(QFile::exists(dataDir_->path() + QStringLiteral("/qt/sessions.db")));

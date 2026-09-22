@@ -71,14 +71,14 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-6 个套件、156 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
+6 个套件、157 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
 
 | 套件 | 断言 | 覆盖 |
 | --- | ---: | --- |
 | `test_types` | 97 | 领域模型、全部枚举词表的双向转换、JSON 往返、未知枚举降级、路径/权限策略函数 |
 | `test_permission_gate` | 16 | 权限判定链、规则匹配（前缀 / `*` / `prefix:*` / allow 优先）、异步裁决、取消收尾、重复请求幂等 |
 | `test_markdown` | 19 | 标题、围栏代码块、行内代码与强调规则顺序、表格、任务列表、HTML 转义、不安全链接 scheme 拦截 |
-| `test_agent_runtime` | 13 | **真实 HTTP + SSE**（本地假网关）驱动完整 Agent 循环：纯文本轮、只读工具免确认、Bash 权限放行/拒绝、plan 模式拦截、中断、未知工具、HTTP 401 |
+| `test_agent_runtime` | 14 | **真实 HTTP + SSE**（本地假网关）驱动完整 Agent 循环：纯文本轮、只读工具免确认、Bash 权限放行/拒绝、plan 模式拦截、中断、未知工具、HTTP 401 |
 | `test_ui_flow` | 3 | **界面级端到端**：构造真实 MainWindow → 输入 → 点击发送 → 等待权限弹窗 → 点击"允许一次" → 断言对话流、工具卡片与会话落盘；另断言思考等级下拉可见且默认档位正确、上下文分母用的是覆盖值 |
 | `test_app_config` | 6 | 配置持久化：全字段 JSON 往返、模型能力覆盖的写入/删除、思考档位（含 `off` 这个合法空串）、真实落盘往返与首次启动的默认值 |
 
@@ -106,6 +106,10 @@ ctest --test-dir build --output-on-failure
 13. **模型能力表格一打开就横向滚动**。五列固定宽度之和超过了设置页右栏可用宽度，"默认档位"那列根本看不到。同时收窄了 Provider 列表、加宽对话框、并把 ` tokens` 后缀从输入框移到分组提示里（单位由提示承载，宽度还给"模型"列）。
 
 14. **改完"上下文窗口"后工具条仍显示旧值**（用户报告："我设置了 1000000 的上下文，上方显示的是 128k"）。覆盖本身生效了，但**没有任何东西触发重新测量**——`refreshContextUsage()` 只在新建会话、载入会话、turn 结束时调用。于是界面一直显示旧分母，只有等下一个回合结束才更新，看起来就是"设置没生效"。修法：新增 `AgentRuntime::remeasureContext()`，设置保存后与 `setModel()` 里都调用它；另外在**没有会话**时用有效模型元信息兜底显示分母，让用户一改就能看到反馈。这条已加回归测试，并验证过"去掉修复即失败"。
+
+15. **重启后打不开之前的会话**（用户报告："之前执行过的对话，关闭软件后无法打开"）。`onSessionSelected` 在 `loadSession()` **之后**才调用 `conversation_->clear()`，而 `loadSession()` 会为每条历史消息发 `messageAdded` 并由窗口塞进对话流——于是刚载入的历史被立刻抹掉，点开会话是空的。改为"先清空视图，再让 runtime 驱动填充"，并让新建会话走同一顺序，使这条不变式只有一种写法。
+16. **消息控件的几何是默认值、一条都画不出来**。`QWidget::setParent()` 会把控件置为隐藏，而 `QLayout` 会**直接跳过隐藏的控件**（不给它布局几何）。消息"存在"（`messageCount()` 正确）但界面全空。动态创建的控件必须显式 `show()`。
+17. **消息之间出现大片空白**。`QAbstractScrollArea` 的默认 `sizeHint()` 是 `256x192`；只要竖向策略里没有 `ShrinkFlag`，Qt 的 `qSmartMinSize` 就取 `max(sizeHint, minimumSizeHint)` 当最小高度——192 会盖过 `setFixedHeight()`（实测内容只有 23 却占 192）。而且高度依赖宽度（换行数随宽度变），`sizeHint()` 在布局期被问到时文档还没拿到最终宽度，存在循环依赖。最终用 `heightForWidth()` 按目标宽度量高度（带宽度缓存，避免每次布局都做一次 HTML 往返）。
 
 ### 一个测试上的坑
 

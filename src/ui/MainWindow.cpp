@@ -681,8 +681,9 @@ void MainWindow::onNewSessionRequested() {
         return;
     }
 
-    // 清空视图必须在 startSession 之后：中间态里旧消息还在，
-    // 但新会话的标题/状态已经生效，用户看到的是"新会话 + 空列表"。
+    // 与 loadSession 保持一致：先清空视图，再让 runtime 驱动填充。
+    // startSession 不发 messageAdded（新会话没有历史），所以这里先后都安全，
+    // 但统一顺序后"清空 → 由 runtime 发消息填充"就是唯一的不变式。
     conversation_->clear();
     activeSessionId_ = runtime_.session().id;
     sidebar_->setActiveSession(activeSessionId_);
@@ -703,15 +704,19 @@ void MainWindow::onSessionSelected(const Id &sessionId) {
         runtime_.abort();
     }
 
+    // ⚠ 必须先清空视图，再让 runtime 载入。
+    // loadSession() 会为每条历史消息发 messageAdded 并由本窗口塞进对话流，
+    // 如果 clear() 放在它**之后**，刚载入的历史会被立刻抹掉——表现就是
+    // "关掉软件再打开，之前的会话打不开（点开是空的）"（实测踩到）。
+    conversation_->clear();
+
     QString error;
     if (!runtime_.loadSession(sessionId, &error)) {
         setStatusMessage(error);
         return;
     }
 
-    conversation_->clear();
     activeSessionId_ = sessionId;
-    // loadSession 会为每条历史消息发 messageAdded，这里不需要再手动填充。
 
     const ModelSelection selection = runtime_.session().providerId.isEmpty()
                                          ? effectiveModelSelection()

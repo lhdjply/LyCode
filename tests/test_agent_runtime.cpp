@@ -12,6 +12,7 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFile>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTcpSocket>
@@ -21,6 +22,7 @@
 #include "core/Json.h"
 #include "model/ProviderRegistry.h"
 #include "tools/Tool.h"
+#include "storage/SessionStore.h"
 #include "tools/TodoStore.h"
 
 #include "support/FakeGateway.h"
@@ -53,10 +55,13 @@ private slots:
     void reasoningLevelReachesProviderRequest();
     void contextWindowOverrideDrivesUsage();
     void setModelRefreshesContextWindow();
+    void reloadRestoresPersistedConversation();
 
 private:
     /// 组装一个指向假网关的运行时。
     bool setupRuntime(SessionMode mode, PermissionMode permissionMode);
+    /// 只配置 provider，不建会话（供需要自己组装 runtime 的测试使用）。
+    void configureProviders();
 
     std::unique_ptr<FakeGateway> gateway_;
     std::unique_ptr<ProviderRegistry> providers_;
@@ -89,7 +94,7 @@ void TestAgentRuntime::cleanup() {
     gateway_.reset();
 }
 
-bool TestAgentRuntime::setupRuntime(SessionMode mode, PermissionMode permissionMode) {
+void TestAgentRuntime::configureProviders() {
     ProviderConfig config;
     config.id = QStringLiteral("test");
     config.name = QStringLiteral("Test Gateway");
@@ -100,6 +105,10 @@ bool TestAgentRuntime::setupRuntime(SessionMode mode, PermissionMode permissionM
     config.enabled = true;
     config.availability = AccountAvailability::Available;
     providers_->replaceAll({config});
+}
+
+bool TestAgentRuntime::setupRuntime(SessionMode mode, PermissionMode permissionMode) {
+    configureProviders();
 
     *tools_ = ToolRegistry::createWithBuiltins();
     runtime_->setProviderRegistry(providers_.get());
@@ -506,6 +515,88 @@ void TestAgentRuntime::setModelRefreshesContextWindow() {
     QCOMPARE(gateway_->requestCount(), 0);
 
     providers_->setModelOverrides({});
+}
+
+void TestAgentRuntime::reloadRestoresPersistedConversation() {
+    configureProviders();
+    // 必须显式注册内置工具：ToolRegistry 默认构造是空的
+    // （这与主窗口里踩过的那个"空工具表"是同一个坑）。
+    *tools_ = ToolRegistry::createWithBuiltins();
+
+    // 用真实的 SQLite 存储跑一轮对话，然后换一个 AgentRuntime 重新载入，
+    // 模拟"关闭软件再打开"。这条覆盖的是存储层与运行时的往返，
+    // 不依赖 UI —— 界面层的同类回归在 test_ui_flow 里。
+    SessionStore store;
+    QVERIFY2(store.open(tempDir_.filePath(QStringLiteral("reload-test.db"))),
+             qPrintable(store.lastError()));
+
+    const QString samplePath = tempDir_.filePath(QStringLiteral("reload-sample.txt"));
+    {
+        QFile sample(samplePath);
+        QVERIFY(sample.open(QIODevice::WriteOnly));
+        sample.write("persisted-content\n");
+    }
+
+    gateway_->enqueue(toolCallResponse(QStringLiteral("Read"),
+                                       "{\\\"file_path\\\":\\\"" + jsonEscape(samplePath) + "\\\"",
+                                       "}"));
+    gateway_->enqueue(textResponse("read it back"));
+
+    Workspace workspace;
+    workspace.path = tempDir_.path();
+    const ModelSelection selection{QStringLiteral("test"), QStringLiteral("test-model"),
+                                   QString()};
+
+    AgentRuntime first;
+    first.setProviderRegistry(providers_.get());
+    first.setToolRegistry(tools_.get());
+    first.setSessionStore(&store);
+    first.setTodoStore(todos_.get());
+
+    QString error;
+    QVERIFY2(first.startSession(workspace, SessionMode::Build, selection, &error),
+             qPrintable(error));
+
+    QSignalSpy finishedSpy(&first, &AgentRuntime::turnFinished);
+    QVERIFY2(first.submitText(QStringLiteral("read the sample"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(8000));
+
+    const Id sessionId = first.session().id;
+    const QList<Message> before = first.messages();
+    QCOMPARE(before.size(), 4);  // user, assistant(工具调用), 工具结果(user), assistant(最终)
+
+    // ── 模拟重启 ───────────────────────────────────────────────────────────
+    AgentRuntime second;
+    second.setProviderRegistry(providers_.get());
+    second.setToolRegistry(tools_.get());
+    second.setSessionStore(&store);
+    second.setTodoStore(todos_.get());
+    QVERIFY2(second.loadSession(sessionId, &error), qPrintable(error));
+
+    const QList<Message> after = second.messages();
+    QCOMPARE(after.size(), before.size());
+    QCOMPARE(after.at(0).plainText(), QStringLiteral("read the sample"));
+
+    // 工具调用必须连同状态与输出一起恢复，否则重启后只剩一段文字。
+    const ToolPart restoredTool = after.at(1).toolParts().first();
+    QCOMPARE(restoredTool.name, QStringLiteral("Read"));
+    QVERIFY2(restoredTool.state == ToolState::Success,
+             qPrintable(QStringLiteral("工具状态异常: state=%1 error=%2 code=%3 output=%4")
+                            .arg(static_cast<int>(restoredTool.state))
+                            .arg(restoredTool.error, restoredTool.errorCode,
+                                 restoredTool.output)));
+    QVERIFY(restoredTool.output.contains(QStringLiteral("persisted-content")));
+
+    // modelOnly 标记也要还原：否则重启后那条合成的工具结果轮会显示成
+    // 一条用户从未说过的"你"的消息。
+    QVERIFY(after.at(2).modelOnly);
+    QVERIFY(!after.at(3).modelOnly);
+    QCOMPARE(after.at(3).plainText(), QStringLiteral("read it back"));
+
+    // 会话元信息（标题取自首条用户输入）也要在。
+    Session reloadedSession;
+    QVERIFY(store.loadSession(sessionId, &reloadedSession));
+    QCOMPARE(reloadedSession.title, QStringLiteral("read the sample"));
 }
 
 QTEST_MAIN(TestAgentRuntime)

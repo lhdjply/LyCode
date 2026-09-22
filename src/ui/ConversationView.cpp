@@ -66,19 +66,58 @@ public:
         setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse);
-        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
+        // 尺寸策略必须打开 heightForWidth：高度依赖宽度（换行数随宽度变），
+        // 这是唯一能既准确又不回环的表达方式。
+        QSizePolicy policy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        policy.setHeightForWidth(true);
+        setSizePolicy(policy);
         document()->setDocumentMargin(0);
 
+        // 内容变化（流式增量、Markdown 重排、主题切换）时让布局重算高度。
         connect(document()->documentLayout(), &QAbstractTextDocumentLayout::documentSizeChanged,
-                this, [this](const QSizeF &size) {
-                    const int target = static_cast<int>(size.height()) + 2;
-                    // 只在真的变化时改：否则 setFixedHeight → resize → 重新排版
-                    // → 再次发出信号，会形成回环。
-                    if (target > 0 && height() != target) {
-                        setFixedHeight(target);
-                    }
+                this, [this](const QSizeF &) {
+                    heightCacheWidth_ = -1;
+                    updateGeometry();
                 });
     }
+
+    bool hasHeightForWidth() const override { return true; }
+
+    /// 按目标宽度量出文档高度。
+    ///
+    /// ⚠ 这里不能用 `document()->size().height()` 直接当 sizeHint：
+    /// QAbstractScrollArea 的默认 sizeHint 是 256x192，而布局期文档还没拿到
+    /// 最终宽度，量出来的高度要么太大（192 被当成最小高度，把消息撑出大片空白）
+    /// 要么太小（宽高循环依赖）。用一个**副本文档**按目标宽度排版来量，
+    /// 既准确又不会扰动可见文档。
+    int heightForWidth(int width) const override {
+        if (width <= 0) {
+            return 0;
+        }
+        // 缓存：布局会反复问同一个宽度，每次都做一次 HTML 往返太浪费。
+        if (width == heightCacheWidth_ && heightCacheHeight_ > 0) {
+            return heightCacheHeight_;
+        }
+        QTextDocument probe;
+        probe.setDefaultStyleSheet(document()->defaultStyleSheet());
+        probe.setHtml(document()->toHtml());
+        probe.setTextWidth(width);
+        heightCacheWidth_ = width;
+        heightCacheHeight_ = static_cast<int>(probe.size().height()) + 2;
+        return heightCacheHeight_;
+    }
+
+    QSize sizeHint() const override {
+        const int width = this->width() > 0 ? this->width() : 640;
+        return QSize(width, heightForWidth(width));
+    }
+
+    QSize minimumSizeHint() const override { return sizeHint(); }
+
+private:
+    /// heightForWidth 的缓存。宽度不变时直接复用上次结果。
+    mutable int heightCacheWidth_ = -1;
+    mutable int heightCacheHeight_ = 0;
 };
 
 QString formatTime(TimestampMs milliseconds) {
@@ -131,6 +170,12 @@ MessageWidget::MessageWidget(const Message &message, QWidget *parent)
 MessageWidget::~MessageWidget() = default;
 
 void MessageWidget::buildUi() {
+    // 竖向策略必须是 Maximum：一条消息的高度应当**等于它的内容**。
+    // 默认的 Preferred 会让消息在对话流有多余空间时长高（内部 content 容器
+    // 把富余高度全吃掉），表现为消息之间出现大片空白——实测 content 高 192
+    // 而 sizeHint 只有 23。Maximum 表示"sizeHint 就是上限，可以缩不能长"。
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(4);
@@ -158,6 +203,8 @@ void MessageWidget::buildUi() {
     root->addWidget(errorLabel_);
 
     auto *content = new QWidget;
+    // 同上：内部容器也不能吸收多余高度，否则消息内部会先撑开再把 MessageWidget 顶大。
+    content->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     contentLayout_ = new QVBoxLayout(content);
     contentLayout_->setContentsMargins(0, 0, 0, 0);
     contentLayout_->setSpacing(6);
@@ -176,6 +223,13 @@ QTextBrowser *MessageWidget::createRichTextView(bool reasoning) {
 }
 
 void MessageWidget::buildPartWidget(const Part &part) {
+    // 动态创建的 part 控件同样需要显式显示（原因见 ConversationView::addMessage）。
+    // 用一个统一收口的小 lambda，避免每个分支各写一遍 show()。
+    const auto addPartWidget = [this](QWidget *widget) {
+        contentLayout_->addWidget(widget);
+        widget->show();
+    };
+
     switch (part.kind) {
         case PartKind::Text:
         case PartKind::Reasoning: {
@@ -188,12 +242,12 @@ void MessageWidget::buildPartWidget(const Part &part) {
                                            .arg(Theme::css(Theme::instance().palette()
                                                                .foregroundSubtlest)));
                 caption->setProperty("partCaptionFor", part.id);
-                contentLayout_->addWidget(caption);
+                addPartWidget(caption);
             }
             QTextBrowser *view = createRichTextView(reasoning);
             richViews_.insert(part.id, view);
             richSources_.insert(part.id, reasoning ? part.reasoning.text : part.text.text);
-            contentLayout_->addWidget(view);
+            addPartWidget(view);
             renderRichText(part.id);
             break;
         }
@@ -201,7 +255,7 @@ void MessageWidget::buildPartWidget(const Part &part) {
         case PartKind::Tool: {
             auto *card = new ToolCallWidget(part, this);
             toolViews_.insert(part.tool.callId, card);
-            contentLayout_->addWidget(card);
+            addPartWidget(card);
             break;
         }
 
@@ -218,7 +272,7 @@ void MessageWidget::buildPartWidget(const Part &part) {
             separator->setStyleSheet(QStringLiteral("color: %1;")
                                          .arg(Theme::css(Theme::instance().palette()
                                                              .foregroundSubtlest)));
-            contentLayout_->addWidget(separator);
+            addPartWidget(separator);
             break;
         }
 
@@ -227,7 +281,7 @@ void MessageWidget::buildPartWidget(const Part &part) {
                                                                  : part.file.fileName);
             label->setFont(Theme::instance().font(FontRole::UiSm));
             label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-            contentLayout_->addWidget(label);
+            addPartWidget(label);
             break;
         }
 
@@ -235,7 +289,7 @@ void MessageWidget::buildPartWidget(const Part &part) {
             auto *label = new QLabel(QStringLiteral("产物：") + part.artifact.displayName);
             label->setFont(Theme::instance().font(FontRole::UiSm));
             label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-            contentLayout_->addWidget(label);
+            addPartWidget(label);
             break;
         }
 
@@ -244,7 +298,7 @@ void MessageWidget::buildPartWidget(const Part &part) {
             label->setFont(Theme::instance().font(FontRole::UiSm));
             label->setWordWrap(true);
             label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-            contentLayout_->addWidget(label);
+            addPartWidget(label);
             break;
         }
 
@@ -500,6 +554,11 @@ void ConversationView::addMessage(const Message &message) {
     messageOrder_.append(message.id);
     // 插在末尾 stretch 之前，保证消息向上增长而不是被 stretch 推到底部。
     containerLayout_->insertWidget(containerLayout_->count() - 1, widget);
+
+    // ⚠ 必须显式 show()。QWidget::setParent() 会把控件置为隐藏，而 QLayout 会
+    // 直接跳过隐藏的控件（不给它布局几何），表现就是消息"存在但一条都画不出来"：
+    // messageCount() 是对的，界面却是空的。show() 会连同子控件一起显示。
+    widget->show();
 
     refreshEmptyState();
     if (follow) {
