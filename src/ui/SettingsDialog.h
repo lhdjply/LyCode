@@ -59,6 +59,17 @@ private:
     QWidget *buildAppearancePage();
     QWidget *buildProviderPage();
     QWidget *buildSessionPage();
+    /// MCP 服务器与 Skills 目录。两者都是"外部能力接入"，放在同一页。
+    QWidget *buildIntegrationsPage();
+
+    /// 用当前表格内容重建 MCP 表格。
+    void refreshMcpTable();
+    /// 编辑第 row 行（row < 0 表示新增）。
+    void editMcpServer(int row);
+    /// 用当前目录列表重建 Skills 目录列表，并预览能扫出多少技能。
+    void refreshSkillDirectories();
+    void addSkillDirectory();
+    void removeSelectedSkillDirectory();
     void buildButtonBox(QVBoxLayout *root);
 
     // ── 外观页 ──────────────────────────────────────────────────────────────
@@ -164,6 +175,10 @@ private:
     QComboBox *sessionModeCombo_ = nullptr;
     QCheckBox *persistSessionsCheck_ = nullptr;
     QCheckBox *titleGenerationCheck_ = nullptr;
+
+    QTableWidget *mcpTable_ = nullptr;
+    QListWidget *skillDirList_ = nullptr;
+    QLabel *skillPreview_ = nullptr;
     QListWidget *recentList_ = nullptr;
     QLabel *recentEmptyLabel_ = nullptr;
     QPushButton *clearRecentButton_ = nullptr;

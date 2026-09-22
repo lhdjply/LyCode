@@ -15,6 +15,15 @@ function(zcode_add_test name)
   )
 endfunction()
 
+# 假 MCP 服务器：测试用的协议完整子进程。它必须是一个**独立可执行文件**
+# （MCP 的 stdio 传输本来就是进程间对话），所以不放进 zcode_lib。
+add_executable(fake_mcp_server support/fake_mcp_server.cpp)
+target_link_libraries(fake_mcp_server PRIVATE Qt6::Core)
+# 和测试二进制放同一个目录，测试用 applicationDirPath() 就能找到它。
+set_target_properties(fake_mcp_server PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+)
+
 zcode_add_test(test_types)
 zcode_add_test(test_permission_gate)
 zcode_add_test(test_markdown)
@@ -28,3 +37,5 @@ zcode_add_test(test_file_viewer)
 
 zcode_add_test(test_ui_flow)
 zcode_add_test(test_app_config)
+zcode_add_test(test_mcp)
+zcode_add_test(test_skills)

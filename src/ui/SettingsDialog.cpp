@@ -1,5 +1,7 @@
 #include "ui/SettingsDialog.h"
 
+#include "skills/SkillLibrary.h"
+
 #include "core/Ids.h"
 #include "model/ReasoningLevels.h"
 #include "ui/Theme.h"
@@ -23,7 +25,10 @@
 #include <QScrollArea>
 #include <QSet>
 #include <QSpinBox>
+#include <QMessageBox>
 #include <QTableWidget>
+#include <QFileDialog>
+#include <QFormLayout>
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QVariant>
@@ -362,6 +367,7 @@ SettingsDialog::SettingsDialog(const AppSettings &settings, QWidget *parent)
     tabs_->addTab(buildAppearancePage(), QStringLiteral("外观"));
     tabs_->addTab(buildProviderPage(), QStringLiteral("Provider"));
     tabs_->addTab(buildSessionPage(), QStringLiteral("会话"));
+    tabs_->addTab(buildIntegrationsPage(), QStringLiteral("MCP / Skills"));
     root->addWidget(tabs_, 1);
 
     buildButtonBox(root);
@@ -1237,6 +1243,326 @@ void SettingsDialog::pruneStaleModelOverrides() {
 // ─────────────────────────────────────────────────────────────────────────────
 // 会话
 // ─────────────────────────────────────────────────────────────────────────────
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP / Skills
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+/// MCP 服务器的编辑对话框。返回 false 表示用户取消。
+///
+/// 做成一个独立的小对话框而不是就地编辑：服务器有 5 个字段（含多行的
+/// args/env），塞进表格单元格里编辑会非常难受。
+bool editServerDialog(QWidget *parent, zcode::mcp::ServerConfig *server, bool isNew) {
+    QDialog dialog(parent);
+    dialog.setWindowTitle(isNew ? QStringLiteral("添加 MCP 服务器")
+                                : QStringLiteral("编辑 MCP 服务器"));
+    dialog.setStyleSheet(Theme::instance().styleSheet());
+    dialog.resize(560, 420);
+
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+
+    auto *idEdit = new QLineEdit(server->id);
+    idEdit->setPlaceholderText(QStringLiteral("例如 github（会出现在工具名前缀里）"));
+    form->addRow(QStringLiteral("名称"), idEdit);
+
+    auto *commandEdit = new QLineEdit(server->command);
+    commandEdit->setPlaceholderText(QStringLiteral("例如 npx / python3 / /abs/path/server"));
+    form->addRow(QStringLiteral("命令"), commandEdit);
+
+    auto *argsEdit = new QPlainTextEdit(server->args.join(QLatin1Char('\n')));
+    argsEdit->setPlaceholderText(QStringLiteral("每行一个参数，例如\n-y\n@modelcontextprotocol/server-github"));
+    argsEdit->setFixedHeight(90);
+    form->addRow(QStringLiteral("参数"), argsEdit);
+
+    auto *envEdit = new QPlainTextEdit(server->env.join(QLatin1Char('\n')));
+    envEdit->setPlaceholderText(QStringLiteral("每行一个 KEY=VALUE；会叠加在继承的环境之上"));
+    envEdit->setFixedHeight(70);
+    form->addRow(QStringLiteral("环境变量"), envEdit);
+
+    auto *enabledCheck = new QCheckBox(QStringLiteral("启用"));
+    enabledCheck->setChecked(server->enabled);
+    form->addRow(QString(), enabledCheck);
+
+    layout->addLayout(form);
+
+    auto *hint = new QLabel(QStringLiteral(
+        "工具的权限默认是保守的：服务器没声明只读的工具，每次调用都会请你确认。\n"
+        "「服务器自述只读」只在放宽方向采信——那是它的说法，不是可信信息。"));
+    hint->setWordWrap(true);
+    hint->setFont(Theme::instance().font(FontRole::UiXs));
+    layout->addWidget(hint);
+    layout->addStretch(1);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    // 名称与命令是必填：缺任何一个服务器都起不来，与其存下去再报错不如拦在这里。
+    const auto validate = [&]() {
+        buttons->button(QDialogButtonBox::Ok)
+            ->setEnabled(!idEdit->text().trimmed().isEmpty() &&
+                         !commandEdit->text().trimmed().isEmpty());
+    };
+    QObject::connect(idEdit, &QLineEdit::textChanged, &dialog, validate);
+    QObject::connect(commandEdit, &QLineEdit::textChanged, &dialog, validate);
+    validate();
+
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) {
+        return false;
+    }
+
+    server->id = idEdit->text().trimmed();
+    server->command = commandEdit->text().trimmed();
+    server->args.clear();
+    for (const QString &line : argsEdit->toPlainText().split(QLatin1Char('\n'))) {
+        if (!line.trimmed().isEmpty()) {
+            server->args.append(line.trimmed());
+        }
+    }
+    server->env.clear();
+    for (const QString &line : envEdit->toPlainText().split(QLatin1Char('\n'))) {
+        if (!line.trimmed().isEmpty()) {
+            // 顺手校验格式：写错的行会被运行时忽略，用户会以为已经生效。
+            if (!line.contains(QLatin1Char('='))) {
+                QMessageBox::warning(&dialog, QStringLiteral("环境变量格式错误"),
+                                     QStringLiteral("这一行缺少 '='：%1\n"
+                                                    "应当写成 KEY=VALUE。")
+                                         .arg(line.trimmed()));
+                return false;
+            }
+            server->env.append(line.trimmed());
+        }
+    }
+    server->enabled = enabledCheck->isChecked();
+    return true;
+}
+
+}  // namespace
+
+QWidget *SettingsDialog::buildIntegrationsPage() {
+    auto *page = new QWidget;
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(16, 16, 16, 16);
+    layout->setSpacing(10);
+
+    // ── MCP 服务器 ──────────────────────────────────────────────────────────
+    auto *mcpTitle = new QLabel(QStringLiteral("MCP 服务器"));
+    mcpTitle->setFont(Theme::instance().font(FontRole::UiLg));
+    layout->addWidget(mcpTitle);
+
+    auto *mcpHint = new QLabel(QStringLiteral(
+        "应用启动时按下面的配置把这些服务器作为子进程拉起，它们提供的工具会注册成"
+        "普通工具供模型调用。改完需要重新打开应用才会重连（退出时会终止这些子进程）。"));
+    mcpHint->setWordWrap(true);
+    mcpHint->setFont(Theme::instance().font(FontRole::UiXs));
+    layout->addWidget(mcpHint);
+
+    mcpTable_ = new QTableWidget(0, 4, page);
+    mcpTable_->setObjectName(QStringLiteral("mcpTable"));
+    mcpTable_->setHorizontalHeaderLabels({QStringLiteral("名称"), QStringLiteral("命令"),
+                                          QStringLiteral("参数"), QStringLiteral("启用")});
+    mcpTable_->verticalHeader()->setVisible(false);
+    mcpTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    mcpTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    mcpTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);  // 改内容走"编辑"按钮
+    mcpTable_->horizontalHeader()->setStretchLastSection(false);
+    mcpTable_->setColumnWidth(0, 140);
+    mcpTable_->setColumnWidth(1, 160);
+    mcpTable_->setColumnWidth(2, 300);
+    mcpTable_->setMinimumHeight(150);
+    layout->addWidget(mcpTable_, 1);
+
+    auto *mcpButtons = new QHBoxLayout;
+    auto *addServer = new QPushButton(QStringLiteral("添加…"));
+    addServer->setObjectName(QStringLiteral("addMcpServer"));
+    connect(addServer, &QPushButton::clicked, this, [this]() { editMcpServer(-1); });
+    mcpButtons->addWidget(addServer);
+
+    auto *editServer = new QPushButton(QStringLiteral("编辑…"));
+    editServer->setObjectName(QStringLiteral("editMcpServer"));
+    connect(editServer, &QPushButton::clicked, this,
+            [this]() { editMcpServer(mcpTable_->currentRow()); });
+    mcpButtons->addWidget(editServer);
+
+    auto *removeServer = new QPushButton(QStringLiteral("删除"));
+    removeServer->setObjectName(QStringLiteral("removeMcpServer"));
+    connect(removeServer, &QPushButton::clicked, this, [this]() {
+        const int row = mcpTable_->currentRow();
+        if (row < 0 || row >= settings_.mcpServers.size()) {
+            return;
+        }
+        settings_.mcpServers.removeAt(row);
+        refreshMcpTable();
+    });
+    mcpButtons->addWidget(removeServer);
+    mcpButtons->addStretch(1);
+    layout->addLayout(mcpButtons);
+
+    // ── Skills 目录 ─────────────────────────────────────────────────────────
+    auto *skillsTitle = new QLabel(QStringLiteral("Skills 目录"));
+    skillsTitle->setFont(Theme::instance().font(FontRole::UiLg));
+    layout->addWidget(skillsTitle);
+
+    auto *skillsHint = new QLabel(QStringLiteral(
+        "在这些目录下发现 <名称>/SKILL.md 或 <名称>.md。留空表示使用默认目录："
+        "用户级 <数据根>/qt/skills，以及当前工作区的 .zcode/skills。"));
+    skillsHint->setWordWrap(true);
+    skillsHint->setFont(Theme::instance().font(FontRole::UiXs));
+    layout->addWidget(skillsHint);
+
+    skillDirList_ = new QListWidget(page);
+    skillDirList_->setObjectName(QStringLiteral("skillDirList"));
+    skillDirList_->setMinimumHeight(90);
+    layout->addWidget(skillDirList_, 1);
+
+    skillPreview_ = new QLabel;
+    skillPreview_->setObjectName(QStringLiteral("skillPreview"));
+    skillPreview_->setWordWrap(true);
+    skillPreview_->setFont(Theme::instance().font(FontRole::UiXs));
+    layout->addWidget(skillPreview_);
+
+    auto *skillButtons = new QHBoxLayout;
+    auto *addDir = new QPushButton(QStringLiteral("添加目录…"));
+    addDir->setObjectName(QStringLiteral("addSkillDir"));
+    connect(addDir, &QPushButton::clicked, this, &SettingsDialog::addSkillDirectory);
+    skillButtons->addWidget(addDir);
+
+    auto *removeDir = new QPushButton(QStringLiteral("移除"));
+    removeDir->setObjectName(QStringLiteral("removeSkillDir"));
+    connect(removeDir, &QPushButton::clicked, this,
+            &SettingsDialog::removeSelectedSkillDirectory);
+    skillButtons->addWidget(removeDir);
+
+    auto *resetDirs = new QPushButton(QStringLiteral("恢复默认目录"));
+    resetDirs->setObjectName(QStringLiteral("resetSkillDirs"));
+    connect(resetDirs, &QPushButton::clicked, this, [this]() {
+        settings_.skillDirectories.clear();  // 空 = 用内置默认
+        refreshSkillDirectories();
+    });
+    skillButtons->addWidget(resetDirs);
+    skillButtons->addStretch(1);
+    layout->addLayout(skillButtons);
+
+    refreshMcpTable();
+    refreshSkillDirectories();
+    return page;
+}
+
+void SettingsDialog::refreshMcpTable() {
+    mcpTable_->setRowCount(settings_.mcpServers.size());
+    for (int row = 0; row < settings_.mcpServers.size(); ++row) {
+        const mcp::ServerConfig &server = settings_.mcpServers.at(row);
+        mcpTable_->setItem(row, 0, new QTableWidgetItem(server.id));
+        mcpTable_->setItem(row, 1, new QTableWidgetItem(server.command));
+        mcpTable_->setItem(row, 2,
+                           new QTableWidgetItem(server.args.join(QLatin1Char(' '))));
+        auto *enabled = new QTableWidgetItem(server.enabled ? QStringLiteral("是")
+                                                            : QStringLiteral("否"));
+        enabled->setTextAlignment(Qt::AlignCenter);
+        mcpTable_->setItem(row, 3, enabled);
+    }
+}
+
+void SettingsDialog::editMcpServer(int row) {
+    const bool isNew = row < 0;
+    mcp::ServerConfig server;
+    if (!isNew && row < settings_.mcpServers.size()) {
+        server = settings_.mcpServers.at(row);
+    } else {
+        server.enabled = true;
+    }
+
+    if (!editServerDialog(this, &server, isNew)) {
+        return;
+    }
+
+    // 名称唯一：重名会导致工具名前缀撞车，注册表里互相覆盖。
+    for (int index = 0; index < settings_.mcpServers.size(); ++index) {
+        if (index != row && settings_.mcpServers.at(index).id == server.id) {
+            QMessageBox::warning(this, QStringLiteral("名称重复"),
+                                 QStringLiteral("已经有一个叫「%1」的服务器了。")
+                                     .arg(server.id));
+            refreshMcpTable();
+            return;
+        }
+    }
+
+    if (isNew) {
+        settings_.mcpServers.append(server);
+    } else {
+        settings_.mcpServers[row] = server;
+    }
+    refreshMcpTable();
+}
+
+void SettingsDialog::refreshSkillDirectories() {
+    skillDirList_->clear();
+    const QStringList directories = settings_.skillDirectories.isEmpty()
+                                        ? skills::Library::defaultDirectories(QString())
+                                        : settings_.skillDirectories;
+    const bool usingDefaults = settings_.skillDirectories.isEmpty();
+    for (const QString &directory : directories) {
+        auto *item = new QListWidgetItem(directory);
+        if (usingDefaults) {
+            item->setToolTip(QStringLiteral("默认目录（要改成自定义列表就点「添加目录…」）"));
+        }
+        skillDirList_->addItem(item);
+    }
+
+    // 立刻扫一遍做预览：让用户当场确认"我配的目录真的被认到了"，
+    // 而不是等重启后发现一个技能都没有。
+    skills::Library preview;
+    preview.rescan(directories);
+    if (preview.isEmpty()) {
+        skillPreview_->setText(QStringLiteral("当前没有发现任何技能。"));
+        return;
+    }
+    QStringList names;
+    for (const skills::Skill &skill : preview.skills()) {
+        names.append(skill.id);
+    }
+    skillPreview_->setText(QStringLiteral("已发现 %1 个技能：%2")
+                               .arg(preview.skills().size())
+                               .arg(names.join(QStringLiteral("、"))));
+}
+
+void SettingsDialog::addSkillDirectory() {
+    const QString directory = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("选择技能目录"));
+    if (directory.isEmpty()) {
+        return;
+    }
+    // 第一次添加时把默认目录也并进来：用户点"添加"的意图是"再加一个"，
+    // 而不是"丢掉默认的那两个"。
+    if (settings_.skillDirectories.isEmpty()) {
+        settings_.skillDirectories = skills::Library::defaultDirectories(QString());
+    }
+    if (!settings_.skillDirectories.contains(directory)) {
+        settings_.skillDirectories.append(directory);
+    }
+    refreshSkillDirectories();
+}
+
+void SettingsDialog::removeSelectedSkillDirectory() {
+    const int row = skillDirList_->currentRow();
+    if (row < 0) {
+        return;
+    }
+    if (settings_.skillDirectories.isEmpty()) {
+        // 列表里现在显示的是默认目录。用户点"移除"的意思是"别再用它了"，
+        // 所以先把默认目录展开成显式列表，再删掉选中的那个。
+        settings_.skillDirectories = skills::Library::defaultDirectories(QString());
+    }
+    if (row < settings_.skillDirectories.size()) {
+        settings_.skillDirectories.removeAt(row);
+    }
+    refreshSkillDirectories();
+}
 
 QWidget *SettingsDialog::buildSessionPage() {
     auto *page = new QWidget;

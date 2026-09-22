@@ -26,6 +26,8 @@ class QHBoxLayout;
 #include "agent/AgentRuntime.h"
 #include "agent/PermissionGate.h"
 #include "core/Types.h"
+#include "mcp/McpManager.h"
+#include "skills/SkillLibrary.h"
 #include "model/ProviderRegistry.h"
 #include "storage/SessionStore.h"
 #include "tools/Tool.h"
@@ -87,6 +89,10 @@ private slots:
     void onSubagentFinished(const zcode::Id &childSessionId, bool ok);
     /// 后台任务数量变化：状态栏给出可见提示，否则用户不知道有进程还在跑。
     void onBackgroundTasksChanged(int runningCount);
+    /// MCP 服务器就绪/失败时刷新状态提示。
+    void onMcpChanged();
+    /// 重新扫描技能目录并注入运行时。
+    void rescanSkills();
 
     // ── 交互 ────────────────────────────────────────────────────────────────
     void onSendRequested();
@@ -166,6 +172,14 @@ private:
 
     QLabel *runStateLabel_ = nullptr;
     QLabel *backgroundLabel_ = nullptr;
+    QLabel *mcpLabel_ = nullptr;
+    /// MCP 服务器集合。启动时按配置拉起，工具直接注册进 tools_。
+    std::unique_ptr<zcode::mcp::Manager> mcp_;
+    /// Skills 库。扫描一次，注入运行时；换工作区时重扫。
+    zcode::skills::Library skills_;
+    /// 为 MCP 握手等待用户输入的计时与状态。
+    QElapsedTimer mcpWaitElapsed_;
+    bool mcpWaitPending_ = false;
     QLabel *usageLabel_ = nullptr;
     QTimer *usageTimer_ = nullptr;
     /// 本轮运行已耗时。用于状态栏的"运行中（12s）"。

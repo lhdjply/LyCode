@@ -53,6 +53,11 @@ struct SystemPromptInput {
     QString subagentType;
     /// 派生子代理时给出的任务描述，用于让子代理确认自己的职责边界。
     QString subagentDescription;
+
+    /// Skills 清单片段（名字 + 描述）。由 SkillLibrary 生成，这里只负责插入——
+    /// 让提示词层依赖一个字符串而不是 skills 库，避免 agent/ → skills/ 的耦合。
+    /// 为空表示没有可用技能。
+    QString skillsSection;
 };
 
 class SystemPromptBuilder {

@@ -3,6 +3,8 @@
 #include "core/Ids.h"
 #include "core/Json.h"
 #include "core/Logging.h"
+#include "mcp/McpManager.h"
+#include "skills/SkillLibrary.h"
 #include "tools/BackgroundTaskRegistry.h"
 #include "tools/TodoStore.h"
 #include "ui/ConversationView.h"
@@ -44,6 +46,13 @@
 #include <QVBoxLayout>
 
 namespace zcode::ui {
+namespace {
+/// 第一次请求最多为 MCP 握手等多久。卡住的服务器不该把用户的输入一起卡住。
+constexpr int kMcpWaitTimeoutMs = 8000;
+/// 等待期间的重试间隔。
+constexpr int kMcpPollIntervalMs = 150;
+}  // namespace
+
 namespace {
 
 Q_LOGGING_CATEGORY(log, "zcode.ui.main")
@@ -166,6 +175,28 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     runtime_.setProviderRegistry(&providers_);
     runtime_.setToolRegistry(&tools_);
+
+    // MCP：按配置拉起服务器。**异步**——不阻塞界面启动；服务器就绪后再把
+    // 它的工具注册进 tools_，所以模型第一次请求可能还不包含这些工具，
+    // 下一次请求就会包含（工具声明是每次请求重新构建的）。
+    // Skills：扫描用户级与项目级目录。换工作区时会重扫（见 applyWorkspace）。
+    rescanSkills();
+
+    mcp_ = std::make_unique<mcp::Manager>();
+    connect(mcp_.get(), &mcp::Manager::serverReady, this, [this](const QString &serverId, int count) {
+        const int added = mcp_->registerToolsInto(tools_);
+        qCInfo(log) << "MCP 服务器就绪; id=" << serverId << "工具数=" << count
+                    << "本次新增=" << added;
+        onMcpChanged();
+    });
+    connect(mcp_.get(), &mcp::Manager::serverFailed, this,
+            [this](const QString &serverId, const QString &reason) {
+                qCWarning(log) << "MCP 服务器失败; id=" << serverId << "reason=" << reason;
+                setStatusMessage(QStringLiteral("MCP 服务器「%1」不可用：%2")
+                                     .arg(serverId, reason));
+                onMcpChanged();
+            });
+    connect(mcp_.get(), &mcp::Manager::changed, this, &MainWindow::onMcpChanged);
     runtime_.setSessionStore(&store_);
     runtime_.setTodoStore(todoStore_.get());
 
@@ -186,6 +217,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
     if (store_.isOpen()) {
         loadWorkspaceSessions();
+    }
+
+    // MCP 服务器在界面搭好之后再拉起：失败时要能通过状态栏告知用户，
+    // 太早启动的话那些提示还没有落点。
+    if (!settings_.mcpServers.isEmpty()) {
+        qCInfo(log) << "启动 MCP 服务器; 数量=" << settings_.mcpServers.size();
+        mcp_->startAll(settings_.mcpServers);
     }
 
     // 运行时长与用量的低频刷新。放在定时器里而不是每次增量都算，
@@ -332,6 +370,12 @@ void MainWindow::buildUi() {
 
     // 后台任务计数。没有它用户根本不知道还有进程在跑——后台任务的全部意义
     // 就是"离开视线继续工作"，因此必须有个常驻的可见提示。
+    // MCP 连接数。与后台任务一样用 permanent：状态消息不该把它藏起来。
+    mcpLabel_ = new QLabel;
+    mcpLabel_->setObjectName(QStringLiteral("mcpLabel"));
+    mcpLabel_->setFont(Theme::instance().font(FontRole::UiXs));
+    statusBar()->addPermanentWidget(mcpLabel_);
+
     backgroundLabel_ = new QLabel;
     backgroundLabel_->setObjectName(QStringLiteral("backgroundLabel"));
     backgroundLabel_->setFont(Theme::instance().font(FontRole::UiXs));
@@ -974,6 +1018,7 @@ void MainWindow::onOpenWorkspacePath(const QString &path) {
     currentModel_ = settings_.modelForWorkspace(workspace_.key());
     applySettingsToUi();
 
+    rescanSkills();  // 项目级技能目录跟着工作区走
     qCInfo(log) << "切换工作区:" << workspace_.path;
     setStatusMessage(QStringLiteral("已切换工作区：") + workspace_.path);
 
@@ -1104,6 +1149,37 @@ void MainWindow::onBackgroundTasksChanged(int runningCount) {
         QStringLiteral("有 %1 个后台任务正在运行。用 TaskOutput 查看它们的输出，"
                        "或在工具卡片里用 TaskStop 终止。")
             .arg(runningCount));
+}
+
+void MainWindow::rescanSkills() {
+    // 非空即覆盖默认目录。空列表与"没配过"区分不开，所以用"非空即覆盖"的语义：
+    // 用户在设置里删掉默认目录后，我们不该又把它加回来。
+    const QStringList directories = settings_.skillDirectories.isEmpty()
+                                        ? skills::Library::defaultDirectories(workspace_.path)
+                                        : settings_.skillDirectories;
+    skills_.rescan(directories);
+    runtime_.setSkillLibrary(&skills_);
+    if (!skills_.isEmpty()) {
+        qCInfo(log) << "已加载技能; 数量=" << skills_.skills().size();
+    }
+}
+
+void MainWindow::onMcpChanged() {
+    if (mcpLabel_ == nullptr) {
+        return;
+    }
+    const int ready = mcp_ != nullptr ? mcp_->readyCount() : 0;
+    if (ready <= 0) {
+        mcpLabel_->clear();
+        mcpLabel_->setToolTip(QString());
+        return;
+    }
+    mcpLabel_->setText(QStringLiteral("· MCP %1").arg(ready));
+    mcpLabel_->setStyleSheet(
+        QStringLiteral("color: %1;").arg(Theme::css(Theme::instance().palette().success)));
+    mcpLabel_->setToolTip(QStringLiteral("已连接 %1 个 MCP 服务器；它们提供的工具"
+                                         "已注册为普通工具，模型可以直接调用。")
+                              .arg(ready));
 }
 
 void MainWindow::onFailed(const QString &message) {
@@ -1289,6 +1365,32 @@ void MainWindow::refreshAttachmentStrip() {
 }
 
 void MainWindow::onSendRequested() {
+    // MCP 服务器还在握手时先等它就绪再发第一次请求。
+    //
+    // 为什么值得等：工具声明是**每次请求重新构建**的，所以第一次请求如果赶在
+    // 握手完成之前发出，模型这一次就看不到 MCP 工具——它会以为自己没有这些能力，
+    // 于是改用别的方式（甚至直接告诉用户"我没有这个工具"），而用户明明配了。
+    // 等的上限是有界的：卡住的服务器不该把用户的输入也一起卡住。
+    if (mcp_ != nullptr && mcp_->isSettling() && !mcpWaitElapsed_.isValid()) {
+        mcpWaitElapsed_.start();
+    }
+    if (mcp_ != nullptr && mcp_->isSettling() &&
+        mcpWaitElapsed_.elapsed() < kMcpWaitTimeoutMs) {
+        if (!mcpWaitPending_) {
+            mcpWaitPending_ = true;
+            setStatusMessage(QStringLiteral("正在连接 MCP 服务器…"));
+            // 一次性订阅：就绪或超时后自动重试这一次发送。
+            auto *timer = new QTimer(this);
+            timer->setSingleShot(true);
+            connect(timer, &QTimer::timeout, this, [this]() {
+                mcpWaitPending_ = false;
+                onSendRequested();
+            });
+            timer->start(kMcpPollIntervalMs);
+        }
+        return;
+    }
+
     const QString text = composer_->toPlainText().trimmed();
     // **先快照附件**：没有会话时下面会先建会话，而 onNewSessionRequested()
     // 会清空待发附件（它们属于"上一次编辑"）。不快照的话，用户在空会话里
@@ -1408,6 +1510,18 @@ void MainWindow::onSettingsRequested() {
     applySettingsToUi();
     saveSettings();
 
+    // MCP 与 Skills 的配置也在这一页里，改完要立刻生效：
+    // 重连服务器（否则用户会以为配置没保存），并重扫技能目录。
+    rescanSkills();
+    if (mcp_ != nullptr) {
+        mcp_->startAll(settings_.mcpServers);
+        onMcpChanged();
+        if (mcp_->isSettling()) {
+            // 就绪后把工具补进注册表——否则要等下一次改设置才生效。
+            setStatusMessage(QStringLiteral("正在连接 MCP 服务器…"));
+        }
+    }
+
     if (!providers_.hasUsableProvider()) {
         setStatusMessage(QStringLiteral("当前没有可用的 Provider，请检查 Base URL 与 API Key。"));
     } else {
@@ -1423,6 +1537,10 @@ void MainWindow::saveSettings() {
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
+    // MCP 服务器是子进程，必须显式终止；否则退出后会留下孤儿进程。
+    if (mcp_ != nullptr) {
+        mcp_->stopAll();
+    }
     // 退出前收尾：中断运行、落盘设置。不这样做会留下孤儿工具进程与未保存配置。
     if (runtime_.isRunning()) {
         runtime_.abort();

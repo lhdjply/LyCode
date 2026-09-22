@@ -144,6 +144,20 @@ QJsonObject AppSettings::toJson() const {
     result.insert(QStringLiteral("defaultSessionMode"), toToken(defaultSessionMode));
     result.insert(QStringLiteral("persistSessions"), persistSessions);
     result.insert(QStringLiteral("generateSessionTitles"), generateSessionTitles);
+
+    QJsonArray servers;
+    for (const zcode::mcp::ServerConfig &server : mcpServers) {
+        QJsonObject item;
+        item.insert(QStringLiteral("id"), server.id);
+        item.insert(QStringLiteral("command"), server.command);
+        item.insert(QStringLiteral("args"), QJsonArray::fromStringList(server.args));
+        item.insert(QStringLiteral("env"), QJsonArray::fromStringList(server.env));
+        item.insert(QStringLiteral("enabled"), server.enabled);
+        servers.append(item);
+    }
+    result.insert(QStringLiteral("mcpServers"), servers);
+    result.insert(QStringLiteral("skillDirectories"),
+                  QJsonArray::fromStringList(skillDirectories));
     return result;
 }
 
@@ -198,6 +212,32 @@ AppSettings AppSettings::fromJson(const QJsonObject &json) {
     settings.persistSessions = json::boolean(json, QStringLiteral("persistSessions"), true);
     settings.generateSessionTitles =
         json::boolean(json, QStringLiteral("generateSessionTitles"), true);
+
+    for (const QJsonValue &entry : json::array(json, QStringLiteral("skillDirectories"))) {
+        const QString path = entry.toString().trimmed();
+        if (!path.isEmpty()) {
+            settings.skillDirectories.append(path);
+        }
+    }
+
+    for (const QJsonValue &value : json::array(json, QStringLiteral("mcpServers"))) {
+        const QJsonObject item = value.toObject();
+        zcode::mcp::ServerConfig server;
+        server.id = json::str(item, QStringLiteral("id"));
+        server.command = json::str(item, QStringLiteral("command"));
+        for (const QJsonValue &argument : json::array(item, QStringLiteral("args"))) {
+            server.args.append(argument.toString());
+        }
+        for (const QJsonValue &entry : json::array(item, QStringLiteral("env"))) {
+            server.env.append(entry.toString());
+        }
+        server.enabled = json::boolean(item, QStringLiteral("enabled"), true);
+        if (server.isValid()) {
+            settings.mcpServers.append(server);
+        } else {
+            qCWarning(log) << "忽略配置不完整的 MCP 服务器条目; id=" << server.id;
+        }
+    }
     return settings;
 }
 

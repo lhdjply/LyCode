@@ -33,6 +33,7 @@
 #include "tools/GrepTool.h"
 #include "tools/ReadTool.h"
 #include "tools/AgentTool.h"
+#include "tools/SkillTool.h"
 #include "tools/TaskTools.h"
 #include "tools/TodoTool.h"
 #include "tools/WriteTool.h"
@@ -622,6 +623,7 @@ ToolRegistry ToolRegistry::createWithBuiltins() {
     // 别名与 npm 对齐，兼容按 Claude Code 习惯发起的调用。
     registry.add(new TaskOutputTool(),
                  {QStringLiteral("BashOutput"), QStringLiteral("AgentOutput")});
+    registry.add(new SkillTool());
     registry.add(new TaskStopTool(),
                  {QStringLiteral("KillBash"), QStringLiteral("KillShell")});
     qCInfo(log) << "已注册内置工具:" << registry.names().join(QStringLiteral(", "));

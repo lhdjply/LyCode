@@ -410,7 +410,12 @@ QString SystemPromptBuilder::build(const SystemPromptInput &input) {
         sections << toolingNormsSection(input.tools);
     }
 
-    // ④ 会话模式约束。子代理用专用版本：主代理版本的 plan 文案会要它
+    // ④ 技能清单。只放名字与描述：正文由 Skill 工具按需加载。
+    if (!input.skillsSection.trimmed().isEmpty()) {
+        sections << input.skillsSection.trimmed();
+    }
+
+    // ⑤ 会话模式约束。子代理用专用版本：主代理版本的 plan 文案会要它
     //    "产出一份计划供用户批准"，而只读子代理要的是调查结论。
     sections << (input.subagentType.trimmed().isEmpty()
                      ? modeSection(input.mode, input.permissionMode)

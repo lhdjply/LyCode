@@ -316,6 +316,10 @@ void AgentRuntime::launchSubagent(const LaunchRequest &request, Completion done)
     }
 }
 
+void AgentRuntime::setSkillLibrary(const skills::Library *library) {
+    skills_ = library;
+}
+
 void AgentRuntime::setToolAllowlist(const QStringList &names) {
     toolAllowlist_ = names;
 }
@@ -758,6 +762,10 @@ ModelRequest AgentRuntime::buildModelRequest() const {
         request.tools = promptInput.tools;
     }
     promptInput.subagentType = subagentType_;
+    // 技能清单每次请求重新生成：用户中途加了 skill 不该要重启应用。
+    if (skills_ != nullptr) {
+        promptInput.skillsSection = skills_->promptSection();
+    }
     promptInput.subagentDescription = subagentDescription_;
     request.systemPrompt = SystemPromptBuilder::build(promptInput);
 
@@ -1541,6 +1549,7 @@ void AgentRuntime::executeToolAt(int index) {
             // Agent 工具据此拒绝递归派生。
             context.subagentHost = this;
             context.backgroundTasks = backgroundTasks_;
+            context.skills = skills_;
             // 并发执行时所有工具共享同一个取消令牌；这是刻意的：
             // 用户按一次"停止"应当让整轮的所有工具都停下。
             context.cancelled = cancelFlag_;

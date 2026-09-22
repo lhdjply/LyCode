@@ -38,6 +38,8 @@ file(
   "${CMAKE_CURRENT_SOURCE_DIR}/src/model/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/agent/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/mcp/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/skills/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/*.cpp"
 )

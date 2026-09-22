@@ -36,6 +36,7 @@
 #include "agent/PermissionGate.h"
 #include "core/Types.h"
 #include "storage/SessionStore.h"
+#include "skills/SkillLibrary.h"
 #include "tools/SubagentHost.h"
 #include "tools/Tool.h"
 
@@ -150,6 +151,10 @@ public:
 
     /// 后台任务注册表。Bash 的 run_in_background 与 TaskOutput/TaskStop 共用它。
     BackgroundTaskRegistry *backgroundTasks() const { return backgroundTasks_; }
+
+    /// 注入 skills 库（不接管所有权）。传 nullptr 表示没有技能目录。
+    void setSkillLibrary(const skills::Library *library);
+    const skills::Library *skillLibrary() const { return skills_; }
 
     /// 用模型为当前会话生成标题。
     ///
@@ -365,6 +370,9 @@ private:
     /// 父代理不该看到、也不该被它的通知打扰。
     std::unique_ptr<BackgroundTaskRegistry> ownedBackgroundTasks_;
     BackgroundTaskRegistry *backgroundTasks_ = nullptr;
+
+    /// Skills 库。由 MainWindow 持有，这里只借用。
+    const skills::Library *skills_ = nullptr;
 
     /// 传给工具与权限层的取消令牌。一个 turn 一个，abort() 时置位。
     /// 用 shared_ptr 是因为工具可能在异步回调里持有它，生命周期必须独立于 turn。

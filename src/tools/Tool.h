@@ -144,6 +144,11 @@ class SubagentHost;
 /// TaskOutput / TaskStop 用它查询与终止。
 class BackgroundTaskRegistry;
 
+/// Skills 库。由 MainWindow 扫描后注入，Skill 工具用它取正文。
+namespace skills {
+class Library;
+}
+
 /// 执行上下文。由 Agent 主循环构造，工具只读。
 struct ToolContext {
     Id sessionId;
@@ -172,6 +177,9 @@ struct ToolContext {
     /// 后台任务注册表。为空表示当前环境不支持后台任务——
     /// Bash 的 run_in_background 必须据此明确失败，而不是假装已启动。
     BackgroundTaskRegistry *backgroundTasks = nullptr;
+
+    /// Skills 库。为空表示没有配置技能目录，Skill 工具据此明确失败。
+    const skills::Library *skills = nullptr;
 
     /// 进度回调，可空。用于把长任务的中间输出推给 UI。
     std::function<void(const QString &chunk)> progress;
