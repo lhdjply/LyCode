@@ -24,7 +24,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ── Qt ──────────────────────────────────────────────────────────────────────
 # 仅依赖本机已有的模块：Widgets 而非 Quick/QML，避免引入未安装的依赖。
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent)
 
 qt_standard_project_setup()
 

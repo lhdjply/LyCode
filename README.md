@@ -38,7 +38,7 @@
 
 - CMake ≥ 3.21、Ninja（或 Make）
 - 支持 C++20 的编译器（GCC 12+ / Clang 15+ / MSVC 2022）
-- Qt **6.5+**，需要模块：`Core`、`Gui`、`Widgets`、`Network`、`Sql`、`Concurrent`、`Test`
+- Qt **6.4+**（6.5 起有 `QStyleHints::colorScheme()`，6.4 走调色板回退），需要模块：`Core`、`Gui`、`Widgets`、`Network`、`Sql`、`Concurrent`、`Test`
 
 Debian / Ubuntu / Deepin：
 

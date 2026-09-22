@@ -30,6 +30,7 @@
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QStringList>
+#include <QPalette>
 #include <QStyleHints>
 #include <QtGlobal>
 
@@ -359,18 +360,41 @@ Palette zaiDark() {
 
 }  // namespace
 
+namespace {
+
+/// 系统当前是否使用深色配色。
+///
+/// Qt 6.5 起有 `QStyleHints::colorScheme()`；在那之前没有这个 API，
+/// 只能用调色板亮度近似判断（不如前者可靠，但能让项目在 Qt 6.4 的发行版上
+/// 也能编出来——Ubuntu 24.04 / Debian 12 的 apt 里就是 6.4）。
+bool systemPrefersDark() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    if (auto *hints = QGuiApplication::styleHints()) {
+        return hints->colorScheme() == Qt::ColorScheme::Dark;
+    }
+    return false;
+#else
+    // 回退：窗口底色偏暗即认为是深色主题。
+    return QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
+#endif
+}
+
+}  // namespace
+
 // ── Theme 单例 ──────────────────────────────────────────────────────────────
 
 Theme::Theme() {
     // 构造时解析一次系统配色。QStyleHints 只在 GUI 线程可用，单例首次使用时
     // QApplication 必然已存在（风格表/字体库同理），这里不需要额外保护。
+    systemDark_ = systemPrefersDark();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     if (auto *hints = QGuiApplication::styleHints()) {
-        systemDark_ = hints->colorScheme() == Qt::ColorScheme::Dark;
         // colorSchemeChanged 只在 mode_ == System 时影响调色板；refreshFromSystem 内部会判断。
         // 用 AutoConnection：若 styleHints 将来在别的线程发信号，会排队回本对象线程执行。
         connect(hints, &QStyleHints::colorSchemeChanged, this,
                 [this](Qt::ColorScheme) { refreshFromSystem(); });
     }
+#endif
     resolvePalette();
 }
 
@@ -400,9 +424,7 @@ void Theme::refreshFromSystem() {
         // 用户显式选了 Light/Dark：系统配色变化不影响任何令牌，不该发 changed()。
         return;
     }
-    if (auto *hints = QGuiApplication::styleHints()) {
-        systemDark_ = hints->colorScheme() == Qt::ColorScheme::Dark;
-    }
+    systemDark_ = systemPrefersDark();
     const bool wasDark = palette_.isDark;
     resolvePalette();
     if (wasDark != palette_.isDark) {

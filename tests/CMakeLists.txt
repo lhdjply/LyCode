@@ -1,4 +1,4 @@
-find_package(Qt6 6.5 REQUIRED COMPONENTS Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Test)
 
 # 每个测试是一个独立可执行文件：这样单个测试崩溃不会带走其它测试的结果，
 # 也让 CTest 能把失败精确定位到某一个模块。
