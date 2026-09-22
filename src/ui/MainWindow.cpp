@@ -175,66 +175,6 @@ void MainWindow::buildUi() {
     rootLayout->setContentsMargins(0, 0, 0, 0);
     rootLayout->setSpacing(0);
 
-    // ── 顶部工具条 ──────────────────────────────────────────────────────────
-    auto *header = new QWidget;
-    header->setObjectName(QStringLiteral("headerBar"));
-    auto *headerLayout = new QHBoxLayout(header);
-    headerLayout->setContentsMargins(16, 8, 16, 8);
-    headerLayout->setSpacing(10);
-
-    modelCombo_ = new QComboBox;
-    // objectName 供样式表与 UI 级测试定位控件；改名要同步更新测试。
-    modelCombo_->setObjectName(QStringLiteral("modelCombo"));
-    modelCombo_->setMinimumWidth(220);
-    modelCombo_->setToolTip(QStringLiteral("选择本会话使用的模型"));
-    connect(modelCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModelChanged);
-    headerLayout->addWidget(modelCombo_);
-
-    // 思考等级下拉：紧挨模型选择器。它的可见性由模型是否支持思考决定，
-    // 所以不支持的模型不会看到一个永远禁用的空控件。
-    reasoningCombo_ = new QComboBox;
-    reasoningCombo_->setObjectName(QStringLiteral("reasoningCombo"));
-    reasoningCombo_->setToolTip(
-        QStringLiteral("思考等级：越高推理越充分，消耗的 token 也越多"));
-    connect(reasoningCombo_, &QComboBox::currentIndexChanged, this,
-            &MainWindow::onReasoningLevelChanged);
-    headerLayout->addWidget(reasoningCombo_);
-
-    modeCombo_ = new QComboBox;
-    modeCombo_->setObjectName(QStringLiteral("modeCombo"));
-    modeCombo_->setToolTip(
-        QStringLiteral("会话模式：plan 只读规划 / build 默认 / edit 编辑 / yolo 免确认"));
-    modeCombo_->addItem(QStringLiteral("plan 只读规划"), static_cast<int>(SessionMode::Plan));
-    modeCombo_->addItem(QStringLiteral("build 默认"), static_cast<int>(SessionMode::Build));
-    modeCombo_->addItem(QStringLiteral("edit 编辑"), static_cast<int>(SessionMode::Edit));
-    modeCombo_->addItem(QStringLiteral("yolo 免确认"), static_cast<int>(SessionMode::Yolo));
-    connect(modeCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModeChanged);
-    headerLayout->addWidget(modeCombo_);
-
-    headerLayout->addStretch(1);
-
-    contextLabel_ = new QLabel;
-    contextLabel_->setObjectName(QStringLiteral("contextLabel"));
-    contextLabel_->setFont(Theme::instance().font(FontRole::UiXs));
-    // 预留最宽可能的文案宽度：否则用户把窗口调到 200 万时最后一位会被裁掉
-    // （QLabel 在布局里可以被压缩到 sizeHint 以下）。用字体度量而不是写死像素，
-    // 这样界面字号变化也仍然够用。
-    contextLabel_->setMinimumWidth(
-        QFontMetrics(contextLabel_->font())
-                .horizontalAdvance(QStringLiteral("上下文 000.0 / 2000.0M")) +
-        8);
-    headerLayout->addWidget(contextLabel_);
-
-    contextBar_ = new QProgressBar;
-    contextBar_->setRange(0, 100);
-    contextBar_->setValue(0);
-    contextBar_->setTextVisible(false);
-    contextBar_->setFixedWidth(120);
-    contextBar_->setFixedHeight(6);
-    headerLayout->addWidget(contextBar_);
-
-    rootLayout->addWidget(header);
-
     // ── 主体：侧边栏 + 对话 ─────────────────────────────────────────────────
     splitter_ = new QSplitter(Qt::Horizontal);
     sidebar_ = new SidebarPanel;
@@ -266,10 +206,43 @@ void MainWindow::buildUi() {
     composer_->installEventFilter(this);
     composerLayout->addWidget(composer_);
 
+    // ── 操作行：模式在左，模型/思考/停止/发送在右 ───────────────────────────
+    // 这三个选择器都放进输入区而不是顶部工具条：它们影响的是"这一次发送"，
+    // 贴着输入框才符合"先设参数再发送"的操作顺序，也省掉一整条顶部横栏。
     auto *actionRow = new QHBoxLayout;
     actionRow->setContentsMargins(0, 0, 0, 0);
     actionRow->setSpacing(8);
+
+    modeCombo_ = new QComboBox;
+    modeCombo_->setObjectName(QStringLiteral("modeCombo"));
+    modeCombo_->setToolTip(
+        QStringLiteral("会话模式：plan 只读规划 / build 默认 / edit 编辑 / yolo 免确认"));
+    modeCombo_->addItem(QStringLiteral("plan 只读规划"), static_cast<int>(SessionMode::Plan));
+    modeCombo_->addItem(QStringLiteral("build 默认"), static_cast<int>(SessionMode::Build));
+    modeCombo_->addItem(QStringLiteral("edit 编辑"), static_cast<int>(SessionMode::Edit));
+    modeCombo_->addItem(QStringLiteral("yolo 免确认"), static_cast<int>(SessionMode::Yolo));
+    connect(modeCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModeChanged);
+    actionRow->addWidget(modeCombo_);
+
     actionRow->addStretch(1);
+
+    modelCombo_ = new QComboBox;
+    // objectName 供样式表与 UI 级测试定位控件；改名要同步更新测试。
+    modelCombo_->setObjectName(QStringLiteral("modelCombo"));
+    modelCombo_->setMinimumWidth(180);
+    modelCombo_->setToolTip(QStringLiteral("选择本会话使用的模型"));
+    connect(modelCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModelChanged);
+    actionRow->addWidget(modelCombo_);
+
+    // 思考等级下拉：紧挨模型选择器。它的可见性由模型是否支持思考决定，
+    // 所以不支持的模型不会看到一个永远禁用的空控件。
+    reasoningCombo_ = new QComboBox;
+    reasoningCombo_->setObjectName(QStringLiteral("reasoningCombo"));
+    reasoningCombo_->setToolTip(
+        QStringLiteral("思考等级：越高推理越充分，消耗的 token 也越多"));
+    connect(reasoningCombo_, &QComboBox::currentIndexChanged, this,
+            &MainWindow::onReasoningLevelChanged);
+    actionRow->addWidget(reasoningCombo_);
 
     stopButton_ = new QPushButton(QStringLiteral("停止"));
     stopButton_->setObjectName(QStringLiteral("stopButton"));
@@ -289,10 +262,33 @@ void MainWindow::buildUi() {
     setCentralWidget(central);
 
     // ── 状态栏 ──────────────────────────────────────────────────────────────
+    // 上下文用量原先在顶部工具条右侧。三个选择器搬进输入区后顶部就空了，
+    // 与其留一条只有一项的横栏，不如把它并入状态栏（这里本来就在展示用量）。
     runStateLabel_ = new QLabel(runStateText(RunState::Idle));
+    statusBar()->addWidget(runStateLabel_);
+
+    contextLabel_ = new QLabel;
+    contextLabel_->setObjectName(QStringLiteral("contextLabel"));
+    contextLabel_->setFont(Theme::instance().font(FontRole::UiXs));
+    // 预留最宽可能的文案宽度：否则用户把窗口调到 200 万时最后一位会被裁掉
+    // （QLabel 在布局里可以被压缩到 sizeHint 以下）。用字体度量而不是写死像素，
+    // 这样界面字号变化也仍然够用。
+    contextLabel_->setMinimumWidth(
+        QFontMetrics(contextLabel_->font())
+                .horizontalAdvance(QStringLiteral("上下文 000.0 / 2000.0M")) +
+        8);
+    statusBar()->addPermanentWidget(contextLabel_);
+
+    contextBar_ = new QProgressBar;
+    contextBar_->setRange(0, 100);
+    contextBar_->setValue(0);
+    contextBar_->setTextVisible(false);
+    contextBar_->setFixedWidth(120);
+    contextBar_->setFixedHeight(6);
+    statusBar()->addPermanentWidget(contextBar_);
+
     usageLabel_ = new QLabel;
     usageLabel_->setFont(Theme::instance().font(FontRole::UiXs));
-    statusBar()->addWidget(runStateLabel_);
     statusBar()->addPermanentWidget(usageLabel_);
 }
 
@@ -405,9 +401,7 @@ void MainWindow::applyTheme() {
     const Palette &palette = theme.palette();
 
     setStyleSheet(theme.styleSheet() +
-                  QStringLiteral("QWidget#headerBar { background-color: %1; "
-                                 "border-bottom: 1px solid %2; }"
-                                 "QWidget#composerFrame { background-color: %1; "
+                  QStringLiteral("QWidget#composerFrame { background-color: %1; "
                                  "border-top: 1px solid %2; }")
                       .arg(Theme::css(palette.backgroundAlt), Theme::css(palette.border)));
 

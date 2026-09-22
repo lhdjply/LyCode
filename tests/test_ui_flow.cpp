@@ -218,6 +218,41 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     QCOMPARE(reasoningCombo->count(), 3);
     QCOMPARE(reasoningCombo->currentData().toString(), QStringLiteral("high"));
 
+    // ── 三个选择器必须在输入区，而不是顶部工具条 ───────────────────────────
+    // 要求：模式在输入框左下；模型与思考在发送按钮左边。
+    auto *composerFrame = window.findChild<QWidget *>(QStringLiteral("composerFrame"));
+    QVERIFY2(composerFrame != nullptr, "输入区应当有 composerFrame");
+    auto *modeCombo = window.findChild<QComboBox *>(QStringLiteral("modeCombo"));
+    auto *modelCombo = window.findChild<QComboBox *>(QStringLiteral("modelCombo"));
+    QVERIFY(modeCombo != nullptr);
+    QVERIFY(modelCombo != nullptr);
+
+    for (QWidget *widget : {static_cast<QWidget *>(modeCombo),
+                            static_cast<QWidget *>(modelCombo),
+                            static_cast<QWidget *>(reasoningCombo),
+                            static_cast<QWidget *>(sendButton)}) {
+        QVERIFY2(composerFrame->isAncestorOf(widget),
+                 "模式/模型/思考/发送都必须位于输入区内");
+    }
+
+    // 同一行上的水平顺序：模式 → 模型 → 思考 → 发送。
+    const auto windowX = [&window](QWidget *widget) {
+        return widget->mapTo(&window, QPoint(0, 0)).x();
+    };
+    const auto windowY = [&window](QWidget *widget) {
+        return widget->mapTo(&window, QPoint(0, 0)).y();
+    };
+    QVERIFY2(windowX(modeCombo) < windowX(modelCombo),
+             "模式应当排在模型左边（模式在输入框左下，模型在发送按钮一侧）");
+    QVERIFY(windowX(modelCombo) < windowX(reasoningCombo));
+    QVERIFY2(windowX(reasoningCombo) < windowX(sendButton),
+             "模型与思考必须在发送按钮左边");
+    QVERIFY2(qAbs(windowY(modeCombo) - windowY(sendButton)) < modeCombo->height(),
+             "模式应与发送按钮在同一行（输入框下方那一行）");
+    QVERIFY2(windowY(modeCombo) > windowY(window.findChild<QPlainTextEdit *>(
+                                     QStringLiteral("composer"))),
+             "模式应当在输入框的下方，而不是上方");
+
     // 启动时会自动建一个会话（或恢复最近会话），等它稳定下来。
     QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }));
 
@@ -420,10 +455,13 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
              qPrintable(QStringLiteral("改完设置后工具条应立即显示新分母（1.0M），实际：") +
                         contextLabel->text()));
 
-    // 留一张"改完设置立刻生效"的截图作为证据。
+    // 留一张"改完设置立刻生效"的截图作为证据。上下文用量现在在状态栏，
+    // 所以截底部一条（输入区 + 状态栏）而不是顶部。
     const QString afterSettingsShot =
         screenshotDir() + QStringLiteral("/06-after-context-change.png");
-    QVERIFY2(window.grab().copy(0, 0, window.width(), 90).save(afterSettingsShot),
+    const QPixmap afterSettings = window.grab();
+    QVERIFY2(afterSettings.copy(0, afterSettings.height() - 150, afterSettings.width(), 150)
+                 .save(afterSettingsShot),
              qPrintable(afterSettingsShot));
 
     // 设置必须真的落盘，重启后还在。
