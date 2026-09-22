@@ -70,6 +70,10 @@ private slots:
     /// 删除某个工作区下的全部会话（二次确认后执行）。
     void onWorkspacePurgeRequested(const QString &path);
     void onOpenWorkspacePath(const QString &path);
+    /// 切换工作区的真正实现。`remember` 决定要不要把它写回工作区列表——
+    /// 从树里点开一个会话时**不能**写回，否则用户从列表移除过的工作区
+    /// 会因为他点了一下它的会话就复活。
+    void openWorkspacePath(const QString &path, bool remember);
 
     // ── 运行时信号 ──────────────────────────────────────────────────────────
     void onMessageAdded(const Message &message);
@@ -91,6 +95,8 @@ private slots:
     void onBackgroundTasksChanged(int runningCount);
     /// MCP 服务器就绪/失败时刷新状态提示。
     void onMcpChanged();
+    /// 清掉某个工作区的按工作区索引的配置（模型记忆、展开状态）。
+    void forgetWorkspaceRecords(const QString &path);
     /// 重新扫描技能目录并注入运行时。
     void rescanSkills();
 

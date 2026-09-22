@@ -33,6 +33,8 @@
 #include <QSet>
 #include <QTextBlock>
 #include <QListWidget>
+#include <QToolButton>
+#include <QTreeWidget>
 #include <QMessageBox>
 
 #ifdef Q_OS_UNIX
@@ -98,6 +100,11 @@ private slots:
     void workspacePurgeDeletesSessionsButKeepsFiles();
     void attachesImageAndSendsIt();
     void conversationRendersHighlightedCode();
+    void workspaceExpansionIsPersisted();
+    void switchingWorkspaceKeepsTreeOrderStable();
+    void topButtonCreatesWorkspaceNotSession();
+    void removingCurrentWorkspaceActuallyWorks();
+    void everyWorkspaceShowsFoldMarker();
 
 private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -146,6 +153,11 @@ void TestUiFlow::initTestCase() {
     // 让既有断言变得不确定（实测直接打乱了图片附件那条测试）。
     // 标题生成本身由 sessionTitleIsGeneratedByModel 单独覆盖。
     settings.insert(QStringLiteral("generateSessionTitles"), false);
+    // 显式给一个工作区：应用不再用"当前目录"兜底（那会让"移除最后一个工作区"
+    // 在重启后复活），所以测试要像真实用户一样先有一个工作区。
+    QVERIFY(QDir().mkpath(dataDir_->path() + QStringLiteral("/workspace")));
+    settings.insert(QStringLiteral("lastWorkspace"),
+                    dataDir_->path() + QStringLiteral("/workspace"));
 
     // 声明该模型的能力覆盖：上下文窗口与思考档位。用于验证
     // ① 工具条上的思考等级选择器出现并选中默认档位
@@ -254,12 +266,44 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
             break;
         }
     }
-    QVERIFY2(pathLabel != nullptr, "侧边栏应当有一行显示工作区路径的标签");
-    QVERIFY2(pathLabel->isVisible() && pathLabel->height() > 0,
-             "工作区路径标签必须可见且有高度");
-    QVERIFY2(!pathLabel->text().isEmpty(), "工作区路径标签不应为空");
-    // 完整路径必须在 tooltip 里，即使显示被省略。
-    QVERIFY(pathLabel->toolTip().startsWith(QLatin1Char('/')));
+    // 顶部那一行已经去掉：工作区现在只出现在左侧的树里。
+    // 路径信息挂在节点的 tooltip 上，名字在节点文本里。
+    auto *sidebarTree = sidebar->findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY2(sidebarTree != nullptr, "侧边栏应当是一棵工作区/会话树");
+    QVERIFY2(sidebarTree->topLevelItemCount() >= 1, "树里应当有当前工作区节点");
+    QTreeWidgetItem *currentWorkspaceNode = sidebarTree->topLevelItem(0);
+    QVERIFY2(!currentWorkspaceNode->toolTip(0).isEmpty(),
+             "工作区节点必须能用 tooltip 给出完整路径");
+    QVERIFY2(!currentWorkspaceNode->text(0).isEmpty(), "工作区节点不应为空");
+    // 每个工作区行右侧要有"+"（新建会话入口）。
+    QVERIFY2(sidebarTree->itemWidget(currentWorkspaceNode, 1) != nullptr,
+             "每个工作区行上应当有新建会话的入口");
+    // 同一个动作（选目录并加进列表）在菜单栏和侧边栏不该有两个名字。
+    auto *openWorkspaceButton =
+        window.findChild<QPushButton *>(QStringLiteral("newWorkspaceButton"));
+    QVERIFY(openWorkspaceButton != nullptr);
+    QString menuText;
+    for (QAction *menuAction : window.menuBar()->actions()) {
+        if (menuAction->menu() == nullptr) {
+            continue;
+        }
+        for (QAction *action : menuAction->menu()->actions()) {
+            if (action->text().contains(QStringLiteral("工作区"))) {
+                menuText = action->text();
+                break;
+            }
+        }
+    }
+    QVERIFY2(!menuText.isEmpty(), "菜单栏里应当有工作区相关项");
+    QCOMPARE(openWorkspaceButton->text(), menuText);
+    // 正文宽度是"条目能不能读"的关键。列 1 只放一个 20px 的 "+"，
+    // 一旦它被表头按内容撑开，正文就会被挤到大量省略号。
+    QVERIFY2(sidebarTree->columnWidth(1) <= 30,
+             qPrintable(QStringLiteral("操作列不该吃掉正文宽度，实际 %1px")
+                            .arg(sidebarTree->columnWidth(1))));
+    QVERIFY2(sidebarTree->columnWidth(0) > 200,
+             qPrintable(QStringLiteral("正文列应当有足够宽度，实际 %1px")
+                            .arg(sidebarTree->columnWidth(0))));
 
     // ── 思考等级选择器 ─────────────────────────────────────────────────────
     auto *reasoningCombo = window.findChild<QComboBox *>(QStringLiteral("reasoningCombo"));
@@ -401,9 +445,18 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     QVERIFY2(cards.first()->grab().save(toolShot), qPrintable(toolShot));
 
     // ── 子代理：独立会话进列表，但不抢走当前会话 ───────────────────────────
-    auto *sessionList = sidebar->findChild<QListWidget *>();
-    QVERIFY(sessionList != nullptr);
-    const int sessionsBefore = sessionList->count();
+    // 侧边栏是"工作区 → 会话"的树。会话是**子节点**，所以要递归数。
+    auto *tree = sidebar->findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY2(tree != nullptr, "侧边栏应当是一棵树");
+    const auto countSessions = [tree]() {
+        int total = 0;
+        for (int index = 0; index < tree->topLevelItemCount(); ++index) {
+            total += tree->topLevelItem(index)->childCount();
+        }
+        return total;
+    };
+    const int sessionsBefore = countSessions();
+    QVERIFY2(tree->topLevelItemCount() >= 1, "树里至少应当有当前工作区这个顶层节点");
     const int parentMessagesBefore = conversation->messageCount();
 
     const QByteArray agentArgs =
@@ -421,15 +474,18 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
              "父会话应当继续累积消息（子代理的对话不能替换掉它）");
     QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }, 15000));
     // 子会话必须出现在列表里。
-    QVERIFY2(waitFor([&]() { return sessionList->count() > sessionsBefore; }, 8000),
-             "子代理会话应当出现在侧边栏列表里");
+    QVERIFY2(waitFor([&]() { return countSessions() > sessionsBefore; }, 8000),
+             "子代理会话应当出现在侧边栏的树上");
 
-    // 列表里能一眼看出哪条是子代理。
+    // 树上能一眼看出哪条是子代理。
     bool foundSubagentRow = false;
-    for (int row = 0; row < sessionList->count(); ++row) {
-        if (sessionList->item(row)->text().contains(QStringLiteral("子代理"))) {
-            foundSubagentRow = true;
-            break;
+    for (int index = 0; index < tree->topLevelItemCount() && !foundSubagentRow; ++index) {
+        QTreeWidgetItem *parent = tree->topLevelItem(index);
+        for (int child = 0; child < parent->childCount(); ++child) {
+            if (parent->child(child)->text(0).contains(QStringLiteral("子代理"))) {
+                foundSubagentRow = true;
+                break;
+            }
         }
     }
     QVERIFY2(foundSubagentRow, "子代理会话应当在列表里标注出来");
@@ -439,6 +495,12 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     QCOMPARE(conversation->messageCount(), parentMessagesBefore + 3);
     QVERIFY2(conversation->findChildren<ToolCallWidget *>().size() >= 2,
              "父会话里应当同时有 Bash 与 Agent 两张工具卡片");
+
+    // 树的效果图：顶层是工作区，子节点是它的会话。
+    const QString treeShot =
+        screenshotDir() + QStringLiteral("/17-sidebar-tree.png");
+    const QPixmap full = window.grab();
+    QVERIFY2(full.copy(0, 0, 340, full.height()).save(treeShot), qPrintable(treeShot));
 
     const QString subagentShot =
         screenshotDir() + QStringLiteral("/08-subagent-session.png");
@@ -751,6 +813,10 @@ void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles() {
         for (QAction *entry : popup->actions()) {
             QMenu *sub = entry->menu();
             if (sub == nullptr) {
+                // 平铺菜单（树节点的右键菜单）。
+                if (!entry->isSeparator()) {
+                    menuTexts.append(entry->text());
+                }
                 continue;
             }
             for (QAction *action : sub->actions()) {
@@ -774,16 +840,33 @@ void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles() {
         }
         popup->close();
     });
-    // 按**真实用户路径**触发：点工作区按钮。它会 exec 出模态菜单，
-    // 定时器在嵌套事件循环里截图并关闭。
-    auto *workspaceButton = window.findChild<QPushButton *>(QStringLiteral("workspaceButton"));
-    QVERIFY2(workspaceButton != nullptr, "侧边栏应当有工作区按钮");
-    workspaceButton->click();
+    // 按**真实用户路径**触发：在树的工作区节点上请求右键菜单。
+    // （顶部的工作区按钮已经去掉，管理动作现在挂在树节点的右键菜单上。）
+    auto *treeForMenu = window.findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY2(treeForMenu != nullptr, "侧边栏应当是一棵树");
+    QTreeWidgetItem *workspaceNode = nullptr;
+    for (int index = 0; index < treeForMenu->topLevelItemCount(); ++index) {
+        if (treeForMenu->topLevelItem(index)->toolTip(0) == workspaceDir.path()) {
+            workspaceNode = treeForMenu->topLevelItem(index);
+            break;
+        }
+    }
+    QVERIFY2(workspaceNode != nullptr, "树上应当有这个工作区的节点");
+    // 用列 0 内的确定坐标，而不是 rect 的中心：中心可能落到第二列
+    // （"+"/操作列）上，itemAt() 那时返回 null，菜单就不会弹出来。
+    const QRect nodeRect = treeForMenu->visualItemRect(workspaceNode);
+    QVERIFY2(nodeRect.isValid() && nodeRect.height() > 0, "工作区节点应当已经布局");
+    emit treeForMenu->customContextMenuRequested(
+        QPoint(8, nodeRect.center().y()));
     QVERIFY2(menuTexts.contains(QStringLiteral("从最近列表移除")),
              qPrintable(QStringLiteral("菜单里应当有「从最近列表移除」，实际：%1")
                             .arg(menuTexts.join(QStringLiteral(" / ")))));
     QVERIFY2(menuTexts.contains(QStringLiteral("删除该工作区的全部会话…")),
              qPrintable(QStringLiteral("菜单里应当有「删除该工作区的全部会话…」，实际：%1")
+                            .arg(menuTexts.join(QStringLiteral(" / ")))));
+    // 展开/折叠只是界面收起，不是"打开/关闭工作区"，所以不该有"打开"这一项。
+    QVERIFY2(!menuTexts.contains(QStringLiteral("打开")),
+             qPrintable(QStringLiteral("工作区菜单不该有「打开」，实际：%1")
                             .arg(menuTexts.join(QStringLiteral(" / ")))));
 
     // ① 从最近列表移除：只动列表。
@@ -800,6 +883,11 @@ void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles() {
     QVERIFY2(!recentAfter.contains(workspaceDir.path()), "应当已从最近列表移除");
     // 关键：移除列表项**不删**会话。
     QCOMPARE(probe.listSessions(key).size(), sessionsBefore);
+
+    // 移除的是**当前**工作区，界面会切到列表里剩下的那个——把它切回来，
+    // 后面的"删除全部会话"要作用在这个工作区上。
+    emit sidebar->workspaceRecentRequested(workspaceDir.path());
+    QTest::qWait(200);
 
     // ② 删除该工作区全部会话：需要确认，用一个定时器在模态循环里点「是」。
     // 用**重复**定时器而不是 0ms 单发：单发有可能在对话框成为模态窗口之前
@@ -870,6 +958,17 @@ void TestUiFlow::attachesImageAndSendsIt() {
     QVERIFY(sendButton != nullptr);
     auto *attachButton = window.findChild<QPushButton *>(QStringLiteral("attachButton"));
     QVERIFY2(attachButton != nullptr, "输入区必须有附加图片的入口");
+
+    // 前面的测试会改动工作区列表与当前工作区，这里显式切到一个确定的工作区，
+    // 否则本测试可能在"没有工作区"的状态下开始，发送按钮是禁用的。
+    {
+        auto *sb = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+        QVERIFY(sb != nullptr);
+        QTemporaryDir ownWorkspace;
+        QVERIFY(ownWorkspace.isValid());
+        emit sb->workspaceRecentRequested(ownWorkspace.path());
+        QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }, 3000));
+    }
     auto *strip = window.findChild<QWidget *>(QStringLiteral("attachmentStrip"));
     QVERIFY(strip != nullptr);
     auto *conversation = window.findChild<ConversationView *>(QStringLiteral("conversation"));
@@ -972,6 +1071,346 @@ void TestUiFlow::conversationRendersHighlightedCode() {
     // 需要确认观感时看截图。
 
     view.close();
+}
+
+void TestUiFlow::workspaceExpansionIsPersisted() {
+    // 用户报过："每次打开软件只有一个工作区是打开的"——展开状态没被持久化，
+    // 展开过的其它工作区重启后全被收起来。
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QVERIFY(first.isValid() && second.isValid());
+
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    QVERIFY(sidebar != nullptr);
+    auto *tree = sidebar->findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY(tree != nullptr);
+
+    // 造两个工作区节点。用真实入口：打开目录会把它加进最近列表。
+    sidebar->setWorkspace(Workspace{first.path(), {}, {}});
+    emit sidebar->workspaceRecentRequested(first.path());
+    QVERIFY(waitFor([&]() { return tree->topLevelItemCount() >= 1; }, 3000));
+
+    AppSettings settings;
+    QVERIFY(AppConfig::load(&settings));
+    settings.recentWorkspaces = {first.path(), second.path()};
+    sidebar->setRecentWorkspaces(settings.recentWorkspaces);
+    QVERIFY(waitFor([&]() { return tree->topLevelItemCount() >= 2; }, 3000));
+
+    // 展开第二个工作区（不是当前工作区）。
+    QTreeWidgetItem *secondNode = nullptr;
+    for (int index = 0; index < tree->topLevelItemCount(); ++index) {
+        if (tree->topLevelItem(index)->toolTip(0) == second.path()) {
+            secondNode = tree->topLevelItem(index);
+            break;
+        }
+    }
+    QVERIFY2(secondNode != nullptr, "第二个工作区应当出现在树上");
+    secondNode->setExpanded(true);
+
+    // 展开状态必须落盘——这是"下次打开还保持原样"的唯一依据。
+    AppSettings saved;
+    QVERIFY(AppConfig::load(&saved));
+    QVERIFY2(saved.expandedWorkspaces.contains(second.path()),
+             qPrintable(QStringLiteral("展开状态应当被持久化，实际：%1")
+                            .arg(saved.expandedWorkspaces.join(QStringLiteral(", ")))));
+
+    // 折叠后要从记录里移除，否则下次打开会"自己弹开"。
+    secondNode->setExpanded(false);
+    AppSettings afterCollapse;
+    QVERIFY(AppConfig::load(&afterCollapse));
+    QVERIFY2(!afterCollapse.expandedWorkspaces.contains(second.path()),
+             "折叠后不该还留在展开记录里");
+}
+
+void TestUiFlow::switchingWorkspaceKeepsTreeOrderStable() {
+    // 用户报过："点击会话，工作区排序就变了"。原因是切工作区时会把它提到
+    // "最近"列表最前，而树的顺序照的就是这个列表。
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QVERIFY(first.isValid() && second.isValid());
+
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    QVERIFY(sidebar != nullptr);
+    auto *tree = sidebar->findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY(tree != nullptr);
+
+    // 启动时的工作区本身就在列表里，所以每打开一个新目录，节点数 +1。
+    const int initialCount = tree->topLevelItemCount();
+    QVERIFY2(initialCount >= 1, "启动时应当有当前工作区这个节点");
+
+    emit sidebar->workspaceRecentRequested(first.path());
+    QVERIFY(waitFor([&]() { return tree->topLevelItemCount() > initialCount; }, 3000));
+    const int afterFirst = tree->topLevelItemCount();
+
+    emit sidebar->workspaceRecentRequested(second.path());
+    QVERIFY(waitFor([&]() { return tree->topLevelItemCount() > afterFirst; }, 3000));
+
+    const auto order = [tree]() {
+        QStringList paths;
+        for (int index = 0; index < tree->topLevelItemCount(); ++index) {
+            paths.append(tree->topLevelItem(index)->toolTip(0));
+        }
+        return paths;
+    };
+    const QStringList before = order();
+    QVERIFY2(before.size() >= 3, qPrintable(before.join(QStringLiteral(", "))));
+
+    // 切到**已经存在**的工作区：顺序不能变。
+    // 这里直接走真实入口（打开工作区路径），它以前会把它提到最前。
+    emit sidebar->workspaceRecentRequested(before.first());
+    QTest::qWait(200);
+    QCOMPARE(order(), before);
+    emit sidebar->workspaceRecentRequested(before.last());
+    QTest::qWait(200);
+    QVERIFY2(order() == before,
+             qPrintable(QStringLiteral("切换工作区不该改变树的顺序，实际：%1（原为 %2）")
+                            .arg(order().join(QStringLiteral(", ")),
+                                 before.join(QStringLiteral(", ")))));
+
+    // 同一个工作区再切回来，仍然稳定。
+    emit sidebar->workspaceRecentRequested(before.first());
+    QTest::qWait(200);
+    QCOMPARE(order(), before);
+
+    // 点击工作区节点应当折叠/展开。
+    // 展开箭头换成了文字指示符（▸/▾）之后就没有可点的箭头了，必须自己接
+    // 点击事件——否则用户**根本没有办法折叠**一个工作区（实测漏过）。
+    QTreeWidgetItem *node = tree->topLevelItem(0);
+    QVERIFY(node != nullptr);
+    node->setExpanded(true);
+    QVERIFY(node->isExpanded());
+    emit tree->itemClicked(node, 0);
+    QVERIFY2(!node->isExpanded(), "点击工作区节点应当折叠它");
+    emit tree->itemClicked(node, 0);
+    QVERIFY2(node->isExpanded(), "再点一次应当展开");
+
+    // 会话节点不该被折叠（它们没有子节点，折叠无意义且会让人困惑）。
+    if (node->childCount() > 0) {
+        QTreeWidgetItem *session = node->child(0);
+        emit tree->itemClicked(session, 0);
+        QVERIFY2(node->isExpanded(), "点会话不该折叠它的工作区");
+    }
+}
+
+void TestUiFlow::topButtonCreatesWorkspaceNotSession() {
+    // 用户报过："新建工作区怎么是新建会话的功能？"——按钮文字改了，但它接的
+    // 信号还是 newSessionRequested。这类"改了外观没改动作"的错误，只有断言
+    // **动作**才拦得住。
+    //
+    // 这里单独建一个 SidebarPanel 而不是用 MainWindow：workspaceChangeRequested
+    // 在 MainWindow 里会打开模态目录对话框，测试会被卡住。
+    SidebarPanel panel;
+    panel.setWorkspace(Workspace{QDir::tempPath(), {}, {}});
+    panel.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&panel));
+
+    auto *button = panel.findChild<QPushButton *>(QStringLiteral("newWorkspaceButton"));
+    QVERIFY2(button != nullptr, "顶部应当有新建工作区按钮");
+    // 措辞必须与菜单栏的同一个动作一致（同一个动作不该有两个名字）。
+    QVERIFY2(button->text().startsWith(QStringLiteral("打开工作区")),
+             qPrintable(QStringLiteral("侧边栏按钮措辞应当与菜单一致，实际：%1")
+                            .arg(button->text())));
+
+    QSignalSpy workspaceSpy(&panel, &SidebarPanel::workspaceChangeRequested);
+    QSignalSpy sessionSpy(&panel, &SidebarPanel::newSessionRequested);
+    button->click();
+
+    QCOMPARE(workspaceSpy.count(), 1);
+    QCOMPARE(sessionSpy.count(), 0);  // ★ 关键：绝不能建会话
+
+    // 工作区行上的 "+" 才是新建会话，而且必须带上那个工作区的路径。
+    panel.setRecentWorkspaces({QDir::tempPath()});
+    auto *tree = panel.findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY(tree != nullptr);
+    QCOMPARE(tree->topLevelItemCount(), 1);
+    auto *plus = qobject_cast<QToolButton *>(
+        tree->itemWidget(tree->topLevelItem(0), 1));
+    QVERIFY2(plus != nullptr, "工作区行上应当有 + 按钮");
+    QSignalSpy plusSpy(&panel, &SidebarPanel::newSessionRequestedInWorkspace);
+    plus->click();
+    QCOMPARE(plusSpy.count(), 1);
+    QCOMPARE(plusSpy.first().at(0).toString(), QDir::tempPath());
+}
+
+void TestUiFlow::removingCurrentWorkspaceActuallyWorks() {
+    // 用户报过："无法移除最后一个工作区"。根因是移除**当前**工作区时，
+    // SidebarPanel::setRecentWorkspaces 会把当前工作区强制补回树上，
+    // 界面上看不出变化；重启后启动逻辑又把它写回列表——永远删不掉。
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QVERIFY(first.isValid() && second.isValid());
+
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    QVERIFY(sidebar != nullptr);
+    auto *tree = sidebar->findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY(tree != nullptr);
+    auto *sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+    QVERIFY(sendButton != nullptr);
+
+    const auto treePaths = [tree]() {
+        QStringList paths;
+        for (int index = 0; index < tree->topLevelItemCount(); ++index) {
+            paths.append(tree->topLevelItem(index)->toolTip(0));
+        }
+        return paths;
+    };
+
+    // 加两个工作区，当前是第二个。
+    emit sidebar->workspaceRecentRequested(first.path());
+    QTest::qWait(200);
+    emit sidebar->workspaceRecentRequested(second.path());
+    QTest::qWait(200);
+    QVERIFY2(treePaths().contains(first.path()), "第一个工作区应当在树上");
+    QVERIFY2(treePaths().contains(second.path()), "第二个工作区应当在树上");
+
+    {
+        AppSettings probe;
+        QVERIFY(AppConfig::load(&probe));
+        QVERIFY2(probe.recentWorkspaces.contains(second.path()),
+                 "第二个工作区应当是当前的");
+    }
+
+    // ① 移除**当前**工作区（第二个）：必须真的消失。
+    emit sidebar->workspaceRemoveRequested(second.path());
+    QVERIFY2(waitFor([&]() { return !treePaths().contains(second.path()); }, 3000),
+             qPrintable(QStringLiteral("移除当前工作区后它必须从树上消失，实际：%1")
+                            .arg(treePaths().join(QStringLiteral(", ")))));
+    {
+        AppSettings after;
+        QVERIFY(AppConfig::load(&after));
+        QVERIFY2(!after.recentWorkspaces.contains(second.path()),
+                 "移除当前工作区后配置里也不该还有它（否则重启会回来）");
+        QVERIFY2(after.recentWorkspaces.contains(first.path()),
+                 "剩下的那个工作区应当被保留");
+    }
+
+    // ② 只剩一个时移除：**必须也能删**。删完进入"无工作区"状态——
+    //    这是个被完整支持的状态（会话被收干净、发送按钮禁用、界面给出下一步提示）。
+    while (treePaths().size() > 1) {
+        emit sidebar->workspaceRemoveRequested(treePaths().last());
+        QTest::qWait(200);
+    }
+    QCOMPARE(treePaths().size(), 1);
+    const QString only = treePaths().first();
+    emit sidebar->workspaceRemoveRequested(only);
+    QVERIFY2(waitFor([&]() { return treePaths().isEmpty(); }, 3000),
+             "最后一个工作区必须能移除");
+    {
+        AppSettings afterAll;
+        QVERIFY(AppConfig::load(&afterAll));
+        QVERIFY2(afterAll.recentWorkspaces.isEmpty(), "删光后列表应当为空");
+        QVERIFY2(afterAll.lastWorkspace.isEmpty(),
+                 "lastWorkspace 也要清掉，否则重启会把最后一个又打开");
+    }
+    // 无工作区时不能发消息，且界面要告诉用户下一步做什么（而不是空白一片）。
+    QVERIFY2(!sendButton->isEnabled(), "没有工作区时不该能发送");
+    bool hintFound = false;
+    for (const QLabel *label : sidebar->findChildren<QLabel *>()) {
+        if (label->isVisible() && label->text().contains(QStringLiteral("打开工作区"))) {
+            hintFound = true;
+            break;
+        }
+    }
+    QVERIFY2(hintFound, "没有工作区时应当提示用户去「打开工作区…」");
+    // 重新打开一个工作区后要能继续用。
+    QTemporaryDir recovered;
+    QVERIFY(recovered.isValid());
+    emit sidebar->workspaceRecentRequested(recovered.path());
+    QVERIFY2(waitFor([&]() { return sendButton->isEnabled(); }, 5000),
+             "重新打开工作区后应当恢复可用");
+
+    // ③ ★ 被移除的工作区**不能复活**（重启后也不该回来）。
+    //    用户报过："移除后重新打开软件 又会出来"。启动逻辑只从 lastWorkspace
+    //    与列表恢复，所以"配置里不再有它、lastWorkspace 也不指着它"就等于
+    //    "重启不会回来"——这里直接断言配置。
+    QTemporaryDir third;
+    QVERIFY(third.isValid());
+    emit sidebar->workspaceRecentRequested(third.path());
+    QTest::qWait(200);
+    QVERIFY2(treePaths().size() >= 2, "先保证列表里不只一个工作区");
+
+    emit sidebar->workspaceRemoveRequested(first.path());
+    QTest::qWait(200);
+
+    AppSettings afterRevive;
+    QVERIFY(AppConfig::load(&afterRevive));
+    QVERIFY2(!afterRevive.recentWorkspaces.contains(first.path()),
+             qPrintable(QStringLiteral("移除后配置里不该还有它，实际：%1")
+                            .arg(afterRevive.recentWorkspaces.join(QStringLiteral(", ")))));
+    QVERIFY2(afterRevive.lastWorkspace != first.path(),
+             "lastWorkspace 也不能还指着已移除的工作区（否则重启会把它打开）");
+    QVERIFY2(!treePaths().contains(first.path()), "树上也不该还有它");
+
+    // ④ ★ 移除工作区还要清掉它的**按工作区索引**的配置。
+    //    用户报过："移除工作区，为什么 settings.json 里 workspaceLastModel
+    //    还有工作区记录"。那些表按工作区 key 索引，不清就会长期堆积。
+    {
+        AppSettings probe;
+        QVERIFY(AppConfig::load(&probe));
+        QVERIFY2(!probe.workspaceLastModel.contains(first.path()),
+                 qPrintable(QStringLiteral("workspaceLastModel 不该还留着已移除的工作区：%1")
+                                .arg(probe.workspaceLastModel.keys()
+                                         .join(QStringLiteral(", ")))));
+        QVERIFY2(!probe.expandedWorkspaces.contains(first.path()),
+                 "expandedWorkspaces 也不该还留着已移除的工作区");
+    }
+}
+
+void TestUiFlow::everyWorkspaceShowsFoldMarker() {
+    // 用户报过："重新打开软件 会有一些工作区 没有向右也没有向下"。
+    // 根因：折叠指示符按 childCount() 判断，而会话是**懒加载**的——
+    // 没被展开过的工作区 childCount() 为 0，于是既没有 ▸ 也没有 ▾，
+    // 看起来根本不能折叠。
+    QTemporaryDir first;
+    QTemporaryDir second;
+    QVERIFY(first.isValid() && second.isValid());
+
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    QVERIFY(sidebar != nullptr);
+    auto *tree = sidebar->findChild<QTreeWidget *>(QStringLiteral("sessionTree"));
+    QVERIFY(tree != nullptr);
+
+    emit sidebar->workspaceRecentRequested(first.path());
+    QTest::qWait(200);
+    emit sidebar->workspaceRecentRequested(second.path());
+    QTest::qWait(200);
+    QVERIFY2(tree->topLevelItemCount() >= 2, "应当有至少两个工作区节点");
+
+    // 每个工作区节点都必须带折叠指示符。关键是**没被展开过**的那些也要有——
+    // 它们此刻 childCount() 还是 0。
+    for (int index = 0; index < tree->topLevelItemCount(); ++index) {
+        QTreeWidgetItem *node = tree->topLevelItem(index);
+        const QString text = node->text(0);
+        QVERIFY2(text.startsWith(QStringLiteral("▸")) || text.startsWith(QStringLiteral("▾")),
+                 qPrintable(QStringLiteral("工作区节点必须带折叠指示符（childCount=%1），实际文本：%2")
+                                .arg(node->childCount())
+                                .arg(text)));
+    }
+
+    // 展开一个之后再检查：指示符要跟着翻转。
+    QTreeWidgetItem *node = tree->topLevelItem(0);
+    node->setExpanded(true);
+    QVERIFY2(node->text(0).startsWith(QStringLiteral("▾")),
+             qPrintable(QStringLiteral("展开后应当是 ▾，实际：%1").arg(node->text(0))));
+    node->setExpanded(false);
+    QVERIFY2(node->text(0).startsWith(QStringLiteral("▸")),
+             qPrintable(QStringLiteral("折叠后应当是 ▸，实际：%1").arg(node->text(0))));
 }
 
 QTEST_MAIN(TestUiFlow)

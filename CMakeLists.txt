@@ -55,10 +55,8 @@ file(
   "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/*.h"
 )
 
-# ── 核心库 ──────────────────────────────────────────────────────────────────
-# 业务逻辑（模型、Agent、工具、存储、UI 组件）全部放进静态库，
-# 可执行文件只保留 main()，这样测试可以直接链接核心库而不启动 GUI。
-add_library(zcode_lib STATIC ${ZCODE_SOURCES} ${ZCODE_HEADERS})
+# ── 核心目标 ────────────────────────────────────────────────────────────────
+add_library(zcode_lib OBJECT ${ZCODE_SOURCES} ${ZCODE_HEADERS})
 
 target_include_directories(zcode_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 

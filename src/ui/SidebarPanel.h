@@ -19,9 +19,14 @@
 
 class QLabel;
 class QListWidget;
+class QTreeWidgetItem;
 class QListWidgetItem;
 class QPushButton;
 class QResizeEvent;
+
+#include <QSet>
+
+#include <QTreeWidget>
 
 namespace zcode::ui {
 
@@ -33,21 +38,32 @@ public:
     ~SidebarPanel() override;
 
     void setWorkspace(const Workspace &workspace);
+    /// 重建顶层的工作区节点。`paths` 里的顺序就是树的顺序。
+    void setWorkspaces(const QStringList &paths);
+    /// 设置**当前工作区**的会话（树的子节点）。
     void setSessions(const QList<SessionSummary> &sessions);
+    /// 设置任意工作区的会话。展开一个非当前工作区时由 MainWindow 调用。
+    void setWorkspaceSessions(const QString &workspacePath,
+                              const QList<SessionSummary> &sessions);
+    /// 展开工作区节点；子节点还没加载时发出 workspaceExpandRequested。
+    void onWorkspaceExpanded(QTreeWidgetItem *item);
+    /// 恢复这批工作区的展开状态（启动时用）。
+    /// 展开会触发 workspaceExpandRequested，从而按需加载它们的会话。
+    void setExpandedWorkspaces(const QStringList &paths);
     void setActiveSession(const Id &sessionId);
     /// 就地更新一条会话的摘要（运行中标题/状态会变），不存在则插入到顶部。
     void upsertSession(const SessionSummary &summary);
     /// 选中当前项对应的会话 id；无选中返回空。
     Id activeSessionId() const;
+    /// 某个会话属于哪个工作区。MainWindow 用它决定"要不要先切工作区"。
+    QString workspacePathForSession(const Id &sessionId) const;
+    /// 当前展开的工作区集合（重建树时用来恢复展开状态）。
+    QSet<QString> expandedWorkspaces() const;
+    /// 某个工作区的会话节点是否已经加载过。
+    bool workspaceLoaded(const QString &path) const { return loadedWorkspaces_.contains(path); }
 
     /// 设置最近工作区列表（用于切换菜单中的快捷项）。
     void setRecentWorkspaces(const QStringList &paths);
-
-protected:
-    /// 侧边栏宽度变化时重新省略工作区路径。
-    void resizeEvent(QResizeEvent *event) override;
-    /// 让路径标签与工作区按钮一样可点。
-    bool eventFilter(QObject *watched, QEvent *event) override;
 
 signals:
     void newSessionRequested();
@@ -61,6 +77,13 @@ signals:
     void workspacePurgeRequested(const QString &path);
 
     void workspaceRecentRequested(const QString &path);
+    /// 某个工作区的展开/折叠状态变了。调用方据此持久化。
+    void workspaceExpansionChanged(const QString &path, bool expanded);
+    /// 在某个工作区里新建会话（工作区行上的 "+"）。
+    /// 带上路径而不是用"当前工作区"：入口在树上的每一行，用户点的是**那一行**。
+    void newSessionRequestedInWorkspace(const QString &path);
+    /// 工作区节点被展开且子节点尚未加载。
+    void workspaceExpandRequested(const QString &path);
     void sessionDeleteRequested(const zcode::Id &sessionId);
     void settingsRequested();
 
@@ -68,24 +91,30 @@ private:
     void buildUi();
     void applyTheme();
     void refreshEmptyState();
-    /// 弹出工作区切换菜单（按钮点击与路径标签点击共用）。
-    void showWorkspaceMenu();
-    /// 按当前标签宽度重新计算路径的省略显示。
-    void updateWorkspacePathLabel();
-    QListWidgetItem *makeItem(const SessionSummary &summary) const;
-    /// 从 item 上取会话 id。
-    static Id itemSessionId(const QListWidgetItem *item);
+    /// 建一个会话子节点。
+    QTreeWidgetItem *makeSessionItem(const SessionSummary &summary) const;
+    /// 刷新工作区节点的文本（含展开指示符）。
+    void updateWorkspaceItemText(QTreeWidgetItem *item);
+    /// 建/取一个工作区顶层节点。
+    QTreeWidgetItem *ensureWorkspaceItem(const QString &path);
+    /// 从 item 上取会话 id（非会话节点返回空）。
+    static Id itemSessionId(const QTreeWidgetItem *item);
+    /// 该项或其祖先的工作区路径。
+    QString workspacePathOf(const QTreeWidgetItem *item) const;
 
     Workspace workspace_;
     QList<SessionSummary> sessions_;
 
-    QLabel *workspacePathLabel_ = nullptr;
-    QPushButton *workspaceButton_ = nullptr;
-    QPushButton *newSessionButton_ = nullptr;
-    QListWidget *sessionList_ = nullptr;
+    /// 顶部按钮：选目录并加进工作区列表（**不是**新建会话）。
+    QPushButton *newWorkspaceButton_ = nullptr;
+    QTreeWidget *sessionTree_ = nullptr;
     QLabel *emptyHint_ = nullptr;
     QPushButton *settingsButton_ = nullptr;
-    QHash<Id, QListWidgetItem *> itemsById_;
+    QHash<Id, QTreeWidgetItem *> itemsById_;
+    /// 工作区路径 → 顶层节点。
+    QHash<QString, QTreeWidgetItem *> workspaceItems_;
+    /// 已加载过子节点的工作区。
+    QSet<QString> loadedWorkspaces_;
     bool updatingSelection_ = false;
     /// 最近工作区（由 MainWindow 从设置同步过来），用于切换菜单。
     QStringList recentWorkspaces_;

@@ -202,10 +202,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
 
     // ── 工作区 ──────────────────────────────────────────────────────────────
     workspace_.path = settings_.lastWorkspace;
-    if (workspace_.path.isEmpty() || !QDir(workspace_.path).exists()) {
-        // 首次启动没有历史工作区：用当前目录作为合理默认，避免一上来就是空白。
-        workspace_.path = QDir::currentPath();
+    if (!workspace_.path.isEmpty() && !QDir(workspace_.path).exists()) {
+        // 目录已被删掉/移走：不保留一个不存在的工作区。
+        qCWarning(log) << "上次的工作区目录已不存在，回退到无工作区:" << workspace_.path;
+        workspace_.path.clear();
     }
+    // 没有任何工作区时**不**用当前目录兜底：那会让"移除最后一个工作区"
+    // 在重启后复活。停在无工作区状态，由界面引导用户去打开一个目录
+    //（首次运行也一样——提示语已经说清了下一步该做什么）。
 
     buildUi();
     buildMenus();
@@ -213,8 +217,50 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     applyTheme();
     applySettingsToUi();
 
+    // 启动时的工作区也要进列表：否则它只以"当前工作区"的身份出现在树上，
+    // 一旦切到别的目录，它就从树上消失了——用户会以为工作区被删了。
+    if (!workspace_.path.isEmpty() && !settings_.recentWorkspaces.contains(workspace_.path)) {
+        settings_.recentWorkspaces.prepend(workspace_.path);
+        saveSettings();
+    }
+
+    // 清掉历史遗留的孤儿记录：早先版本移除工作区时没有清理这些表，
+    // 于是 settings.json 里可能还留着已经不存在的工作区。启动时统一对账一次。
+    {
+        const QStringList known = settings_.recentWorkspaces;
+        int pruned = 0;
+        for (auto it = settings_.workspaceLastModel.begin();
+             it != settings_.workspaceLastModel.end();) {
+            if (!known.contains(it.key())) {
+                it = settings_.workspaceLastModel.erase(it);
+                ++pruned;
+            } else {
+                ++it;
+            }
+        }
+        const int before = settings_.expandedWorkspaces.size();
+        for (const QString &path : std::as_const(settings_.expandedWorkspaces)) {
+            if (!known.contains(path)) {
+                settings_.expandedWorkspaces.removeAll(path);
+            }
+        }
+        pruned += before - settings_.expandedWorkspaces.size();
+        if (pruned > 0) {
+            qCInfo(log) << "已清理不再存在的工作区配置; 条数=" << pruned;
+            saveSettings();
+        }
+    }
+
+
     sidebar_->setWorkspace(workspace_);
     sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
+    // 恢复上次退出时的展开状态。没有记录时（首次运行）只展开当前工作区——
+    // 全部展开会在启动时把每个工作区的会话都查一遍，最近列表长的时候会拖慢启动。
+    if (settings_.expandedWorkspaces.isEmpty()) {
+        sidebar_->setExpandedWorkspaces({workspace_.path});
+    } else {
+        sidebar_->setExpandedWorkspaces(settings_.expandedWorkspaces);
+    }
     if (store_.isOpen()) {
         loadWorkspaceSessions();
     }
@@ -267,7 +313,9 @@ void MainWindow::buildUi() {
     splitter_->addWidget(conversation_);
     splitter_->setStretchFactor(0, 0);
     splitter_->setStretchFactor(1, 1);
-    splitter_->setSizes({260, 1020});
+    // 从 260 加宽到 300：树形结构有缩进，还要留出右侧的 "+" 列，
+    // 260 的时候正文只剩 190px，两行的会话条目第二行几乎整行被省略成"…"。
+    splitter_->setSizes({300, 980});
     rootLayout->addWidget(splitter_, 1);
 
     // ── 输入区 ──────────────────────────────────────────────────────────────
@@ -515,7 +563,43 @@ void MainWindow::wireRuntime() {
 
     connect(sidebar_, &SidebarPanel::newSessionRequested, this,
             &MainWindow::onNewSessionRequested);
+    // 工作区行上的 "+"：在那个工作区里新建会话。不在当前工作区就先切过去，
+    // 否则新会话会建到别处——用户点的是那一行，期望落点也在那一行。
+    // 展开状态变化就落盘：这是"下次打开还保持原样"的唯一依据。
+    // 只在内存里记的话，用户每次重启都要重新展开一遍。
+    connect(sidebar_, &SidebarPanel::workspaceExpansionChanged, this,
+            [this](const QString &path, bool expanded) {
+                if (path.isEmpty()) {
+                    return;
+                }
+                settings_.expandedWorkspaces.removeAll(path);
+                if (expanded) {
+                    settings_.expandedWorkspaces.append(path);
+                }
+                saveSettings();
+            });
+    connect(sidebar_, &SidebarPanel::newSessionRequestedInWorkspace, this,
+            [this](const QString &path) {
+                if (!path.isEmpty() && QDir(path) != QDir(workspace_.path)) {
+                    onOpenWorkspacePath(path);
+                    // onOpenWorkspacePath 内部会在没有可用会话时新建一个，
+                    // 所以这里不用再建一次。
+                    return;
+                }
+                onNewSessionRequested();
+            });
     connect(sidebar_, &SidebarPanel::sessionSelected, this, &MainWindow::onSessionSelected);
+    // 展开一个还没加载过的工作区时，才去库里取它的会话——启动时不查，
+    // 否则最近工作区多的时候会拖慢启动。
+    connect(sidebar_, &SidebarPanel::workspaceExpandRequested, this,
+            [this](const QString &path) {
+                if (!store_.isOpen()) {
+                    return;
+                }
+                Workspace workspace;
+                workspace.path = path;
+                sidebar_->setWorkspaceSessions(path, store_.listSessions(workspace.key()));
+            });
     connect(sidebar_, &SidebarPanel::sessionDeleteRequested, this,
             &MainWindow::onSessionDeleteRequested);
     connect(sidebar_, &SidebarPanel::workspaceChangeRequested, this,
@@ -685,6 +769,11 @@ void MainWindow::onReasoningLevelChanged(int index) {
 }
 
 void MainWindow::loadWorkspaceSessions() {
+    if (!workspace_.isValid()) {
+        // 同上：空 key 会返回全部会话，绝不能拿它当"当前工作区没有会话"。
+        sidebar_->setSessions({});
+        return;
+    }
     const QList<SessionSummary> sessions = store_.listSessions(workspace_.key());
     sidebar_->setSessions(sessions);
 }
@@ -771,6 +860,12 @@ ModelSelection MainWindow::effectiveModelSelection() const {
 }
 
 void MainWindow::openSessionOrCreate() {
+    if (!workspace_.isValid()) {
+        // 没有工作区就没有会话可言。**不要**调用 listSessions("")——
+        // 空 key 的语义是"不过滤"，会返回**所有**工作区的会话。
+        sidebar_->setSessions({});
+        return;
+    }
     // 优先恢复最近一次会话；没有就新建。
     const QList<SessionSummary> sessions = store_.listSessions(workspace_.key(), 1);
     if (!sessions.isEmpty()) {
@@ -800,8 +895,9 @@ void MainWindow::onNewSessionRequested() {
     }
 
     if (!workspace_.isValid()) {
-        QMessageBox::information(this, QStringLiteral("需要工作区"),
-                                 QStringLiteral("请先选择一个工作区目录。"));
+        // ⚠ 用状态栏提示而不是模态框：没有工作区是一个**合法状态**，
+        // 而模态框会让任何走到这里的路径都停下来等人点确定（实测把测试卡死）。
+        setStatusMessage(QStringLiteral("还没有工作区：先用「打开工作区…」选择一个目录。"));
         return;
     }
 
@@ -845,6 +941,14 @@ void MainWindow::onSessionSelected(const Id &sessionId) {
     }
     if (runtime_.isRunning()) {
         runtime_.abort();
+    }
+
+    // 树上的会话可能属于**另一个**工作区。先切过去再打开，否则会话会被
+    // 载入到不匹配的工作区上下文里（工具的工作目录、会话列表都是错的）。
+    const QString owner = sidebar_->workspacePathForSession(sessionId);
+    if (!owner.isEmpty() && QDir(owner) != QDir(workspace_.path)) {
+        qCInfo(log) << "从树里打开其它工作区的会话，先切换工作区;" << owner;
+        openWorkspacePath(owner, false);  // 只是切过去看，不写回列表
     }
 
     // ⚠ 必须先清空视图，再让 runtime 载入。
@@ -911,18 +1015,84 @@ void MainWindow::onSessionDeleteRequested(const Id &sessionId) {
     }
 }
 
+void MainWindow::forgetWorkspaceRecords(const QString &path) {
+    // 工作区被移除后，它的**按工作区索引**的配置要一起清掉，否则 settings.json
+    // 会长期堆积已经不存在的工作区记录（用户会看到 workspaceLastModel 里还有
+    // 一个已经删掉的工作区）。本地工作区的身份 key 就是路径，与
+    // rememberModelForWorkspace / listSessions 的口径一致。
+    Workspace target;
+    target.path = QDir(path).absolutePath();
+    const QString key = target.key();
+
+    settings_.workspaceLastModel.remove(key);
+    settings_.expandedWorkspaces.removeAll(key);
+    settings_.expandedWorkspaces.removeAll(path);
+    qCDebug(log) << "已清理工作区记录:" << key;
+}
+
+
 void MainWindow::onWorkspaceRemoveRequested(const QString &path) {
     // 只动列表，不动数据。工作区目录与它的会话都原样保留，
     // 下次打开该目录时会重新出现在列表里。
+    const bool isCurrent = QDir(path) == QDir(workspace_.path);
     const int removed = settings_.recentWorkspaces.removeAll(path);
-    if (removed == 0) {
-        setStatusMessage(QStringLiteral("该工作区不在最近列表里。"));
+
+    if (!isCurrent) {
+        if (removed == 0) {
+            setStatusMessage(QStringLiteral("该工作区不在列表里。"));
+            return;
+        }
+        forgetWorkspaceRecords(path);
+        saveSettings();
+        sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
+        qCInfo(log) << "已从最近工作区移除:" << path;
+        setStatusMessage(QStringLiteral("已从列表移除：%1（会话与文件都还在）").arg(path));
         return;
     }
+
+    // ── 移除的是**当前**工作区 ──────────────────────────────────────────────
+    // 这里以前是静默无效的：列表里删掉了，但 SidebarPanel::setRecentWorkspaces
+    // 会把"当前工作区"强制补回树上，界面上看不出任何变化；重启后启动逻辑又把
+    // 它写回列表——于是当前工作区永远删不掉。
+    if (settings_.recentWorkspaces.isEmpty()) {
+        // 最后一个工作区也允许移除：应用进入**无工作区**状态。
+        //
+        // 这是一个被完整支持的状态，不是"半坏"：会话与对话流被收干净、
+        // workspace_ 清空、lastWorkspace 清空，发送按钮由 refreshRunState()
+        // 自动禁用（它要求 workspace_.isValid()），界面提示用户去打开一个目录。
+        // 没有工作区归属的会话不会被写进会话表，也不会在树上建出空节点。
+        qCInfo(log) << "移除最后一个工作区，进入无工作区状态:" << path;
+        if (runtime_.isRunning()) {
+            runtime_.abort();
+        }
+        runtime_.closeSession();
+        conversation_->clear();
+        activeSessionId_.clear();
+        workspace_ = Workspace{};
+        forgetWorkspaceRecords(path);
+        settings_.lastWorkspace.clear();
+        saveSettings();
+
+        sidebar_->setWorkspace(workspace_);
+        sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
+        applySettingsToUi();
+        refreshRunState();
+        setStatusMessage(QStringLiteral("已移除最后一个工作区。用「打开工作区…」选择目录即可继续。"));
+        return;
+    }
+
+    // 还有别的工作区：切到第一个，再把它从列表里去掉。这样"移除"是真的生效。
+    const QString next = settings_.recentWorkspaces.first();
+    qCInfo(log) << "移除当前工作区，先切到:" << next << "再移除" << path;
+    forgetWorkspaceRecords(path);
     saveSettings();
-    sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
-    qCInfo(log) << "已从最近工作区移除:" << path;
-    setStatusMessage(QStringLiteral("已从最近列表移除：%1（会话与文件都还在）").arg(path));
+    onOpenWorkspacePath(next);
+    // onOpenWorkspacePath 会按新工作区重写列表；被移除的那个不该被加回来。
+    if (settings_.recentWorkspaces.removeAll(path) > 0) {
+        saveSettings();
+        sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
+    }
+    setStatusMessage(QStringLiteral("已从列表移除：%1（工作区文件未被改动）").arg(path));
 }
 
 void MainWindow::onWorkspacePurgeRequested(const QString &path) {
@@ -990,6 +1160,10 @@ void MainWindow::onWorkspaceChangeRequested() {
 }
 
 void MainWindow::onOpenWorkspacePath(const QString &path) {
+    openWorkspacePath(path, true);
+}
+
+void MainWindow::openWorkspacePath(const QString &path, bool remember) {
     if (path.isEmpty() || !QDir(path).exists()) {
         setStatusMessage(QStringLiteral("目录不存在：") + path);
         return;
@@ -1001,11 +1175,20 @@ void MainWindow::onOpenWorkspacePath(const QString &path) {
     workspace_.path = QDir(path).absolutePath();
     workspace_.identity.clear();
     settings_.lastWorkspace = workspace_.path;
-    settings_.recentWorkspaces.removeAll(workspace_.path);
-    settings_.recentWorkspaces.prepend(workspace_.path);
-    // 最近工作区列表要有限，否则菜单会无限增长。
-    while (settings_.recentWorkspaces.size() > 12) {
-        settings_.recentWorkspaces.removeLast();
+    // ⚠ **只有新加入的工作区**才放到最前；已经在列表里的保持原位。
+    //
+    // 这里原来是"无条件 removeAll + prepend"（最近使用优先）。那在还顶部有
+    // 切换菜单时是合理的，但树上显示的**就是**这个列表的顺序——于是每次点会话
+    // 切到另一个工作区，那个工作区就被提到最前，用户正在点的条目会在眼皮底下
+    // 跳走。切换菜单删掉之后，"最近优先"没有任何消费者，只剩这个副作用。
+    // ⚠ 只有"用户显式打开"才写回列表。从树里点开一个会话时传 remember=false：
+    // 那个工作区可能正是用户刚从列表里移除的，写回等于让它复活。
+    if (remember && !settings_.recentWorkspaces.contains(workspace_.path)) {
+        settings_.recentWorkspaces.prepend(workspace_.path);
+        // 列表要有上限，否则工作区会无限增长。
+        while (settings_.recentWorkspaces.size() > 12) {
+            settings_.recentWorkspaces.removeLast();
+        }
     }
     saveSettings();
 

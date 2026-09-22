@@ -64,6 +64,12 @@ struct AppSettings {
     /// MCP 服务器列表。见 src/mcp/McpProtocol.h。
     QList<zcode::mcp::ServerConfig> mcpServers;
 
+    /// 上一次退出时**处于展开状态**的工作区。
+    ///
+    /// 不持久化它的话，每次启动只有当前工作区是展开的——用户展开过的其它
+    /// 工作区全被收起来，看起来就像"只有一个工作区是打开的"。
+    QStringList expandedWorkspaces;
+
     /// Skills 搜索目录。**为空表示用内置默认**（用户级 + 项目级）。
     /// 非空时只扫这些目录——"我删掉了默认目录"和"我没配过"是两种意图，
     /// 用一个空列表区分不开，所以非空即覆盖。

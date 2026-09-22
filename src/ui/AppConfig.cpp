@@ -156,6 +156,8 @@ QJsonObject AppSettings::toJson() const {
         servers.append(item);
     }
     result.insert(QStringLiteral("mcpServers"), servers);
+    result.insert(QStringLiteral("expandedWorkspaces"),
+                  QJsonArray::fromStringList(expandedWorkspaces));
     result.insert(QStringLiteral("skillDirectories"),
                   QJsonArray::fromStringList(skillDirectories));
     return result;
@@ -212,6 +214,13 @@ AppSettings AppSettings::fromJson(const QJsonObject &json) {
     settings.persistSessions = json::boolean(json, QStringLiteral("persistSessions"), true);
     settings.generateSessionTitles =
         json::boolean(json, QStringLiteral("generateSessionTitles"), true);
+
+    for (const QJsonValue &entry : json::array(json, QStringLiteral("expandedWorkspaces"))) {
+        const QString path = entry.toString().trimmed();
+        if (!path.isEmpty()) {
+            settings.expandedWorkspaces.append(path);
+        }
+    }
 
     for (const QJsonValue &entry : json::array(json, QStringLiteral("skillDirectories"))) {
         const QString path = entry.toString().trimmed();
