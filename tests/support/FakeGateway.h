@@ -131,10 +131,16 @@ inline QByteArray jsonStringEscape(const QByteArray &raw) {
 }
 
 /// 纯文本流式响应。
+/// 纯文本流式响应。
+///
+/// 契约（与 toolCallResponse / multiToolCallResponse 一致）：传入**原始文本**，
+/// 由本函数负责转义。之前是原样拼接，于是文本里出现引号或换行就会破坏 SSE 帧，
+/// 表现为"请求发出去了但流里一个字符都没有"——排查起来毫无线索。
 inline QByteArray textResponse(const QByteArray &text) {
     QByteArray body;
     body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
-    body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + text + "\"}}]}\n\n";
+    body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + jsonStringEscape(text) +
+            "\"}}]}\n\n";
     body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
     body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
             "\"total_tokens\":120}}\n\n";
@@ -150,7 +156,8 @@ inline QByteArray textResponseWithCache(const QByteArray &text, int promptTokens
                                         int cachedTokens, int completionTokens) {
     QByteArray body;
     body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
-    body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + text + "\"}}]}\n\n";
+    body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + jsonStringEscape(text) +
+            "\"}}]}\n\n";
     body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
     body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":" +
             QByteArray::number(promptTokens) + ",\"completion_tokens\":" +

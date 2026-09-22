@@ -142,6 +142,10 @@ void TestUiFlow::initTestCase() {
     settings.insert(QStringLiteral("language"), QStringLiteral("zh-CN"));
     settings.insert(QStringLiteral("providers"), QJsonArray{provider});
     settings.insert(QStringLiteral("lastModel"), QStringLiteral("smoke/smoke-model"));
+    // 关掉模型生成标题：它会额外发一次模型请求，吃掉假网关队列里的响应，
+    // 让既有断言变得不确定（实测直接打乱了图片附件那条测试）。
+    // 标题生成本身由 sessionTitleIsGeneratedByModel 单独覆盖。
+    settings.insert(QStringLiteral("generateSessionTitles"), false);
 
     // 声明该模型的能力覆盖：上下文窗口与思考档位。用于验证
     // ① 工具条上的思考等级选择器出现并选中默认档位
@@ -846,6 +850,15 @@ void TestUiFlow::attachesImageAndSendsIt() {
     source.fill(QColor(200, 60, 60));
     const QString imagePath = imageDir.filePath(QStringLiteral("probe.png"));
     QVERIFY2(source.save(imagePath, "PNG"), "测试图片应当能写入磁盘");
+
+    // 探针：确认设置真的读到了（否则标题请求会吃掉网关响应，
+    // 下面几条断言都会以看不懂的方式失败）。
+    {
+        AppSettings probe;
+        QVERIFY(AppConfig::load(&probe));
+        QVERIFY2(!probe.generateSessionTitles,
+                 "本测试要求 generateSessionTitles=false");
+    }
 
     MainWindow window;
     window.show();

@@ -1042,6 +1042,11 @@ void MainWindow::onTurnFinished(TurnResult result) {
         case TurnResult::Success:
             // 正常结束不打扰用户，状态栏一句话足够。
             setStatusMessage(QStringLiteral("完成。"));
+            // 会话有内容之后才值得生成标题（空会话没有素材）。
+            // 幂等由运行时的 titleGenerated 保证，这里只管"要不要发起"。
+            if (settings_.generateSessionTitles) {
+                runtime_.requestTitleFromModel();
+            }
             break;
         case TurnResult::Interrupted:
             setStatusMessage(QStringLiteral("已中断。"));

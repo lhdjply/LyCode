@@ -54,6 +54,11 @@ struct AppSettings {
     SessionMode defaultSessionMode = SessionMode::Build;
     /// 是否在会话结束后自动落盘（目前恒为真，保留开关以便将来支持"仅内存会话"）。
     bool persistSessions = true;
+    /// 用模型为会话生成标题。
+    ///
+    /// 默认开启，但**可以关**：它意味着每个新会话多一次模型调用。
+    /// 关掉后标题退回"取首条输入的前 40 字符"——无需联网、零成本。
+    bool generateSessionTitles = true;
 
     /// 取指定模型的覆盖配置；无记录时返回空覆盖（不是错误）。
     ModelOptionOverride modelOverride(const QString &providerId, const QString &modelId) const;

@@ -416,6 +416,9 @@ SessionKind sessionKindFromToken(const QString &value);
 struct Session {
     Id id;
     QString title;
+    /// 标题是否由模型生成（而不是取首条输入的前若干字符）。
+    /// 用它做幂等：只有 false 时才值得再花一次模型调用去生成。
+    bool titleGenerated = false;
     Workspace workspace;
 
     /// 父会话 id；非空表示这是派生会话（fork / 子 Agent）。

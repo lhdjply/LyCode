@@ -1268,11 +1268,20 @@ QWidget *SettingsDialog::buildSessionPage() {
     persistSessionsCheck_ = new QCheckBox(QStringLiteral("持久化会话"), page);
     persistSessionsCheck_->setObjectName(QStringLiteral("persistSessionsCheck"));
     persistSessionsCheck_->setChecked(settings_.persistSessions);
+
+    // 这个开关值得单独给出来：模型生成标题意味着**每个新会话多一次模型调用**。
+    // 不想花这次调用的用户可以关掉，标题会退回"取首条输入的前 40 字符"。
+    titleGenerationCheck_ = new QCheckBox(QStringLiteral("用模型生成会话标题"), page);
+    titleGenerationCheck_->setObjectName(QStringLiteral("titleGenerationCheck"));
+    titleGenerationCheck_->setChecked(settings_.generateSessionTitles);
+    titleGenerationCheck_->setToolTip(
+        QStringLiteral("关闭后标题取首条输入的前 40 字符，不额外消耗模型调用"));
     persistSessionsCheck_->setToolTip(
         QStringLiteral("关闭后新建会话仅存在于内存中（当前版本仍会落盘，保留开关以便后续演进）"));
 
     addFormField(layout, QStringLiteral("默认会话模式"), sessionModeCombo_, page);
     layout->addWidget(persistSessionsCheck_);
+    layout->addWidget(titleGenerationCheck_);
 
     auto *separator = new QFrame(page);
     separator->setProperty("role", "separator");
@@ -1311,6 +1320,10 @@ QWidget *SettingsDialog::buildSessionPage() {
     connect(persistSessionsCheck_, &QCheckBox::toggled, this, [this](bool checked) {
         settings_.persistSessions = checked;
         qCDebug(log) << "持久化会话:" << checked;
+    });
+    connect(titleGenerationCheck_, &QCheckBox::toggled, this, [this](bool checked) {
+        settings_.generateSessionTitles = checked;
+        qCDebug(log) << "模型生成会话标题:" << checked;
     });
     connect(clearRecentButton_, &QPushButton::clicked, this,
             [this]() { clearRecentWorkspaces(); });

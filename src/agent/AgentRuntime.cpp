@@ -10,6 +10,7 @@
 #include "tools/TodoStore.h"
 
 #include <QElapsedTimer>
+#include <memory>
 #include <QLoggingCategory>
 #include <QTimer>
 
@@ -1147,6 +1148,168 @@ void AgentRuntime::finishToolCall(const QString &callId, const ToolResult &resul
     // 用 singleShot 而不是直接递归：纯内存工具（TodoWrite 等）会同步回调，
     // 直接递归会让 N 组调用产生 N 层栈帧。
     QTimer::singleShot(0, this, [this]() { runToolQueue(); });
+}
+
+QString AgentRuntime::sanitizeTitle(const QString &raw) {
+    QString text = raw.trimmed();
+    if (text.isEmpty()) {
+        return {};
+    }
+
+    // 只取第一行：模型经常先来一句"标题：xxx"再补充说明。
+    const qsizetype newline = text.indexOf(QLatin1Char('\n'));
+    if (newline > 0) {
+        text = text.left(newline).trimmed();
+    }
+
+    // 去掉常见的前缀、markdown 符号与包裹符号。
+    // ⚠ 必须**循环到稳定**：这些符号是嵌套的（`**"标题"**`），
+    // 只过一遍的话剥掉外层 `**` 后露出的引号就没有机会再被剥掉。
+    static const QStringList prefixes = {
+        QStringLiteral("标题："), QStringLiteral("标题:"), QStringLiteral("Title:"),
+        QStringLiteral("title:"), QStringLiteral("会话标题："), QStringLiteral("会话标题:"),
+    };
+    const auto stripOneLayer = [](QString &value) {
+        const QString before = value;
+        for (const QString &prefix : prefixes) {
+            if (value.startsWith(prefix, Qt::CaseInsensitive)) {
+                value = value.mid(prefix.size()).trimmed();
+            }
+        }
+        // markdown 标题 / 列表符号
+        while (value.startsWith(QLatin1Char('#')) || value.startsWith(QLatin1Char('-')) ||
+               value.startsWith(QLatin1Char('*'))) {
+            value = value.mid(1).trimmed();
+        }
+        while (value.endsWith(QLatin1Char('*')) || value.endsWith(QLatin1Char('#')) ||
+               value.endsWith(QLatin1Char('-'))) {
+            value.chop(1);
+            value = value.trimmed();
+        }
+        // 成对包裹符号。⚠ 中文符号必须用 QChar(码点) 而不是 QLatin1Char：
+        // 「」【】在 UTF-8 里是多字节，塞进 QLatin1Char 会被截断成乱码，
+        // 比较永远不成立（编译期只有一条 -Wmultichar 警告，很容易漏掉）。
+        static const QList<QPair<QChar, QChar>> wrappers = {
+            {QChar('"'), QChar('"')},
+            {QChar('\''), QChar('\'')},
+            {QChar('`'), QChar('`')},
+            {QChar(0x300C), QChar(0x300D)},  // 「」
+            {QChar(0x3010), QChar(0x3011)},  // 【】
+        };
+        for (const auto &pair : wrappers) {
+            if (value.size() >= 2 && value.startsWith(pair.first) &&
+                value.endsWith(pair.second)) {
+                value = value.mid(1, value.size() - 2).trimmed();
+                break;
+            }
+        }
+        return value != before;
+    };
+    while (stripOneLayer(text)) {
+        // 反复剥到不动为止：嵌套符号一层层露出来。
+    }
+    // 与回退标题同一个上限，避免侧边栏被一行长文本撑开。
+    constexpr int kMaxTitleChars = 40;
+    if (text.size() > kMaxTitleChars) {
+        text = text.left(kMaxTitleChars).trimmed();
+        text += QStringLiteral("…");
+    }
+    // 全是标点的"标题"没有信息量，宁可保留回退标题。
+    if (text.size() < 2) {
+        return {};
+    }
+    return text;
+}
+
+void AgentRuntime::applyGeneratedTitle(const QString &raw) {
+    const QString title = sanitizeTitle(raw);
+    if (title.isEmpty()) {
+        qCWarning(log) << "模型返回的标题不可用，保留原标题; raw="
+                       << json::truncate(raw.trimmed(), 120);
+        return;
+    }
+    if (title == session_.title) {
+        return;  // 没有变化就不打扰 UI
+    }
+
+    session_.title = title;
+    session_.titleGenerated = true;
+    session_.updatedAtMs = nowMs();
+    persistSession();
+    qCInfo(log) << "会话标题已由模型生成; session=" << session_.id << "title=" << title;
+    emit sessionChanged(session_);
+    emit titleGenerated(session_.id, title);
+}
+
+void AgentRuntime::requestTitleFromModel() {
+    if (providers_ == nullptr || !model_.isValid() || !hasSession()) {
+        return;
+    }
+    if (titleGenerationInFlight_ || session_.titleGenerated) {
+        return;  // 幂等：不重复花这次调用
+    }
+
+    // 素材：首条**用户可见**的消息正文。modelOnly 的合成轮（工具结果、
+    // 后台任务通知）不是用户说的话，拿它当素材会生成出莫名其妙的标题。
+    QString excerpt;
+    for (const Message &message : std::as_const(messages_)) {
+        if (message.role != MessageRole::User || message.modelOnly) {
+            continue;
+        }
+        excerpt = message.plainText().trimmed();
+        if (!excerpt.isEmpty()) {
+            break;
+        }
+    }
+    if (excerpt.isEmpty()) {
+        return;
+    }
+
+    ModelProvider *provider = providers_->resolve(model_);
+    if (provider == nullptr) {
+        return;
+    }
+
+    ModelRequest request;
+    request.modelId = model_.modelId;
+    request.systemPrompt = QStringLiteral(
+        "You name chat sessions. Reply with a title only — no quotes, no prefix, no "
+        "punctuation at the end, no explanation. Use the same language as the user's "
+        "message. Keep it under 40 characters and make it specific to the task "
+        "(mention the file, feature, or error involved).");
+    request.maxOutputTokens = 64;   // 标题很短，给多了只会让它开始解释
+    request.temperature = 0.3;      // 要稳定，不要创意
+    // 刻意不给工具：这是纯文本改写任务，给工具只会让它试图去读文件。
+    request.tools.clear();
+
+    Message user;
+    user.id = newMessageId();
+    user.sessionId = session_.id;
+    user.role = MessageRole::User;
+    user.status = MessageStatus::Complete;
+    user.parts.append(Part::makeText(excerpt.left(2000)));
+    request.messages.append(user);
+
+    ModelStream *stream = provider->stream(request);
+    if (stream == nullptr) {
+        return;
+    }
+
+    titleGenerationInFlight_ = true;
+    auto collected = std::make_shared<QString>();
+    connect(stream, &ModelStream::event, this,
+            [collected](const StreamEvent &event) {
+                if (event.kind == StreamEventKind::TextDelta) {
+                    *collected += event.text;
+                }
+            });
+    connect(stream, &ModelStream::finished, this, [this, stream, collected]() {
+        titleGenerationInFlight_ = false;
+        stream->deleteLater();
+        applyGeneratedTitle(*collected);
+    });
+
+    qCDebug(log) << "已请求模型生成会话标题; session=" << session_.id;
 }
 
 void AgentRuntime::drainBackgroundNotifications() {

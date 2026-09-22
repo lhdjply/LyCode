@@ -163,6 +163,7 @@ private:
     // 会话
     QComboBox *sessionModeCombo_ = nullptr;
     QCheckBox *persistSessionsCheck_ = nullptr;
+    QCheckBox *titleGenerationCheck_ = nullptr;
     QListWidget *recentList_ = nullptr;
     QLabel *recentEmptyLabel_ = nullptr;
     QPushButton *clearRecentButton_ = nullptr;

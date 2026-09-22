@@ -143,6 +143,7 @@ QJsonObject AppSettings::toJson() const {
 
     result.insert(QStringLiteral("defaultSessionMode"), toToken(defaultSessionMode));
     result.insert(QStringLiteral("persistSessions"), persistSessions);
+    result.insert(QStringLiteral("generateSessionTitles"), generateSessionTitles);
     return result;
 }
 
@@ -195,6 +196,8 @@ AppSettings AppSettings::fromJson(const QJsonObject &json) {
     settings.defaultSessionMode = sessionModeFromToken(
         json::str(json, QStringLiteral("defaultSessionMode"), QStringLiteral("build")));
     settings.persistSessions = json::boolean(json, QStringLiteral("persistSessions"), true);
+    settings.generateSessionTitles =
+        json::boolean(json, QStringLiteral("generateSessionTitles"), true);
     return settings;
 }
 

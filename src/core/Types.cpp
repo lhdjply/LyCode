@@ -926,6 +926,8 @@ Session Session::fromJson(const QJsonObject &value) {
         session.id = newSessionId();
     }
     session.title = json::str(value, QStringLiteral("title"));
+    session.titleGenerated =
+        json::boolean(value, QStringLiteral("titleGenerated"), false);
     session.workspace = Workspace::fromJson(value);
     session.parentSessionId = json::str(value, QStringLiteral("parentSessionId"));
     session.kind = sessionKindFromToken(
@@ -952,6 +954,7 @@ QJsonObject Session::toJson() const {
     QJsonObject result;
     result.insert(QStringLiteral("id"), id);
     result.insert(QStringLiteral("title"), title);
+    result.insert(QStringLiteral("titleGenerated"), titleGenerated);
     // 工作区字段摊平到同一层，与 npm 的 WorkspaceRef 形状一致。
     const QJsonObject workspaceJson = workspace.toJson();
     for (auto it = workspaceJson.constBegin(); it != workspaceJson.constEnd(); ++it) {

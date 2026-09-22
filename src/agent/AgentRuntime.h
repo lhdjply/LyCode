@@ -151,6 +151,13 @@ public:
     /// 后台任务注册表。Bash 的 run_in_background 与 TaskOutput/TaskStop 共用它。
     BackgroundTaskRegistry *backgroundTasks() const { return backgroundTasks_; }
 
+    /// 用模型为当前会话生成标题。
+    ///
+    /// 走一条**独立于主回合**的轻量请求：不给工具、限制输出长度、
+    /// 结果不进消息历史。这样标题生成既不阻塞对话，也不会污染上下文。
+    /// 幂等：已经有模型生成的标题、或正在生成时直接返回。
+    void requestTitleFromModel();
+
     /// 重新测量上下文用量并通知 UI。
     ///
     /// 外部改了会影响上下文窗口的东西之后必须调用它：用户在设置页调整
@@ -206,6 +213,8 @@ signals:
     void subagentFinished(const zcode::Id &childSessionId, bool ok);
     /// 后台任务集合发生变化（新增/结束/停止）。UI 据此刷新计数。
     void backgroundTasksChanged(int runningCount);
+    /// 模型生成的标题已应用（成功时才发）。
+    void titleGenerated(const zcode::Id &sessionId, const QString &title);
     void messageAdded(const zcode::Message &message);
     void partAppended(const zcode::Id &messageId, const zcode::Part &part);
     void partUpdated(const zcode::Id &messageId, const zcode::Part &part);
@@ -240,6 +249,11 @@ private:
     /// 用 callId 而不是下标标识调用：异步回调可能在下一轮 turn 才到达，
     /// 下标那时可能已经指向新 turn 的另一个调用。
     void finishToolCall(const QString &callId, const ToolResult &result);
+    /// 清洗模型返回的标题；不可用时返回空串。
+    static QString sanitizeTitle(const QString &raw);
+    /// 应用生成的标题（落盘并通知 UI）。
+    void applyGeneratedTitle(const QString &raw);
+
     /// 把待投递的后台任务完成通知注入上下文。
     /// 在每次模型步开始前调用：这样任务结束时如果正在跑 turn，模型能在下一步
     /// 就看到结果；如果当时空闲，则在下一次输入的首次模型步看到（与 npm 一致）。
@@ -338,6 +352,9 @@ private:
     /// 权限门可能与子代理共享，所以不能用 gate->hasPending() 判断
     /// "我是不是在等用户"——那会把别人的等待算到自己头上。
     QSet<Id> ownPendingPermissions_;
+    /// 标题生成请求是否在飞。避免首条消息后连开多个请求。
+    bool titleGenerationInFlight_ = false;
+
     /// 子代理身份（非空表示这是子代理运行时）。
     QString subagentType_;
     QString subagentDescription_;

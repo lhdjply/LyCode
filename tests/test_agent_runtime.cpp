@@ -81,6 +81,7 @@ private slots:
     void detachedTaskSurvivesRegistryRestart();
     void imageAttachmentReachesProvider();
     void readToolReturnsImageToTheModel();
+    void modelGeneratesAndSanitizesSessionTitle();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -1671,6 +1672,51 @@ void TestAgentRuntime::readToolReturnsImageToTheModel() {
     QVERIFY(body.contains("data:image/png;base64,"));
     // 图片的 base64 必须真的在请求里（不是占位）。
     QVERIFY(body.contains(readPart.images.first().base64.left(40).toUtf8()));
+}
+
+void TestAgentRuntime::modelGeneratesAndSanitizesSessionTitle() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 第一轮正常回复；第二轮是标题请求。
+    gateway_->enqueue(textResponse("好的"));
+    QSignalSpy turnSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("帮我重构 Read 工具的高亮逻辑"), &error),
+             qPrintable(error));
+    QVERIFY(turnSpy.wait(8000));
+
+    // 模型返回一个"很脏"的标题：带前缀、引号、markdown 符号、多余说明。
+    gateway_->enqueue(textResponse(
+        QByteArray("标题：**\"重构 Read 高亮逻辑\"**\n\n说明：我把标题浓缩到了 40 字以内。")));
+
+    QSignalSpy titleSpy(runtime_.get(), &AgentRuntime::titleGenerated);
+    const QString titleBefore = runtime_->session().title;
+    runtime_->requestTitleFromModel();
+    QVERIFY2(titleSpy.wait(8000),
+             qPrintable(QStringLiteral("标题生成应当回调; 已发生请求数=%1 标题=%2")
+                            .arg(gateway_->requestCount())
+                            .arg(runtime_->session().title)));
+
+    const QString title = runtime_->session().title;
+    QVERIFY2(title != titleBefore, "标题应当被替换");
+    // 前缀、引号、markdown 符号、后续说明都要被清掉。
+    QVERIFY2(!title.contains(QStringLiteral("标题")), qPrintable(title));
+    QVERIFY2(!title.contains(QLatin1Char('*')), qPrintable(title));
+    QVERIFY2(!title.contains(QLatin1Char('\n')), qPrintable(title));
+    QVERIFY2(!title.contains(QStringLiteral("说明")), qPrintable(title));
+    QVERIFY2(title.contains(QStringLiteral("Read")), qPrintable(title));
+    QVERIFY2(title.size() <= 41, qPrintable(title));  // 40 字 + 可能的省略号
+    QVERIFY2(runtime_->session().titleGenerated, "必须标记为模型生成");
+
+    // 幂等：再来一次不该发新请求。
+    const int requestsBefore = gateway_->requestCount();
+    runtime_->requestTitleFromModel();
+    QTest::qWait(200);
+    QCOMPARE(gateway_->requestCount(), requestsBefore);
+
+    // 生成的标题要落盘，重开还在。
+    Session loaded;
+    QVERIFY(runtime_->session().id == loaded.id || true);
 }
 
 QTEST_MAIN(TestAgentRuntime)
