@@ -1,6 +1,7 @@
 #include "ui/ToolCallWidget.h"
 
 #include "core/Json.h"
+#include "ui/DiffView.h"
 #include "ui/Theme.h"
 
 #include <QFontDatabase>
@@ -21,6 +22,7 @@ Q_LOGGING_CATEGORY(log, "zcode.ui.toolcall")
 /// （数据仍在 ToolPart 里，只是不一次性塞进控件，避免卡顿）。
 constexpr int kInlineOutputLimit = 200 * 1024;
 /// 代码/输出区最大高度，防止一个长输出把整个对话流挤没。
+constexpr int kDiffMaxHeight = 260;
 constexpr int kOutputMaxHeight = 260;
 
 /// 把入参渲染成可读文本：有 command 就优先展示命令本身。
@@ -139,6 +141,27 @@ void ToolCallWidget::buildUi() {
     outputView_->setMaximumHeight(kOutputMaxHeight);
     bodyLayout->addWidget(outputCaption_);
     bodyLayout->addWidget(outputView_);
+
+    // 改动补丁放在输出之前：对 Write/Edit 来说"改了什么"才是用户要看的，
+    // 那句"Wrote 3 lines"没什么信息量。
+    diffCaption_ = new QLabel(QStringLiteral("改动"));
+    diffCaption_->setFont(Theme::instance().font(FontRole::UiXs));
+    diffView_ = new DiffView;
+    diffView_->setMaximumHeight(kDiffMaxHeight);
+    diffCaption_->hide();
+    diffView_->hide();
+    bodyLayout->addWidget(diffCaption_);
+    bodyLayout->addWidget(diffView_);
+
+    // 图片单独一块：读图时"看到的那张图"比一句话摘要有用得多，
+    // 用户也需要能确认模型看的确实是这张。
+    imageStrip_ = new QWidget;
+    imageStrip_->setObjectName(QStringLiteral("toolImageStrip"));
+    imageLayout_ = new QHBoxLayout(imageStrip_);
+    imageLayout_->setContentsMargins(0, 0, 0, 0);
+    imageLayout_->setSpacing(6);
+    imageStrip_->hide();
+    bodyLayout->addWidget(imageStrip_);
 
     emptyHint_ = new QLabel;
     emptyHint_->setFont(Theme::instance().font(FontRole::UiSm));
@@ -310,6 +333,74 @@ void ToolCallWidget::refreshBodies() {
     } else {
         emptyHint_->setVisible(false);
     }
+
+    syncDiff();
+    syncImages();
+}
+
+void ToolCallWidget::syncDiff() {
+    if (diffView_ == nullptr || diffCaption_ == nullptr) {
+        return;
+    }
+    const QJsonArray hunks = json::array(part_.tool.metadata, QStringLiteral("structuredPatch"));
+    if (hunks.isEmpty()) {
+        diffView_->hide();
+        diffCaption_->hide();
+        return;
+    }
+
+    diffView_->setHunks(hunks);
+    // 头部直接给出增删行数：不展开卡片也能看出改动规模。
+    diffCaption_->setText(QStringLiteral("改动  +%1  −%2")
+                              .arg(diffView_->additions())
+                              .arg(diffView_->deletions()));
+    diffCaption_->show();
+    diffView_->show();
+}
+
+void ToolCallWidget::syncImages() {
+    if (imageStrip_ == nullptr || imageLayout_ == nullptr) {
+        return;
+    }
+    while (QLayoutItem *item = imageLayout_->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+
+    if (part_.tool.images.isEmpty()) {
+        imageStrip_->hide();
+        return;
+    }
+
+    for (const FilePart &image : part_.tool.images) {
+        QPixmap pixmap;
+        if (!image.base64.isEmpty() &&
+            pixmap.loadFromData(QByteArray::fromBase64(image.base64.toLatin1()))) {
+            auto *label = new QLabel;
+            label->setObjectName(QStringLiteral("toolImage"));
+            constexpr int kMaxEdge = 240;
+            label->setPixmap(pixmap.width() > kMaxEdge || pixmap.height() > kMaxEdge
+                                 ? pixmap.scaled(kMaxEdge, kMaxEdge, Qt::KeepAspectRatio,
+                                                 Qt::SmoothTransformation)
+                                 : pixmap);
+            label->setToolTip(QStringLiteral("%1（%2 · %3×%4）")
+                                  .arg(image.fileName.isEmpty() ? QStringLiteral("图片")
+                                                                : image.fileName,
+                                       image.mimeType)
+                                  .arg(pixmap.width())
+                                  .arg(pixmap.height()));
+            imageLayout_->addWidget(label);
+            continue;
+        }
+        // 解不出图时不要静默：至少说明"这里有张图但没能解码"。
+        auto *label = new QLabel(QStringLiteral("图片无法解码：%1").arg(image.fileName));
+        label->setFont(Theme::instance().font(FontRole::UiXs));
+        imageLayout_->addWidget(label);
+    }
+    imageLayout_->addStretch(1);
+    imageStrip_->show();
 }
 
 void ToolCallWidget::applyPart(const Part &part) {

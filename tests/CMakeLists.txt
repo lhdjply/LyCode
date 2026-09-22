@@ -19,5 +19,8 @@ zcode_add_test(test_types)
 zcode_add_test(test_permission_gate)
 zcode_add_test(test_markdown)
 zcode_add_test(test_agent_runtime)
+zcode_add_test(test_diff_view
+test_diff_view.cpp)
+
 zcode_add_test(test_ui_flow)
 zcode_add_test(test_app_config)

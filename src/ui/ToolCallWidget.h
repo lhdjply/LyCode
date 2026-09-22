@@ -20,6 +20,11 @@
 class QHBoxLayout;
 class QLabel;
 class QPlainTextEdit;
+
+namespace zcode::ui {
+class DiffView;
+}
+
 class QToolButton;
 class QVBoxLayout;
 
@@ -69,6 +74,13 @@ private:
     QLabel *outputCaption_ = nullptr;
     QPlainTextEdit *outputView_ = nullptr;
     QLabel *emptyHint_ = nullptr;
+
+    /// 改动补丁。Write/Edit 会产出 structuredPatch，用专门的视图渲染，
+    /// 而不是把它当普通输出文本塞进等宽框。无补丁时整块隐藏。
+    QLabel *diffCaption_ = nullptr;
+    DiffView *diffView_ = nullptr;
+    /// 同步补丁视图。
+    void syncDiff();
     /// 工具读到的图片（Read 读图片文件时产生）。空时整块隐藏。
     QWidget *imageStrip_ = nullptr;
     QHBoxLayout *imageLayout_ = nullptr;
