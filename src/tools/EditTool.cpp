@@ -53,7 +53,7 @@ ToolMetadata EditTool::metadata() const {
     meta.allowedInPlanMode = false;
     meta.readOnly = false;
     meta.destructive = false;
-    meta.concurrentSafe = false;
+    meta.concurrency = ToolMetadata::Concurrency::Serial;
     meta.requiresUserInteraction = false;
     meta.timeoutMs = 30000;
     meta.maxOutputBytes = kMaxOutputBytes;

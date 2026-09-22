@@ -7,7 +7,7 @@
 //   TurnMachine（相位机）                       内部 TurnPhase + advanceTo()
 //   runRegularTurnLoop                        runModelStep() ↔ runToolQueue()
 //   runModelBackedTurnStep                    单个 model step
-//   executeToolCallsForModelStep               工具队列（串行执行）
+//   executeToolCallsForModelStep               工具批次调度（组内并行、组间串行）
 //   PermissionService + broker                 PermissionGate
 //   ContextBuilder                             SystemPromptBuilder
 //   SessionStore (SQLite)                      SessionStore
@@ -148,6 +148,9 @@ public:
     /// 设为很大是为了不成为常规任务的瓶颈，只用于防御失控循环。
     static constexpr int kMaxModelStepsPerTurn = 200;
 
+    /// 同一组内并行执行的上限。与 npm 的 ToolScheduler 默认 maxConcurrency 一致。
+    static constexpr int kMaxToolConcurrency = 10;
+
 signals:
     void sessionChanged(const zcode::Session &session);
     void messageAdded(const zcode::Message &message);
@@ -170,8 +173,22 @@ private:
     void runModelStep();
     void handleStreamEvent(const StreamEvent &event);
     void finishModelStep(const QString &finishReason);
+
+    // ── 工具调度 ────────────────────────────────────────────────────────────
+    /// 把本轮的调用按并行安全性分组：组内可并行，组与组之间串行。
+    void scheduleToolBatches();
+    /// 推进到下一组；所有组跑完则收口到 afterToolQueue()。
     void runToolQueue();
+    /// 派发当前组的**全部**调用（权限请求与执行都是异步的，不在这里等待）。
+    void startToolBatch(int batchIndex);
+    /// 派发单个调用。完成时统一走 finishToolCall()。
     void executeToolAt(int index);
+    /// 单个调用终结（幂等）。本组全部终结后才推进下一组。
+    /// 用 callId 而不是下标标识调用：异步回调可能在下一轮 turn 才到达，
+    /// 下标那时可能已经指向新 turn 的另一个调用。
+    void finishToolCall(const QString &callId, const ToolResult &result);
+    /// 把尚未终结的调用标记为取消（中断或提前终止时）。
+    void cancelPendingToolCalls(const QString &reason);
     void afterToolQueue();
     void completeTurn(TurnResult result, const QString &errorMessage = {});
 
@@ -185,13 +202,25 @@ private:
     Id appendPart(Message &message, const Part &part);
     /// 更新指定消息里的 part，发信号。找不到返回 false。
     bool updatePart(Message &message, const Part &part);
-    /// 本次 turn 的全部工具调用记录（按产生顺序）。
-    struct PendingToolCall {
+    /// 本次 turn 的单个工具调用及其执行状态（按模型给出的顺序排列）。
+    struct QueuedToolCall {
         Id messageId;
         Id partId;
         QString callId;
         QString name;
         QJsonObject input;
+        /// 是否已派发（权限请求已发出）。未派发的在中断时直接记为取消。
+        bool started = false;
+        /// 是否已终结。用于保证 finishToolCall() 的幂等——
+        /// 参数校验失败、权限拒绝、工具回调都可能走到同一个收口点。
+        bool finished = false;
+    };
+
+    /// 一组可以并行执行的调用。`indices` 指向 toolQueue_。
+    struct ToolBatch {
+        QList<int> indices;
+        /// false 表示独占组（只有一个元素）：不并行安全的工具要与前后形成串行屏障。
+        bool parallel = true;
     };
 
     /// 构造模型请求。
@@ -220,8 +249,12 @@ private:
     Id currentAssistantMessageId_;
     Id currentTextPartId_;
     Id currentReasoningPartId_;
-    QList<PendingToolCall> toolQueue_;
-    int toolQueueCursor_ = 0;
+    QList<QueuedToolCall> toolQueue_;
+    QList<ToolBatch> batches_;
+    int batchCursor_ = 0;
+    /// 当前组内尚未终结的调用数。归零才推进下一组——这保证
+    /// stopTurnAfterResult 不会打断同组的兄弟调用（npm 的 batch-runner 同语义）。
+    int batchPending_ = 0;
     int modelStepCount_ = 0;
     int toolCallCount_ = 0;
     bool abortRequested_ = false;

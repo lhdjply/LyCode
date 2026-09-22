@@ -160,6 +160,51 @@ inline QByteArray toolCallResponse(const QString &toolName,
     return body;
 }
 
+/// 把一段原始文本转义成可以嵌进 JSON 字符串字面量里的形式。
+/// 用于把工具入参原样塞进 `arguments` 字段，避免手写 \\\" 转义出错。
+inline QByteArray jsonStringEscape(const QByteArray &raw) {
+    QByteArray out;
+    out.reserve(raw.size() + 8);
+    for (const char character : raw) {
+        switch (character) {
+            case '"':
+            case '\\':
+                out += '\\';
+                out += character;
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            default:
+                out += character;
+                break;
+        }
+    }
+    return out;
+}
+
+/// 一次返回**多个**工具调用。用于验证并行调度。
+/// `calls` 每项是 {工具名, 原始入参 JSON}。
+inline QByteArray multiToolCallResponse(const QList<QPair<QString, QByteArray>> &calls) {
+    QByteArray body;
+    body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
+    for (int index = 0; index < calls.size(); ++index) {
+        const QByteArray position = QByteArray::number(index);
+        const QByteArray callId = "call_" + QByteArray::number(index + 1);
+        body += "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":" + position +
+                ",\"id\":\"" + callId + "\",\"function\":{\"name\":\"" +
+                calls.at(index).first.toUtf8() + "\",\"arguments\":\"\"}}]}}]}\n\n";
+        body += "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":" + position +
+                ",\"function\":{\"arguments\":\"" +
+                jsonStringEscape(calls.at(index).second) + "\"}}]}}]}\n\n";
+    }
+    body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n";
+    body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":10,"
+            "\"total_tokens\":60}}\n\n";
+    body += "data: [DONE]\n\n";
+    return body;
+}
+
 /// 把字符串转义成可以嵌进 SSE JSON 字符串里的形式（借用 QJsonDocument）。
 inline QByteArray jsonEscape(const QString &value) {
     // 外壳前缀 `{"v":"` 是 6 个字符，后缀 `"}` 是 2 个字符。

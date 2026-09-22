@@ -181,7 +181,7 @@ ToolMetadata TodoReadTool::metadata() const {
     meta.allowedInPlanMode = true;
     meta.readOnly = true;
     meta.destructive = false;
-    meta.concurrentSafe = true;
+    meta.concurrency = ToolMetadata::Concurrency::Safe;
     meta.requiresUserInteraction = false;
     meta.timeoutMs = 30000;
     meta.maxOutputBytes = 256 * 1024;
@@ -261,7 +261,7 @@ ToolMetadata TodoWriteTool::metadata() const {
     ToolMetadata meta;
     meta.name = QStringLiteral("TodoWrite");
     // 注意：这里 readOnly = true 是**声明式语义**上的"不碰外部世界"，
-    // 但它确实写会话状态，因此 concurrentSafe = false、scope = Session。
+    // 但它确实写会话状态，因此显式声明 Serial、scope = Session。
     // 调度器与权限服务只看这些字段，不会因为名字叫 Write 就当作文件写。
     meta.description = QStringLiteral(
         "Replaces the session todo list with the given items. Use it to plan and "
@@ -272,7 +272,7 @@ ToolMetadata TodoWriteTool::metadata() const {
     meta.allowedInPlanMode = true;
     meta.readOnly = true;
     meta.destructive = false;
-    meta.concurrentSafe = false;
+    meta.concurrency = ToolMetadata::Concurrency::Serial;
     meta.requiresUserInteraction = false;
     meta.timeoutMs = 30000;
     meta.maxOutputBytes = 256 * 1024;

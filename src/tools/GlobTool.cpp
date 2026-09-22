@@ -126,7 +126,7 @@ ToolMetadata GlobTool::metadata() const {
     meta.allowedInPlanMode = true;
     meta.readOnly = true;
     meta.destructive = false;
-    meta.concurrentSafe = true;
+    meta.concurrency = ToolMetadata::Concurrency::Safe;
     meta.requiresUserInteraction = false;
     meta.timeoutMs = 30000;
     meta.maxOutputBytes = kMaxOutputBytes;

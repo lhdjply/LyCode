@@ -375,19 +375,21 @@ ToolSpec Tool::spec() const {
 bool Tool::canRunInParallel() const {
     // 判定顺序照抄 npm 版 canRunInParallel：
     //   1. destructive 一律串行（破坏性操作并发执行无法审计）
-    //   2. concurrentSafe == true  → 可并发
-    //   3. concurrentSafe == false → 串行（默认值即 false，未显式声明者同样串行）
-    //   4. 唯一的例外：只读且无副作用，即使没声明 concurrentSafe 也安全并发。
+    //   2. 显式 Safe   → 可并发
+    //   3. 显式 Serial → 串行
+    //   4. 未声明      → 只读且无副作用才可并发
     //
-    // C++ 的 bool 无法区分"显式 false"与"未声明"，所以这里对未声明者取保守
-    // 语义（串行）。这样 TodoWrite（readOnly=true 但 scope=Session）不会被
-    // 误判为可并发——它确实在写会话状态。
+    // 第 3 步必须独立存在：只读工具也可能有必须独占的理由（共享缓存、
+    // 单例资源等）。少了它，显式声明串行的只读工具会被第 4 步的豁免放行。
     const ToolMetadata meta = metadata();
     if (meta.destructive) {
         return false;
     }
-    if (meta.concurrentSafe) {
+    if (meta.concurrency == ToolMetadata::Concurrency::Safe) {
         return true;
+    }
+    if (meta.concurrency == ToolMetadata::Concurrency::Serial) {
+        return false;
     }
     return meta.readOnly && meta.sideEffectScope == SideEffectScope::None;
 }

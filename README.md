@@ -136,6 +136,33 @@ ctest --test-dir build --output-on-failure
 | `edit` | 文件写入自动放行，执行命令仍需确认 |
 | `yolo` | 全部放行。请自行判断风险 |
 
+### 工具并行调度
+
+同一次模型响应里可能要求多个工具调用。调度规则照搬 npm 的 `ToolScheduler` + `batch-runner`：
+
+```
+调用序列（模型给出的顺序）:  Read   Grep   Write   Read   Edit
+分组结果:                    └── 组 1 ──┘  组 2   组 3  组 4
+                             组内并行      独占    独占   独占
+执行:                        组间串行 ──────────────────────→
+```
+
+| 规则 | 说明 |
+| --- | --- |
+| 组内并行、组间串行 | 同一组内同时执行，上一组全部结束才开下一组 |
+| 组内上限 | `kMaxToolConcurrency = 10`（与 npm 的默认 `maxConcurrency` 一致） |
+| 独占组 | `canRunInParallel() == false` 的工具单独成组，与前后调用形成串行屏障 |
+| 终止语义 | 某调用要求终止本轮时，**等同组兄弟全部结束**再中断后续组 |
+| 失败不截断 | 一个工具失败只影响它自己的结果，后续组照常执行 |
+
+**并发策略是三态**（`ToolMetadata::Concurrency`）：`Safe` / `Serial` / `Unspecified`。这一点很关键——npm 里 `concurrentSafe` 是 `boolean | undefined`，用 C++ 的 `bool` 会把"显式声明必须串行"和"未声明"混为一谈，于是显式声明串行的**只读**工具会被"只读且无副作用 ⇒ 可并发"的豁免分支错误放行。这个缺陷是在写并行测试时被真实暴露出来的。
+
+内置工具的分类：`Read` / `Glob` / `Grep` / `TodoRead` 可并发；`Bash` / `Write` / `Edit` / `TodoWrite` 串行（`Bash` 破坏性，`TodoWrite` 虽然 `readOnly` 但会写会话状态）。
+
+与 npm 的差异：npm 的调度器还做依赖图的拓扑排序，因为工具可以声明 `dependencies`。本实现的工具不声明依赖，顺序约束只来自模型给出的调用次序，所以"顺序扫描 + 独占组"就是完整语义，不需要拓扑排序。
+
+**结果顺序与完成顺序无关**：回灌给模型的工具结果始终按模型给出的调用次序排列，所以并行不会让对话历史变得不确定。
+
 ### 用量明细
 
 状态栏右侧显示四个缓存相关指标（会话累计）：
@@ -247,6 +274,7 @@ tests/          单元测试（领域模型、权限链、Markdown 渲染）
 - 8 个内置工具：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoRead`、`TodoWrite`
 - 权限门：5 步判定链 + 规则匹配（前缀 / `*` / `prefix:*`）+ 异步裁决 + 取消收尾
 - Agent 主循环：模型步 ↔ 工具队列循环、turn 相位、中断、安全上限
+- **工具并行调度**：按 `canRunInParallel` 分组，组内并行（上限 10）、组间串行；不可并行的工具独占一组形成串行屏障
 - **思考等级**：输入区选择器 + 两种协议的字段映射（Anthropic `thinking.budget_tokens` / OpenAI `reasoning_effort`），按模型记住上次档位
 - **模型能力覆盖**：每个模型的上下文窗口 / 最大输出 / 思考档位都可在设置页覆盖，经 `ProviderRegistry` 单点应用到所有读取路径
 - 用量明细：缓存命中率 / 未缓存 / 缓存读 / 输出（两种协议的 token 口径已归一）
@@ -260,7 +288,6 @@ tests/          单元测试（领域模型、权限链、Markdown 渲染）
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| 工具并行执行 | **串行** | npm 版按 `canRunInParallel` 分组并行（上限 10）。当前按队列串行执行，语义正确但慢 |
 | `Bash` 后台任务 | **未实现** | `run_in_background` 会明确返回"不支持"，不假装成功 |
 | 子 Agent | **未实现** | `Task` / `Agent` 工具及其子会话、上下文隔离、回传 |
 | MCP | **未实现** | 无 MCP server 接入 |

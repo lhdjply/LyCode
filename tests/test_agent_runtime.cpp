@@ -14,6 +14,7 @@
 #include <QJsonObject>
 #include <QFile>
 #include <QTcpServer>
+#include <QTimer>
 #include <QTemporaryDir>
 #include <QTcpSocket>
 
@@ -31,6 +32,7 @@ using namespace zcode;
 using zcode::test::FakeGateway;
 using zcode::test::jsonEscape;
 using zcode::test::textResponse;
+using zcode::test::multiToolCallResponse;
 using zcode::test::textResponseWithCache;
 using zcode::test::toolCallResponse;
 
@@ -58,6 +60,10 @@ private slots:
     void setModelRefreshesContextWindow();
     void reloadRestoresPersistedConversation();
     void openAiUsageIsNormalizedToUncached();
+    void parallelSafeToolsRunConcurrently();
+    void nonParallelSafeToolFormsSerialBarrier();
+    void stopTurnWaitsForBatchSiblings();
+    void concurrencyPolicyIsTriState();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -630,6 +636,243 @@ void TestAgentRuntime::openAiUsageIsNormalizedToUncached() {
     const Usage dirty = runtime_->lastTurnUsage();
     QVERIFY2(dirty.inputTokens >= 0, "未缓存输入不得为负");
     QCOMPARE(dirty.inputTokens, 0);
+}
+
+namespace {
+
+/// 可控延时的探针工具，用于验证并行调度语义。
+///
+/// 只读 + 无副作用 → 权限自动放行，测试不需要处理权限弹窗，
+/// 这样断言就只针对"调度"这一件事。
+class ProbeTool : public Tool {
+public:
+    explicit ProbeTool(QString name, int durationMs, bool concurrentSafe,
+                       QStringList *orderLog, bool stopTurnOnSuccess = false)
+        : name_(std::move(name)),
+          durationMs_(durationMs),
+          concurrentSafe_(concurrentSafe),
+          orderLog_(orderLog),
+          stopTurn_(stopTurnOnSuccess) {}
+
+    ToolMetadata metadata() const override {
+        ToolMetadata meta;
+        meta.name = name_;
+        meta.description = QStringLiteral("测试用探针工具");
+        meta.readOnly = true;
+        meta.destructive = false;
+        // 三态：显式声明可并发 / 显式声明必须独占。后者正是"只读也可能要串行"的场景。
+        meta.concurrency = concurrentSafe_ ? ToolMetadata::Concurrency::Safe
+                                           : ToolMetadata::Concurrency::Serial;
+        meta.sideEffectScope = SideEffectScope::None;
+        meta.riskLevel = RiskLevel::Low;
+        meta.needsApproval = false;
+        meta.stopTurnOnSuccess = stopTurn_;
+        return meta;
+    }
+
+    QJsonObject inputSchema() const override {
+        QJsonObject properties;
+        properties.insert(QStringLiteral("label"), QJsonObject{{QStringLiteral("type"),
+                                                              QStringLiteral("string")}});
+        QJsonObject schema;
+        schema.insert(QStringLiteral("type"), QStringLiteral("object"));
+        schema.insert(QStringLiteral("properties"), properties);
+        return schema;
+    }
+
+    void execute(const QJsonObject &input, const ToolContext &, ToolCallback done) override {
+        const QString label = input.value(QStringLiteral("label")).toString();
+        ++active_;
+        maxActive_ = qMax(maxActive_, active_);
+        if (orderLog_ != nullptr) {
+            orderLog_->append(QStringLiteral("start:") + label);
+        }
+
+        // 延时用 QTimer 而不是 sleep：必须真正异步，才能观察到并发。
+        // 不能把 this 当上下文——ProbeTool 不是 QObject（工具基类刻意不是），
+        // 测试又总是在销毁 runtime 前等 turn 结束，所以不需要上下文保护。
+        QTimer::singleShot(durationMs_, [this, label, done = std::move(done)]() mutable {
+            --active_;
+            if (orderLog_ != nullptr) {
+                orderLog_->append(QStringLiteral("finish:") + label);
+            }
+            ToolResult result = ToolResult::success(QStringLiteral("ok:") + label);
+            result.stopTurnAfterResult = stopTurn_;
+            done(result);
+        });
+    }
+
+    int maxActive() const { return maxActive_; }
+    int completed() const { return completed_; }
+
+private:
+    QString name_;
+    int durationMs_;
+    bool concurrentSafe_;
+    QStringList *orderLog_;
+    bool stopTurn_;
+    int active_ = 0;
+    int maxActive_ = 0;
+    int completed_ = 0;
+};
+
+}  // namespace
+
+void TestAgentRuntime::parallelSafeToolsRunConcurrently() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 三个可并行的调用，每个 200ms。并行应在 ~200ms 完成，串行则要 ~600ms。
+    QStringList order;
+    auto *probe = new ProbeTool(QStringLiteral("Probe"), 200, true, &order);
+    tools_->add(probe);
+
+    const QByteArray argsA = R"({"label":"a"})";
+    const QByteArray argsB = R"({"label":"b"})";
+    const QByteArray argsC = R"({"label":"c"})";
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Probe"), argsA},
+                                             {QStringLiteral("Probe"), argsB},
+                                             {QStringLiteral("Probe"), argsC}}));
+    gateway_->enqueue(textResponse("all done"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QElapsedTimer timer;
+    timer.start();
+
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+    const qint64 elapsed = timer.elapsed();
+
+    QCOMPARE(finishedSpy.first().at(0).value<TurnResult>(), TurnResult::Success);
+    QCOMPARE(runtime_->toolCallCount(), 3);
+
+    // 真正的并行：同一时刻有 3 个工具在跑。
+    QCOMPARE(probe->maxActive(), 3);
+    // 远快于串行所需的 600ms（放宽到 500ms 以容忍调度开销）。
+    QVERIFY2(elapsed < 500, qPrintable(QStringLiteral("并行执行耗时 %1ms，接近串行").arg(elapsed)));
+
+    // 三个工具都成功落盘。
+    const QList<Message> messages = runtime_->messages();
+    for (const ToolPart &part : messages.at(1).toolParts()) {
+        QCOMPARE(part.state, ToolState::Success);
+    }
+}
+
+void TestAgentRuntime::nonParallelSafeToolFormsSerialBarrier() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 不可并行的工具夹在两个可并行调用之间，必须形成串行屏障：
+    // 分组应为 [Probe], [Exclusive], [Probe]，全程没有重叠。
+    QStringList order;
+    auto *probe = new ProbeTool(QStringLiteral("Probe"), 120, true, &order);
+    auto *exclusive = new ProbeTool(QStringLiteral("Exclusive"), 120, false, &order);
+    tools_->add(probe);
+    tools_->add(exclusive);
+
+    const QByteArray argsA = R"({"label":"a"})";
+    const QByteArray argsB = R"({"label":"b"})";
+    const QByteArray argsC = R"({"label":"c"})";
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Probe"), argsA},
+                                             {QStringLiteral("Exclusive"), argsB},
+                                             {QStringLiteral("Probe"), argsC}}));
+    gateway_->enqueue(textResponse("done"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    QCOMPARE(finishedSpy.first().at(0).value<TurnResult>(), TurnResult::Success);
+    QCOMPARE(runtime_->toolCallCount(), 3);
+
+    // 任何时刻都只有一个工具在跑——组与组之间是串行的。
+    QCOMPARE(probe->maxActive(), 1);
+    QCOMPARE(exclusive->maxActive(), 1);
+
+    // 执行顺序必须与模型给出的调用顺序一致（a → b → c）。
+    QCOMPARE(order, QStringList({QStringLiteral("start:a"), QStringLiteral("finish:a"),
+                                 QStringLiteral("start:b"), QStringLiteral("finish:b"),
+                                 QStringLiteral("start:c"), QStringLiteral("finish:c")}));
+
+    // 结果顺序也要保持模型给出的次序，而不是完成次序。
+    const QList<ToolPart> parts = runtime_->messages().at(1).toolParts();
+    QCOMPARE(parts.size(), 3);
+    QCOMPARE(parts.at(0).input.value(QStringLiteral("label")).toString(), QStringLiteral("a"));
+    QCOMPARE(parts.at(1).input.value(QStringLiteral("label")).toString(), QStringLiteral("b"));
+    QCOMPARE(parts.at(2).input.value(QStringLiteral("label")).toString(), QStringLiteral("c"));
+}
+
+void TestAgentRuntime::stopTurnWaitsForBatchSiblings() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 第 1 组：[Stop, Probe]（都可并行）——Stop 要求终止本轮，
+    //          但同组的 Probe 必须先把结果提交完。
+    // 第 2 组：[Tail]（不可并行）——必须被取消，不得执行。
+    QStringList order;
+    auto *stopping = new ProbeTool(QStringLiteral("Stop"), 80, true, &order, true);
+    auto *probe = new ProbeTool(QStringLiteral("Probe"), 150, true, &order);
+    auto *tail = new ProbeTool(QStringLiteral("Tail"), 80, false, &order);
+    tools_->add(stopping);
+    tools_->add(probe);
+    tools_->add(tail);
+
+    const QByteArray argsS = R"({"label":"s"})";
+    const QByteArray argsP = R"({"label":"p"})";
+    const QByteArray argsT = R"({"label":"t"})";
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Stop"), argsS},
+                                             {QStringLiteral("Probe"), argsP},
+                                             {QStringLiteral("Tail"), argsT}}));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    QCOMPARE(finishedSpy.first().at(0).value<TurnResult>(), TurnResult::Success);
+
+    const QList<ToolPart> parts = runtime_->messages().at(1).toolParts();
+    QCOMPARE(parts.size(), 3);
+
+    // 要求终止的调用：成功。
+    QCOMPARE(parts.at(0).state, ToolState::Success);
+    // 同组兄弟：**必须**已经跑完并成功，不能被"终止"打断。
+    QCOMPARE(parts.at(1).state, ToolState::Success);
+    QVERIFY2(parts.at(1).output.contains(QStringLiteral("ok:p")),
+             "同组兄弟的结果必须在终止前提交");
+    // 后续组：被取消，且没有真正执行过。
+    QCOMPARE(parts.at(2).state, ToolState::Cancelled);
+    QVERIFY2(!order.contains(QStringLiteral("start:t")), "被取消的调用不应真正执行");
+
+    // 终止后不再请求模型（没有第二轮）。
+    QCOMPARE(gateway_->requestCount(), 1);
+}
+
+void TestAgentRuntime::concurrencyPolicyIsTriState() {
+    QStringList ignored;
+
+    // 显式声明 Safe → 可并发。
+    ProbeTool safe(QStringLiteral("SafeProbe"), 0, true, &ignored);
+    QVERIFY(safe.canRunInParallel());
+
+    // 显式声明 Serial → 必须串行，**即使只读且无副作用**。
+    // 这正是三态存在的理由：用 bool 时"显式 false"与"未声明"无法区分，
+    // 显式串行的只读工具会被"只读+无副作用 ⇒ 可并发"的豁免分支错误放行。
+    ProbeTool serial(QStringLiteral("SerialProbe"), 0, false, &ignored);
+    QVERIFY2(!serial.canRunInParallel(), "显式声明串行的只读工具不得被判为可并发");
+
+    // 内置工具的期望分类（与 npm 版的 metadata 一致）。
+    *tools_ = ToolRegistry::createWithBuiltins();
+    QVERIFY(tools_->find(QStringLiteral("Read"))->canRunInParallel());
+    QVERIFY(tools_->find(QStringLiteral("Glob"))->canRunInParallel());
+    QVERIFY(tools_->find(QStringLiteral("Grep"))->canRunInParallel());
+    QVERIFY(tools_->find(QStringLiteral("TodoRead"))->canRunInParallel());
+
+    QVERIFY2(!tools_->find(QStringLiteral("Bash"))->canRunInParallel(),
+             "Bash 既具破坏性又显式串行");
+    QVERIFY2(!tools_->find(QStringLiteral("Write"))->canRunInParallel(), "写文件不能并发");
+    QVERIFY2(!tools_->find(QStringLiteral("Edit"))->canRunInParallel(), "改文件不能并发");
+    QVERIFY2(!tools_->find(QStringLiteral("TodoWrite"))->canRunInParallel(),
+             "TodoWrite 虽然 readOnly，但会写会话状态，必须串行");
 }
 
 QTEST_MAIN(TestAgentRuntime)

@@ -79,7 +79,7 @@ ToolMetadata BashTool::metadata() const {
     meta.allowedInPlanMode = false;
     meta.readOnly = false;
     meta.destructive = true;
-    meta.concurrentSafe = false;
+    meta.concurrency = ToolMetadata::Concurrency::Serial;
     meta.requiresUserInteraction = false;
     meta.timeoutMs = kDefaultTimeoutMs;
     meta.maxOutputBytes = kMaxOutputBytes;

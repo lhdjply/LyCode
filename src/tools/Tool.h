@@ -5,7 +5,7 @@
 // 猜测行为**。
 //
 // 一份 ToolMetadata 同时决定三件事：
-//   1. 调度并发分组  —— destructive/concurrentSafe/readOnly/sideEffectScope
+//   1. 调度并发分组  —— destructive/concurrency/readOnly/sideEffectScope
 //   2. 权限判定      —— readOnly/riskLevel/needsApproval/alwaysAsk/sideEffectScope
 //   3. turn 终止     —— stopTurnOnSuccess
 // 新增工具只需要声明 metadata，不需要在调度器或权限服务里加分支。
@@ -64,8 +64,18 @@ struct ToolMetadata {
     bool readOnly = false;
     /// 是否具备破坏性（用于并发分组与风险评估）。
     bool destructive = false;
-    /// 是否可与其他工具并发执行。
-    bool concurrentSafe = false;
+    /// 并发策略。**三态**，不是 bool。
+    ///
+    /// npm 里 `concurrentSafe` 是 `boolean | undefined`：显式 true、显式 false、
+    /// 未声明是三件不同的事。用 bool 会把"显式声明必须串行"和"未声明"混为一谈——
+    /// 于是显式声明串行的只读工具会被"只读且无副作用 ⇒ 可并发"的豁免分支
+    /// 错误地放行。这个缺陷在写测试时被真实暴露出来。
+    enum class Concurrency {
+        Unspecified,  ///< 未声明：按只读与副作用范围推断
+        Safe,         ///< 显式声明可与其他工具并发
+        Serial,       ///< 显式声明必须独占执行
+    };
+    Concurrency concurrency = Concurrency::Unspecified;
     /// 是否需要用户交互（提问、计划审批）。
     bool requiresUserInteraction = false;
 

@@ -226,7 +226,9 @@ void AgentRuntime::closeSession() {
     messages_.clear();
     model_ = ModelSelection{};
     toolQueue_.clear();
-    toolQueueCursor_ = 0;
+    batches_.clear();
+    batchCursor_ = 0;
+    batchPending_ = 0;
     currentAssistantMessageId_.clear();
     currentTextPartId_.clear();
     currentReasoningPartId_.clear();
@@ -281,7 +283,9 @@ void AgentRuntime::beginTurn(const QString &userText) {
     abortRequested_ = false;
     toolStopRequested_ = false;
     toolQueue_.clear();
-    toolQueueCursor_ = 0;
+    batches_.clear();
+    batchCursor_ = 0;
+    batchPending_ = 0;
     modelStepCount_ = 0;
     toolCallCount_ = 0;
     turnUsage_ = Usage{};
@@ -615,7 +619,7 @@ void AgentRuntime::handleStreamEvent(const StreamEvent &event) {
                 }
             }
 
-            PendingToolCall pending;
+            QueuedToolCall pending;
             pending.messageId = assistant->id;
             pending.partId = part->id;
             pending.callId = part->tool.callId;
@@ -702,12 +706,63 @@ void AgentRuntime::finishModelStep(const QString &finishReason) {
     emit messageFinished(*assistant);
 
     setPhase(TurnPhase::SchedulingTools);
+    // 先算好批次，再开始执行：批次表是这一轮工具执行的唯一调度依据。
+    scheduleToolBatches();
     QTimer::singleShot(0, this, [this]() { runToolQueue(); });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 工具队列
+// 工具调度与执行
+//
+// 语义照搬 npm 的 ToolScheduler + batch-runner：
+//   * 组内并行、组间串行
+//   * 不并行安全的工具独占一组，与前后调用形成串行屏障
+//   * 组内上限 kMaxToolConcurrency
+//   * 某个调用要求终止本轮时，**等同组兄弟全部结束**再中断后续组
+//   * 失败不截断后续组（只影响该调用自己的结果）
+//
+// 与 npm 的差异：npm 的调度器还做依赖图的拓扑排序，因为工具可以声明 dependencies。
+// 本实现的工具不声明依赖，顺序约束只来自模型给出的调用次序，
+// 所以"顺序扫描 + 独占组"就是完整语义，不需要拓扑排序。
 // ─────────────────────────────────────────────────────────────────────────────
+
+void AgentRuntime::scheduleToolBatches() {
+    batches_.clear();
+    batchCursor_ = 0;
+    batchPending_ = 0;
+
+    ToolBatch current;
+    const auto flushCurrent = [this, &current]() {
+        if (!current.indices.isEmpty()) {
+            batches_.append(current);
+            current = ToolBatch{};
+        }
+    };
+
+    for (int index = 0; index < toolQueue_.size(); ++index) {
+        const QueuedToolCall &call = toolQueue_.at(index);
+        Tool *tool = tools_ != nullptr ? tools_->find(call.name) : nullptr;
+        const bool parallelSafe = tool != nullptr && tool->canRunInParallel();
+
+        if (!parallelSafe) {
+            // 独占一组：先收掉正在攒的可并行组，再把该调用单独成组。
+            flushCurrent();
+            ToolBatch exclusive;
+            exclusive.indices.append(index);
+            exclusive.parallel = false;
+            batches_.append(exclusive);
+            continue;
+        }
+
+        current.indices.append(index);
+        if (current.indices.size() >= kMaxToolConcurrency) {
+            flushCurrent();
+        }
+    }
+    flushCurrent();
+
+    qCInfo(log) << "工具调度完成; 调用数=" << toolQueue_.size() << "组数=" << batches_.size();
+}
 
 void AgentRuntime::runToolQueue() {
     if (abortRequested_) {
@@ -716,87 +771,166 @@ void AgentRuntime::runToolQueue() {
         return;
     }
 
-    if (toolQueueCursor_ >= toolQueue_.size()) {
+    if (batchCursor_ >= batches_.size()) {
         afterToolQueue();
         return;
     }
-    executeToolAt(toolQueueCursor_);
+    startToolBatch(batchCursor_);
+}
+
+void AgentRuntime::startToolBatch(int batchIndex) {
+    const ToolBatch batch = batches_.at(batchIndex);
+
+    // 先把整组标记为"已派发"再逐个启动：派发过程中可能有同步终结的调用
+    // （未知工具、参数校验失败、plan 模式拦截），如果边派发边计数，
+    // 计数会在循环中途归零、提前推进到下一组。
+    for (int index : batch.indices) {
+        toolQueue_[index].started = true;
+    }
+    batchPending_ = static_cast<int>(batch.indices.size());
+
+    setPhase(TurnPhase::ExecutingTools);
+    qCDebug(log) << "开始工具组; 序号=" << batchIndex << "调用数=" << batch.indices.size()
+                 << "并行=" << batch.parallel;
+
+    // 组内全部派发出去、不等待：权限请求与执行都是异步的，
+    // 这一组的完成由 finishToolCall() 的计数收口。
+    for (int index : batch.indices) {
+        executeToolAt(index);
+    }
+}
+
+void AgentRuntime::finishToolCall(const QString &callId, const ToolResult &result) {
+    // 按 callId 定位：异步回调可能在下一轮 turn 才到达，
+    // 那时按下标查找会命中完全不同的调用。
+    int index = -1;
+    for (int candidate = 0; candidate < toolQueue_.size(); ++candidate) {
+        if (toolQueue_.at(candidate).callId == callId) {
+            index = candidate;
+            break;
+        }
+    }
+    if (index < 0) {
+        qCDebug(log) << "工具回调找不到对应调用（可能已被清理）; callId=" << callId;
+        return;
+    }
+
+    QueuedToolCall &call = toolQueue_[index];
+    if (call.finished) {
+        // 幂等：参数校验失败、权限拒绝、工具回调都可能到达同一个收口点，
+        // 重复计数会让组计数提前归零、打乱后续组的串行屏障。
+        qCDebug(log) << "工具已终结，忽略重复回调; callId=" << callId;
+        return;
+    }
+    call.finished = true;
+    call.started = false;
+
+    if (Message *message = currentAssistantMessage()) {
+        if (Part *target = message->findPart(call.partId)) {
+            target->tool.state = result.ok ? ToolState::Success : ToolState::Error;
+            target->tool.output = result.output;
+            target->tool.error = result.error;
+            target->tool.errorCode = result.errorCode;
+            // QJsonObject 没有 merge：逐键写入，工具的 metadata 覆盖同名键。
+            for (auto it = result.metadata.constBegin(); it != result.metadata.constEnd(); ++it) {
+                target->tool.metadata.insert(it.key(), it.value());
+            }
+            target->tool.endedAtMs = nowMs();
+            target->tool.progress = QJsonObject{};
+            emit partUpdated(message->id, *target);
+        }
+        message->updatedAtMs = nowMs();
+        persistMessage(*message);
+    }
+
+    toolCallCount_ += 1;
+    if (result.stopTurnAfterResult) {
+        toolStopRequested_ = true;
+    }
+
+    batchPending_ -= 1;
+    if (batchPending_ > 0) {
+        // 同组还有未完成的调用。必须等它们全部结束——
+        // 尤其当上面置了 stopTurnRequested_ 时：同组兄弟的结果同样要提交，
+        // 不能因为一个调用要求终止就打断它们。
+        return;
+    }
+
+    if (toolStopRequested_ || abortRequested_) {
+        afterToolQueue();
+        return;
+    }
+
+    batchCursor_ += 1;
+    // 用 singleShot 而不是直接递归：纯内存工具（TodoWrite 等）会同步回调，
+    // 直接递归会让 N 组调用产生 N 层栈帧。
+    QTimer::singleShot(0, this, [this]() { runToolQueue(); });
+}
+
+void AgentRuntime::cancelPendingToolCalls(const QString &reason) {
+    Message *assistant = currentAssistantMessage();
+    for (int index = 0; index < toolQueue_.size(); ++index) {
+        QueuedToolCall &call = toolQueue_[index];
+        if (call.finished) {
+            continue;
+        }
+        call.finished = true;
+        call.started = false;
+
+        if (assistant == nullptr) {
+            continue;
+        }
+        Part *part = assistant->findPart(call.partId);
+        if (part == nullptr || toolStateIsTerminal(part->tool.state)) {
+            continue;
+        }
+        part->tool.state = ToolState::Cancelled;
+        part->tool.error = reason;
+        part->tool.errorCode = QStringLiteral("cancelled");
+        part->tool.endedAtMs = nowMs();
+        emit partUpdated(assistant->id, *part);
+    }
+    batchPending_ = 0;
 }
 
 void AgentRuntime::executeToolAt(int index) {
     if (index < 0 || index >= toolQueue_.size()) {
-        afterToolQueue();
         return;
     }
 
-    const PendingToolCall pending = toolQueue_.at(index);
+    const QueuedToolCall call = toolQueue_.at(index);
+    const QString callId = call.callId;
     Message *assistant = currentAssistantMessage();
     if (assistant == nullptr) {
-        afterToolQueue();
+        finishToolCall(callId,
+                       ToolResult::failure(QStringLiteral("工具无处写回：消息已不存在"),
+                                           QStringLiteral("message_missing")));
         return;
     }
 
-    Part *part = assistant->findPart(pending.partId);
-    if (part == nullptr) {
-        qCWarning(log) << "工具块已不存在，跳过; callId=" << pending.callId;
-        toolQueueCursor_ = index + 1;
-        QTimer::singleShot(0, this, [this]() { runToolQueue(); });
+    if (assistant->findPart(call.partId) == nullptr) {
+        qCWarning(log) << "工具块已不存在，跳过; callId=" << callId;
+        finishToolCall(callId, ToolResult::failure(QStringLiteral("工具块已不存在"),
+                                                  QStringLiteral("part_missing")));
         return;
     }
-
-    // 统一的"结束本次工具"路径，保证状态落盘与游标推进只发生一次。
-    const auto finishOne = [this, index](ToolResult result) {
-        Message *message = currentAssistantMessage();
-        if (message != nullptr) {
-            const PendingToolCall &call = toolQueue_.at(index);
-            if (Part *target = message->findPart(call.partId)) {
-                target->tool.state = result.ok ? ToolState::Success : ToolState::Error;
-                target->tool.output = result.output;
-                target->tool.error = result.error;
-                target->tool.errorCode = result.errorCode;
-                // QJsonObject 没有 merge：逐键写入，工具的 metadata 覆盖同名键。
-                for (auto it = result.metadata.constBegin(); it != result.metadata.constEnd();
-                     ++it) {
-                    target->tool.metadata.insert(it.key(), it.value());
-                }
-                target->tool.endedAtMs = nowMs();
-                target->tool.progress = QJsonObject{};
-                emit partUpdated(message->id, *target);
-            }
-            message->updatedAtMs = nowMs();
-            persistMessage(*message);
-        }
-
-        toolCallCount_ += 1;
-        if (result.stopTurnAfterResult) {
-            toolStopRequested_ = true;
-        }
-
-        toolQueueCursor_ = index + 1;
-        if (toolStopRequested_ || abortRequested_) {
-            afterToolQueue();
-            return;
-        }
-        // 用 singleShot 而不是直接递归：纯内存工具（TodoWrite 等）会同步回调，
-        // 直接递归会让 N 个工具调用产生 N 层栈帧，工具多时会栈溢出。
-        QTimer::singleShot(0, this, [this]() { runToolQueue(); });
-    };
 
     // 工具名未知：直接记为失败，不询问权限（执行不了的东西不该打扰用户）。
-    Tool *tool = tools_ != nullptr ? tools_->find(pending.name) : nullptr;
+    Tool *tool = tools_ != nullptr ? tools_->find(call.name) : nullptr;
     if (tool == nullptr) {
-        qCWarning(log) << "未知工具:" << pending.name;
-        finishOne(ToolResult::failure(QStringLiteral("未知工具：") + pending.name,
-                                      QStringLiteral("tool_not_found")));
+        qCWarning(log) << "未知工具:" << call.name;
+        finishToolCall(callId, ToolResult::failure(QStringLiteral("未知工具：") + call.name,
+                                                   QStringLiteral("tool_not_found")));
         return;
     }
 
     const ToolMetadata metadata = tool->metadata();
 
     // 入参校验放在权限之前：不合法的调用不该让用户看到确认框。
-    const QString validationError = tool->validateInput(pending.input);
+    const QString validationError = tool->validateInput(call.input);
     if (!validationError.isEmpty()) {
-        finishOne(ToolResult::failure(validationError, QStringLiteral("invalid_input")));
+        finishToolCall(callId, ToolResult::failure(validationError,
+                                                   QStringLiteral("invalid_input")));
         return;
     }
 
@@ -804,32 +938,29 @@ void AgentRuntime::executeToolAt(int index) {
     if (session_.mode == SessionMode::Plan &&
         sideEffectScopeWritesWorkspace(metadata.sideEffectScope)) {
         const QString reason =
-            QStringLiteral("当前处于 plan（只读）模式，不能执行会修改工作区的工具：") +
-            pending.name;
-        finishOne(ToolResult::failure(reason, QStringLiteral("plan_mode_denied")));
+            QStringLiteral("当前处于 plan（只读）模式，不能执行会修改工作区的工具：") + call.name;
+        finishToolCall(callId, ToolResult::failure(reason, QStringLiteral("plan_mode_denied")));
         return;
     }
 
-    setPhase(TurnPhase::ExecutingTools);
-
     const PermissionKind kind = permissionKindFor(metadata);
     const QString capability = tool->permissionCapability();
-    const QString subject = tool->ruleSubject(pending.input);
+    const QString subject = tool->ruleSubject(call.input);
 
     PermissionRequest request;
     request.id = newPermissionId();
     request.sessionId = session_.id;
-    request.callId = pending.callId;
-    request.toolName = pending.name;
-    request.input = pending.input;
+    request.callId = call.callId;
+    request.toolName = call.name;
+    request.input = call.input;
     request.kind = kind;
     request.riskLevel = metadata.riskLevel;
-    request.title = tool->title(pending.input);
-    request.description = tool->permissionDescription(pending.input);
+    request.title = tool->title(call.input);
+    request.description = tool->permissionDescription(call.input);
     request.createdAtMs = nowMs();
 
     // 选项由工具声明的规则生成；UI 不自行发明选项。
-    const QList<PermissionRule> suggestedRules = tool->permissionRules(pending.input);
+    const QList<PermissionRule> suggestedRules = tool->permissionRules(call.input);
 
     PermissionOption allowOnce;
     allowOnce.optionId = QStringLiteral("allowOnce");
@@ -862,33 +993,20 @@ void AgentRuntime::executeToolAt(int index) {
     deny.response.decision = PermissionDecision::Deny;
     request.options.append(deny);
 
-    // 保存 partId 供异步回调使用：回调触发时 currentAssistantMessageId_ 可能已经变化。
-    const Id assistantMessageId = assistant->id;
+    const Id partId = call.partId;
+    const QJsonObject toolInput = call.input;
 
-    // 按值捕获 tool / pending / finishOne：权限裁决可能是异步的，
-    // 而 executeToolAt 的栈帧那时早已返回，引用捕获会悬空。
+    // 按值捕获：权限裁决与工具执行都可能是异步的，
+    // 这个栈帧那时早已返回，引用捕获会悬空。
     permissionGate_.request(
         request, capability, subject,
-        [this, index, assistantMessageId, request, tool, pending,
-         finishOne](PermissionOutcome outcome) {
-            Message *message = nullptr;
-            for (Message &candidate : messages_) {
-                if (candidate.id == assistantMessageId) {
-                    message = &candidate;
-                    break;
-                }
-            }
-            if (message == nullptr) {
-                toolQueueCursor_ = index + 1;
-                QTimer::singleShot(0, this, [this]() { runToolQueue(); });
-                return;
-            }
-
-            const PendingToolCall &call = toolQueue_.at(index);
-            Part *target = message->findPart(call.partId);
-            if (target == nullptr) {
-                toolQueueCursor_ = index + 1;
-                QTimer::singleShot(0, this, [this]() { runToolQueue(); });
+        [this, callId, partId, request, tool, toolInput](PermissionOutcome outcome) {
+            Message *message = currentAssistantMessage();
+            Part *target = message != nullptr ? message->findPart(partId) : nullptr;
+            if (message == nullptr || target == nullptr) {
+                finishToolCall(callId,
+                               ToolResult::failure(QStringLiteral("工具块已不存在"),
+                                                   QStringLiteral("part_missing")));
                 return;
             }
 
@@ -896,22 +1014,10 @@ void AgentRuntime::executeToolAt(int index) {
                 const QString reason = outcome.response.reason.isEmpty()
                                            ? QStringLiteral("用户拒绝了该工具调用。")
                                            : outcome.response.reason;
-                target->tool.state = ToolState::Error;
-                target->tool.error = reason;
-                target->tool.errorCode = QStringLiteral("permission_denied");
-                target->tool.endedAtMs = nowMs();
-                emit partUpdated(message->id, *target);
-
-                ToolResult denied = ToolResult::failure(reason, QStringLiteral("permission_denied"));
+                ToolResult denied =
+                    ToolResult::failure(reason, QStringLiteral("permission_denied"));
                 denied.metadata.insert(QStringLiteral("permissionDenied"), true);
-
-                toolCallCount_ += 1;
-                toolQueueCursor_ = index + 1;
-                if (abortRequested_) {
-                    afterToolQueue();
-                } else {
-                    QTimer::singleShot(0, this, [this]() { runToolQueue(); });
-                }
+                finishToolCall(callId, denied);
                 return;
             }
 
@@ -922,10 +1028,9 @@ void AgentRuntime::executeToolAt(int index) {
             emit partUpdated(message->id, *target);
 
             if (abortRequested_) {
-                target->tool.state = ToolState::Cancelled;
-                target->tool.endedAtMs = nowMs();
-                emit partUpdated(message->id, *target);
-                afterToolQueue();
+                finishToolCall(callId,
+                               ToolResult::failure(QStringLiteral("因中断未执行。"),
+                                                   QStringLiteral("cancelled")));
                 return;
             }
 
@@ -938,31 +1043,31 @@ void AgentRuntime::executeToolAt(int index) {
             context.readOnly = session_.mode == SessionMode::Plan;
             context.grantedRules = permissionGate_.grantedRules();
             context.todoStore = todos_;
+            // 并发执行时所有工具共享同一个取消令牌；这是刻意的：
+            // 用户按一次"停止"应当让整轮的所有工具都停下。
             context.cancelled = cancelFlag_;
 
-            const Id targetMessageId = message->id;
-            const Id targetPartId = call.partId;
-            context.progress = [this, targetMessageId, targetPartId](const QString &chunk) {
+            const Id messageId = message->id;
+            context.progress = [this, messageId, partId](const QString &chunk) {
                 for (Message &candidate : messages_) {
-                    if (candidate.id != targetMessageId) {
+                    if (candidate.id != messageId) {
                         continue;
                     }
-                    if (Part *toolPart = candidate.findPart(targetPartId)) {
+                    if (Part *toolPart = candidate.findPart(partId)) {
                         // 进度只进 metadata，不覆盖最终输出，
                         // 这样 UI 可以区分"正在输出"和"最终结果"。
                         toolPart->tool.progress.insert(QStringLiteral("preview"), chunk);
                         toolPart->tool.progress.insert(QStringLiteral("updatedAtMs"),
                                                        static_cast<double>(nowMs()));
-                        emit partUpdated(targetMessageId, *toolPart);
+                        emit partUpdated(messageId, *toolPart);
                     }
                     break;
                 }
             };
 
             Tool *executingTool = tool;
-            const QJsonObject toolInput = pending.input;
-            executingTool->execute(toolInput, context, [finishOne](ToolResult result) {
-                finishOne(std::move(result));
+            executingTool->execute(toolInput, context, [this, callId](ToolResult result) {
+                finishToolCall(callId, result);
             });
         });
 }
@@ -974,6 +1079,13 @@ void AgentRuntime::afterToolQueue() {
         return;
     }
 
+    // 未派发的调用必须在这里显式取消。
+    // 正常跑完时所有调用都已终结，这里是空操作；而某组要求提前终止时
+    // （stopTurnAfterResult 会让后续组直接跳过），剩下的调用否则会永远停在
+    // "接收参数中"，UI 一直显示未完成，回灌给模型的结果里也是半成品。
+    // 对应 npm 的 batch-runner：命中 stopTurnAfterResult 时把后续组标为 ToolCancelled。
+    cancelPendingToolCalls(QStringLiteral("本轮已结束，未执行。"));
+
     Message *assistant = currentAssistantMessage();
     if (assistant != nullptr) {
         assistant->updatedAtMs = nowMs();
@@ -982,6 +1094,11 @@ void AgentRuntime::afterToolQueue() {
 
     // 终止条件 2：某个工具要求结束本轮。
     if (toolStopRequested_) {
+        toolQueue_.clear();
+        batches_.clear();
+        batchCursor_ = 0;
+        batchPending_ = 0;
+        toolStopRequested_ = false;
         completeTurn(TurnResult::Success);
         return;
     }
@@ -1000,7 +1117,7 @@ void AgentRuntime::afterToolQueue() {
     toolResults.createdAtMs = nowMs();
     toolResults.updatedAtMs = toolResults.createdAtMs;
 
-    for (const PendingToolCall &call : std::as_const(toolQueue_)) {
+    for (const QueuedToolCall &call : std::as_const(toolQueue_)) {
         if (assistant == nullptr) {
             break;
         }
@@ -1038,7 +1155,9 @@ void AgentRuntime::afterToolQueue() {
     }
 
     toolQueue_.clear();
-    toolQueueCursor_ = 0;
+    batches_.clear();
+    batchCursor_ = 0;
+    batchPending_ = 0;
     toolStopRequested_ = false;
 
     // 回到模型步：这是"工具→再思考"的循环边。
@@ -1051,7 +1170,12 @@ void AgentRuntime::teardownAfterAbort() {
         cancelFlag_->store(true);
     }
 
-    // 把当前 assistant 消息里所有未终态的工具关闭，否则 UI 永远显示"运行中"。
+    // 未终结的调用（含未派发的与正在运行的）都要有交代，否则 UI 会永远显示
+    // "等待确认"或"运行中"。运行中的工具由各自的取消令牌负责尽快返回，
+    // 这里先把状态与界面收口。
+    cancelPendingToolCalls(QStringLiteral("因中断未执行。"));
+
+    // 把当前 assistant 消息里所有未终态的工具关闭。
     if (Message *assistant = currentAssistantMessage()) {
         assistant->cancelPendingTools();
         if (!assistant->isTerminal()) {
@@ -1062,24 +1186,10 @@ void AgentRuntime::teardownAfterAbort() {
         emit messageFinished(*assistant);
     }
 
-    // 未被执行的队列项也要在 UI 上有交代。
-    for (int index = toolQueueCursor_; index < toolQueue_.size(); ++index) {
-        const PendingToolCall &call = toolQueue_.at(index);
-        if (currentAssistantMessage() == nullptr) {
-            break;
-        }
-        if (Part *part = currentAssistantMessage()->findPart(call.partId)) {
-            if (!toolStateIsTerminal(part->tool.state)) {
-                part->tool.state = ToolState::Cancelled;
-                part->tool.error = QStringLiteral("因中断未执行。");
-                part->tool.errorCode = QStringLiteral("cancelled");
-                part->tool.endedAtMs = nowMs();
-                emit partUpdated(currentAssistantMessage()->id, *part);
-            }
-        }
-    }
     toolQueue_.clear();
-    toolQueueCursor_ = 0;
+    batches_.clear();
+    batchCursor_ = 0;
+    batchPending_ = 0;
 }
 
 void AgentRuntime::completeTurn(TurnResult result, const QString &errorMessage) {
