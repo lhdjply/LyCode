@@ -4,6 +4,7 @@
 // 业务组装在 MainWindow 里，入口保持无逻辑，便于将来加命令行参数或
 // 无头模式时不必改动业务代码。
 #include <QApplication>
+#include <QIcon>
 #include <QFont>
 #include <QGuiApplication>
 #include <QLoggingCategory>
@@ -27,6 +28,30 @@ int main(int argc, char *argv[]) {
     QCoreApplication::setOrganizationDomain(QStringLiteral("lycode.dev"));
     QCoreApplication::setApplicationName(QStringLiteral("LyCode"));
     QCoreApplication::setApplicationVersion(QStringLiteral(LYCODE_QT_VERSION));
+
+    // 应用图标：任务栏 / dock / alt-tab 用的就是它。
+    // 八档尺寸都加进去——只给一张 512 的位图，任务栏的 16px 那一档就得靠
+    // 系统去缩，小尺寸会发虚。
+    {
+        QIcon appIcon;
+#ifdef Q_OS_WIN
+        // Windows 用 .ico：它本身就是多尺寸容器（16–256，实测 Qt 的 ICO 插件
+        // 会把七档都报给 QIcon），系统也认这个格式。而且它正是编进 exe 资源的
+        // 那一份——运行中的窗口与文件图标同源，不会出现两套图像不一致。
+        // 512 那一档 Windows 用不到（任务栏/alt-tab/资源管理器都到 256 为止）。
+        appIcon.addFile(QStringLiteral(":/icons/windows/lycode.ico"));
+#else
+        // 其他平台用 PNG：资源路径与安装树一致，所以按尺寸直接拼，不需要别名。
+        for (const int size : {16, 24, 32, 48, 64, 128, 256, 512}) {
+            appIcon.addFile(QStringLiteral(":/icons/linux/hicolor/%1x%1/apps/lycode.png")
+                                .arg(size));
+        }
+#endif
+        QApplication::setWindowIcon(appIcon);
+    }
+    // 让窗口与桌面条目关联起来：Linux 上任务栏据此把运行中的窗口
+    // 对上 .desktop 文件（装完之后图标才不会显示成默认的空白方块）。
+    QApplication::setDesktopFileName(QStringLiteral("lycode"));
 
     const QStringList arguments = app.arguments();
     const bool verbose = arguments.contains(QStringLiteral("--verbose"));

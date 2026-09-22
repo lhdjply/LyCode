@@ -1,0 +1,13 @@
+<RCC>
+  <qresource prefix="/">
+    <file>icons/linux/hicolor/16x16/apps/lycode.png</file>
+    <file>icons/linux/hicolor/24x24/apps/lycode.png</file>
+    <file>icons/linux/hicolor/32x32/apps/lycode.png</file>
+    <file>icons/linux/hicolor/48x48/apps/lycode.png</file>
+    <file>icons/linux/hicolor/64x64/apps/lycode.png</file>
+    <file>icons/linux/hicolor/128x128/apps/lycode.png</file>
+    <file>icons/linux/hicolor/256x256/apps/lycode.png</file>
+    <file>icons/linux/hicolor/512x512/apps/lycode.png</file>
+    <file>icons/windows/lycode.ico</file>
+  </qresource>
+</RCC>

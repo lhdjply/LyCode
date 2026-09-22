@@ -7,10 +7,10 @@ project(
   LANGUAGES CXX
 )
 
-# ── 语言与构建类型 ───────────────────────────────────────────────────────────
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE
@@ -19,43 +19,29 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   )
 endif()
 
-# 导出 compile_commands.json，供 clangd / IDE 使用。
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# ── Qt ──────────────────────────────────────────────────────────────────────
-# 仅依赖本机已有的模块：Widgets 而非 Quick/QML，避免引入未安装的依赖。
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent)
 
 qt_standard_project_setup()
 
-# ── 依赖项 ──────────────────────────────────────────────────────────────────
-# 源码用 GLOB + CONFIGURE_DEPENDS：本项目正处于快速扩张期，新文件需要自动纳入构建。
-# CONFIGURE_DEPENDS 会在每次构建时重新求值 glob，避免"新增文件没被编译"的沉默失败。
+# 必须在创建任何目标之前设置：该变量只在目标创建时被读取。
+set(CMAKE_AUTORCC ON)
+
+# GLOB_RECURSE 会递归子目录，因此新增 src/ 下的子目录不需要改这里。
+# CONFIGURE_DEPENDS 让新增文件在下次构建时被纳入，避免"漏编译"。
 file(
   GLOB_RECURSE LYCODE_SOURCES
   CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/model/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/agent/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/mcp/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/skills/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/*.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/*.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
-
+# src/main.cpp 属于可执行文件，不能进库：否则 main() 会被编译两次而链接失败。
+list(REMOVE_ITEM LYCODE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
 file(
   GLOB_RECURSE LYCODE_HEADERS
   CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/model/*.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/agent/*.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/*.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/storage/*.h"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/*.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
 
-# ── 核心目标 ────────────────────────────────────────────────────────────────
+# OBJECT 库：不产出 .a，但让测试与可执行文件共享同一份编译结果。
 add_library(lycode_lib OBJECT ${LYCODE_SOURCES} ${LYCODE_HEADERS})
 
 target_include_directories(lycode_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -82,7 +68,15 @@ else()
   target_compile_options(lycode_lib PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# ── 可执行文件 ──────────────────────────────────────────────────────────────
+# 图标资源挂在 lycode_lib 上（而不是可执行文件）：测试链接的是这个目标，
+# 资源跟着它才能被测试验证到。
+target_sources(lycode_lib PRIVATE assets/resources.qrc)
+
+# Windows 下额外编译 .rc，让 exe 文件本身在资源管理器里有图标。
+if(WIN32)
+  target_sources(lycode_lib PRIVATE assets/icons/windows/win_resources.rc)
+endif()
+
 qt_add_executable(lycode src/main.cpp)
 
 target_link_libraries(lycode PRIVATE lycode_lib)
@@ -95,7 +89,6 @@ set_target_properties(
              MACOSX_BUNDLE_GUI_IDENTIFIER "dev.lycode.qt"
 )
 
-# ── 测试 ────────────────────────────────────────────────────────────────────
 option(LYCODE_BUILD_TESTS "构建单元测试" ON)
 
 if(LYCODE_BUILD_TESTS)
@@ -103,6 +96,12 @@ if(LYCODE_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-# ── 安装 ────────────────────────────────────────────────────────────────────
 include(GNUInstallDirs)
+
 install(TARGETS lycode RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+# 图标目录结构本身就是安装结构，整棵树照搬即可。
+install(
+  DIRECTORY assets/icons/linux/hicolor/
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor"
+)

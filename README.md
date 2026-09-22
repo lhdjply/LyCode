@@ -459,6 +459,32 @@ Markdown 代码块里的代码会着色：注释、字符串、关键字、类�
 
 未实现：非图片文件附件（PDF/文本等）、一次发送的附件数量上限、图片压缩/缩放。
 
+### 应用图标
+
+品牌蓝圆角方块 + 白色终端提示符 `>_`。选这个组合是因为它在 **16px** 下仍可辨——那是最小的真实使用尺寸（任务栏/窗口标题栏）；更复杂的图形缩到 16px 都会糊成一团。
+
+**资源目录镜像安装目录**，清单只有一份：
+
+```
+assets/icons/linux/hicolor/16x16/apps/lycode.png   →  /usr/share/icons/hicolor/16x16/apps/lycode.png
+assets/icons/linux/hicolor/512x512/apps/lycode.png →  /usr/share/icons/hicolor/512x512/apps/lycode.png
+assets/icons/windows/lycode.ico                     →  编进 exe（Windows 资源）
+assets/icons/windows/win_resources.rc
+assets/resources.qrc
+```
+
+| 决定 | 理由 |
+| --- | --- |
+| 资源树与安装树一一对应 | `install(DIRECTORY ...)` 直接照搬整棵树，不必逐档列文件名；加一档尺寸时 CMake 不用改 |
+| 用 `AUTORCC`（qrc 当源文件列进目标） | ⚠ `qt_add_resources` 在 Qt 6 里两种写法都**静默失败**：第二个参数是资源名而非 `.qrc` 路径（传路径什么都不生成），放进 `FILES` 则把 `.qrc` 本身当一个普通文件内嵌、不解析里面的 PNG。⚠ 而 `CMAKE_AUTORCC` 必须**在创建目标之前**设置，它只在目标创建时被读取 |
+| 附带 `.ico` + `.rc` | 只靠 `setWindowIcon` 不够：那只影响运行中的窗口，**exe 文件本身**在资源管理器里显示的图标来自编译进去的 Windows 资源 |
+| Windows 走 .ico，其他平台走 PNG | `.ico` 本身就是多尺寸容器（实测 Qt 的 ICO 插件会把 16–256 七档都报给 `QIcon`），且与编进 exe 的那份资源同源——运行中的窗口与文件图标不会有两套图像。512 那一档 Windows 用不到 |
+| 资源挂在 `lycode_lib` 上 | 测试链接的是这个目标，资源跟着它才能被测试验证到 |
+| 内嵌而不是运行时读文件 | 装完后二进制与 `assets/` 的相对位置会变（`bin/` vs `share/`），按路径查找迟早出错 |
+| 图标不随主题变色 | 应用图标是**品牌标识**，不该跟着界面明暗主题变 |
+
+`.ico` 是脚本生成的 ICO 容器（内嵌各档 PNG），不需要额外工具。`test_ui_flow` 会断言八档齐全、且 16px 那档能看到白色笔画——漏一档或图糊了都会在测试里报出来。
+
 ### 侧边栏：工作区 → 会话树
 
 左侧是两层树：顶层是工作区，子节点是它的会话。
@@ -682,6 +708,7 @@ tests/          11 个套件（领域模型、权限链、Markdown、调度、Di
 - 权限门：5 步判定链 + 规则匹配（前缀 / `*` / `prefix:*`）+ 异步裁决 + 取消收尾
 - Agent 主循环：模型步 ↔ 工具队列循环、turn 相位、中断、安全上限
 - **后台任务**：`Bash(run_in_background)` + `TaskOutput`/`TaskStop`，含输出落盘、完成通知、超时自动后台化、跨重启恢复与状态栏提示
+- **应用图标**：资源树镜像安装树，AUTORCC 内嵌；附 Windows `.ico`/`.rc`
 - **设置界面**：MCP 服务器与 Skills 目录可在界面里增删改，含技能发现预览
 - **Skills**：从用户级/项目级目录发现 SKILL.md，提示词只列名字+描述，正文按需加载
 - **MCP（stdio）**：按配置拉起外部服务器，其工具注册为普通工具（权限默认保守），可在设置里增删改

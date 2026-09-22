@@ -25,6 +25,7 @@
 #include <QFontMetrics>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QIcon>
 #include <QMenu>
 #include "storage/SessionStore.h"
 #include "tools/BackgroundTaskRegistry.h"
@@ -105,6 +106,7 @@ private slots:
     void topButtonCreatesWorkspaceNotSession();
     void removingCurrentWorkspaceActuallyWorks();
     void everyWorkspaceShowsFoldMarker();
+    void windowUsesTheAppIcon();
 
 private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -1411,6 +1413,60 @@ void TestUiFlow::everyWorkspaceShowsFoldMarker() {
     node->setExpanded(false);
     QVERIFY2(node->text(0).startsWith(QStringLiteral("▸")),
              qPrintable(QStringLiteral("折叠后应当是 ▸，实际：%1").arg(node->text(0))));
+}
+
+void TestUiFlow::windowUsesTheAppIcon() {
+    // 图标以 PNG 内嵌在二进制里（qt_add_resources 挂在 lycode_lib 上）。
+    // 断言两件事：资源确实被编进来了，以及各档尺寸都在——只给一张 512，
+    // 任务栏的 16px 那一档就要靠系统缩，会发虚。
+    const QList<int> sizes = {16, 24, 32, 48, 64, 128, 256, 512};
+    QIcon icon;
+    for (const int size : sizes) {
+        const QString path =
+            QStringLiteral(":/icons/linux/hicolor/%1x%1/apps/lycode.png").arg(size);
+        QVERIFY2(QFile::exists(path),
+                 qPrintable(QStringLiteral("图标资源缺失: %1").arg(path)));
+        icon.addFile(path);
+    }
+    QVERIFY2(!icon.isNull(), "应当能构造出应用图标");
+    for (const int size : sizes) {
+        QVERIFY2(icon.availableSizes().contains(QSize(size, size)),
+                 qPrintable(QStringLiteral("图标缺少 %1px 那一档").arg(size)));
+    }
+
+    // 16px 那一档不能是空图，而且必须能看到**白色笔画**——
+    // 透明底上只有蓝底也算"有内容"，所以查的是白色像素。
+    const QImage small = icon.pixmap(QSize(16, 16)).toImage();
+    QCOMPARE(small.size(), QSize(16, 16));
+    bool hasWhite = false;
+    for (int y = 0; y < small.height() && !hasWhite; ++y) {
+        for (int x = 0; x < small.width(); ++x) {
+            const QColor pixel = small.pixelColor(x, y);
+            if (pixel.alpha() > 200 && pixel.red() > 200 && pixel.green() > 200 &&
+                pixel.blue() > 200) {
+                hasWhite = true;
+                break;
+            }
+        }
+    }
+    QVERIFY2(hasWhite, "16px 图标里应当能看到白色笔画");
+
+    // Windows 分支用的是 .ico（多尺寸容器）。这里在**所有平台**都断言它可用：
+    // 否则那条分支只在 Windows 上被走到，而 CI 的 Windows job 只跑 9 个套件，
+    // 一旦 .ico 损坏或漏了某一档，不会有人发现。
+    const QIcon ico(QStringLiteral(":/icons/windows/lycode.ico"));
+    QVERIFY2(!ico.isNull(), "Windows 用的 .ico 资源应当存在且可读");
+    for (const int size : {16, 24, 32, 48, 64, 128, 256}) {
+        QVERIFY2(ico.availableSizes().contains(QSize(size, size)),
+                 qPrintable(QStringLiteral(".ico 缺少 %1px 那一档").arg(size)));
+    }
+
+    // 主窗口用的是这个图标（由 QApplication 提供，窗口继承）。
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+    QApplication::setWindowIcon(icon);
+    QVERIFY2(!window.windowIcon().isNull(), "主窗口应当带应用图标");
 }
 
 QTEST_MAIN(TestUiFlow)

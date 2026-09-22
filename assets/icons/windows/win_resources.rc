@@ -1,0 +1,4 @@
+// Windows 可执行文件图标：让 exe 在资源管理器/任务栏里也有图标。
+// 只靠 QApplication::setWindowIcon 是不够的——那只影响运行中的窗口，
+// 文件本身的图标来自这里的资源。
+IDI_ICON1 ICON DISCARDABLE "lycode.ico"
