@@ -162,16 +162,18 @@ void PermissionGate::request(const PermissionRequest &request, const QString &ca
         return;
     }
 
-    if (request.kind == PermissionKind::Read) {
+    // 工具显式要求批准时跳过只读/模式直通。顺序放在 plan 之后：
+    // plan 模式下带副作用的调用仍然直接拒绝（模式语义优先于工具的申请）。
+    if (request.needsApproval) {
+        qCDebug(log) << "工具声明需要批准，跳过直通;" << capability;
+    } else if (request.kind == PermissionKind::Read) {
         outcome.automatic = true;
         outcome.reasonCode = QStringLiteral("read_only");
         outcome.response.decision = PermissionDecision::Allow;
         emit resolved(request.id, outcome);
         callback(outcome);
         return;
-    }
-
-    if (!permissionModeRequiresPrompt(mode_, request.kind)) {
+    } else if (!permissionModeRequiresPrompt(mode_, request.kind)) {
         outcome.automatic = true;
         outcome.reasonCode = QStringLiteral("mode_allow");
         outcome.response.decision = PermissionDecision::Allow;

@@ -26,6 +26,7 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QMenu>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QProgressBar>
 #include <QScrollArea>
@@ -52,6 +53,7 @@ using namespace zcode;
 using namespace zcode::ui;
 using zcode::test::FakeGateway;
 using zcode::test::jsonEscape;
+using zcode::test::multiToolCallResponse;
 using zcode::test::textResponse;
 using zcode::test::textResponseWithCache;
 using zcode::test::toolCallResponse;
@@ -354,7 +356,55 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     const QString toolShot = screenshotDir() + QStringLiteral("/04-tool-card-expanded.png");
     QVERIFY2(cards.first()->grab().save(toolShot), qPrintable(toolShot));
 
+    // ── 子代理：独立会话进列表，但不抢走当前会话 ───────────────────────────
+    auto *sessionList = sidebar->findChild<QListWidget *>();
+    QVERIFY(sessionList != nullptr);
+    const int sessionsBefore = sessionList->count();
+    const int parentMessagesBefore = conversation->messageCount();
+
+    const QByteArray agentArgs =
+        R"({"description":"核对日志","prompt":"看看有没有异常","subagent_type":"general-purpose"})";
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Agent"), agentArgs}}));
+    gateway_->enqueue(textResponse("子代理结论：没有异常。"));
+    gateway_->enqueue(textResponse("父代理：收到子代理结论。"));
+
+    composer->setPlainText(QStringLiteral("派个 agent 去核对"));
+    QVERIFY(sendButton->isEnabled());
+    sendButton->click();
+
+    QVERIFY2(waitFor([&]() { return conversation->messageCount() >= parentMessagesBefore + 3; },
+                     15000),
+             "父会话应当继续累积消息（子代理的对话不能替换掉它）");
+    QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }, 15000));
+    // 子会话必须出现在列表里。
+    QVERIFY2(waitFor([&]() { return sessionList->count() > sessionsBefore; }, 8000),
+             "子代理会话应当出现在侧边栏列表里");
+
+    // 列表里能一眼看出哪条是子代理。
+    bool foundSubagentRow = false;
+    for (int row = 0; row < sessionList->count(); ++row) {
+        if (sessionList->item(row)->text().contains(QStringLiteral("子代理"))) {
+            foundSubagentRow = true;
+            break;
+        }
+    }
+    QVERIFY2(foundSubagentRow, "子代理会话应当在列表里标注出来");
+
+    // 关键：当前会话**没有**被子代理顶替。父会话的消息继续累积，
+    // 而不是被替换成子代理那两条。
+    QCOMPARE(conversation->messageCount(), parentMessagesBefore + 3);
+    QVERIFY2(conversation->findChildren<ToolCallWidget *>().size() >= 2,
+             "父会话里应当同时有 Bash 与 Agent 两张工具卡片");
+
+    const QString subagentShot =
+        screenshotDir() + QStringLiteral("/08-subagent-session.png");
+    QVERIFY2(window.grab().save(subagentShot), qPrintable(subagentShot));
+
     // ── 回归：重启后必须能打开之前的会话 ───────────────────────────────────
+    // 用"重启前的实际条数"做基准，而不是写死数字：这条路径上新增任何一轮
+    // 对话都不该让断言失效（写死 3 就踩过这个坑）。
+    const int messagesBeforeRestart = conversation->messageCount();
+    QVERIFY(messagesBeforeRestart >= 3);
     // 曾经的缺陷：onSessionSelected 在 loadSession **之后**才 clear()，而
     // loadSession 会为每条历史消息发 messageAdded，于是刚载入的历史被立刻抹掉。
     // 用户看到的现象就是"关掉软件再打开，之前的会话打不开（点开是空的）"。
@@ -372,7 +422,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
         QVERIFY2(waitFor([&]() { return restartedConversation->messageCount() >= 3; }, 8000),
                  qPrintable(QStringLiteral("重启后应自动打开最近会话并显示历史消息，实际 %1 条")
                                 .arg(restartedConversation->messageCount())));
-        QCOMPARE(restartedConversation->messageCount(), 3);
+        QCOMPARE(restartedConversation->messageCount(), messagesBeforeRestart);
 
         // 历史里的工具卡片也要重建出来，而不是只剩纯文本。
         QVERIFY2(!restartedConversation->findChildren<ToolCallWidget *>().isEmpty(),
@@ -523,6 +573,8 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     // ── 再验一次"正常关闭软件后重新打开" ───────────────────────────────────
     // 上一段是"两个窗口并存"，这一段走真实的 closeEvent（会 closeSession +
     // store.close()），然后再全新启动一次。这才是用户报的那个场景的完整路径。
+    const int messagesBeforeClose = conversation->messageCount();
+
     window.close();
     {
         MainWindow reopened;
@@ -533,9 +585,12 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
         auto *reopenedConversation =
             reopened.findChild<ConversationView *>(QStringLiteral("conversation"));
         QVERIFY(reopenedConversation != nullptr);
-        QVERIFY2(waitFor([&]() { return reopenedConversation->messageCount() >= 3; }, 8000),
+        QVERIFY2(waitFor(
+                     [&]() { return reopenedConversation->messageCount() >= messagesBeforeClose; },
+                     8000),
                  qPrintable(QStringLiteral("正常关闭后重新打开应能看到历史，实际 %1 条")
                                 .arg(reopenedConversation->messageCount())));
+        QCOMPARE(reopenedConversation->messageCount(), messagesBeforeClose);
         QVERIFY(!reopenedConversation->findChildren<ToolCallWidget *>().isEmpty());
     }
 

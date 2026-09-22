@@ -421,6 +421,10 @@ void MainWindow::wireRuntime() {
             &MainWindow::onPermissionResolved);
     connect(&runtime_, &AgentRuntime::turnFinished, this, &MainWindow::onTurnFinished);
     connect(&runtime_, &AgentRuntime::failed, this, &MainWindow::onFailed);
+    connect(&runtime_, &AgentRuntime::subagentSessionChanged, this,
+            &MainWindow::onSubagentSessionChanged);
+    connect(&runtime_, &AgentRuntime::subagentFinished, this,
+            &MainWindow::onSubagentFinished);
 
     connect(sidebar_, &SidebarPanel::newSessionRequested, this,
             &MainWindow::onNewSessionRequested);
@@ -932,6 +936,29 @@ void MainWindow::onTurnFinished(TurnResult result) {
         sidebar_->setActiveSession(activeSessionId_);
     }
     composer_->setFocus();
+}
+
+void MainWindow::onSubagentSessionChanged(const Session &session) {
+    // 子会话只进列表，**绝不切换**当前会话：用户正在看的对话不能被
+    // 后台派生的子代理顶掉。这正是它与 onSessionChanged 分成两个信号的原因。
+    SessionSummary summary;
+    summary.session = session;
+    sidebar_->upsertSession(summary);
+    qCDebug(log) << "子代理会话已更新; id=" << session.id
+                 << "parent=" << session.parentSessionId;
+}
+
+void MainWindow::onSubagentFinished(const Id &childSessionId, bool ok) {
+    qCInfo(log) << "子代理结束; child=" << childSessionId << "ok=" << ok;
+    setStatusMessage(ok ? QStringLiteral("子代理已完成，可在左侧列表查看它的完整过程。")
+                        : QStringLiteral("子代理执行失败，详见左侧列表中的该会话。"));
+
+    // 重新拉一次列表让标题/状态与库一致；同时把选中项还原回当前会话，
+    // 避免 loadWorkspaceSessions() 的刷新动作影响用户的当前视图。
+    if (store_.isOpen()) {
+        loadWorkspaceSessions();
+        sidebar_->setActiveSession(activeSessionId_);
+    }
 }
 
 void MainWindow::onFailed(const QString &message) {

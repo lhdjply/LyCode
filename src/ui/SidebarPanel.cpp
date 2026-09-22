@@ -33,6 +33,18 @@ QString statusBadge(const Session &session) {
     if (session.pendingPermissionCount > 0) {
         return QStringLiteral("%1 待确认").arg(session.pendingPermissionCount);
     }
+    // 子代理会话与主会话混在同一个列表里，必须能一眼分出来。
+    if (session.isSubagent()) {
+        switch (session.status) {
+            case SessionStatus::Running:
+            case SessionStatus::Prewarming:
+                return QStringLiteral("子代理 · 运行中");
+            case SessionStatus::Error:
+                return QStringLiteral("子代理 · 出错");
+            default:
+                return QStringLiteral("子代理");
+        }
+    }
     switch (session.status) {
         case SessionStatus::Running:
         case SessionStatus::Prewarming:

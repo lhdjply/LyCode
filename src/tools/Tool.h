@@ -24,6 +24,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include "core/Types.h"
 #include "model/ModelProvider.h"
@@ -128,10 +129,16 @@ struct ToolResult {
 /// 保证 todo 的唯一所有者是会话而不是工具实例。
 class TodoStore;
 
+/// 子 Agent 宿主。由 AgentRuntime 实现；工具通过它派生子代理，
+/// 从而不依赖 agent/ 的具体类型。
+class SubagentHost;
+
 /// 执行上下文。由 Agent 主循环构造，工具只读。
 struct ToolContext {
     Id sessionId;
     Id turnId;
+    /// 本次调用的 id。用于把派生出的子会话关联回父消息里的工具卡片。
+    Id callId;
     Workspace workspace;
     /// 命令与相对路径的解析基准目录。
     QString workingDirectory;
@@ -146,6 +153,10 @@ struct ToolContext {
 
     /// 会话 todo 存储。不得为空——AgentRuntime 必须注入。
     TodoStore *todoStore = nullptr;
+
+    /// 子 Agent 宿主。为空的含义是"当前环境不支持派生子代理"，
+    /// Agent 工具必须据此明确失败，而不是假装成功。
+    SubagentHost *subagentHost = nullptr;
 
     /// 进度回调，可空。用于把长任务的中间输出推给 UI。
     std::function<void(const QString &chunk)> progress;
@@ -232,9 +243,10 @@ public:
     ToolRegistry(ToolRegistry &&other) noexcept;
     ToolRegistry &operator=(ToolRegistry &&other) noexcept;
 
-    /// 注册工具；同名覆盖并返回被替换的实现（调用方持有所有权）。
+    /// 注册工具并**接管其所有权**。同名覆盖时旧实现会被销毁。
     /// 别名不覆盖已有主名，避免别名悄悄遮蔽真实工具。
-    Tool *add(Tool *tool, const QStringList &aliases = {});
+    /// 返回 false 表示入参非法（空指针或无名工具），此时工具不被接管、也不会被销毁。
+    bool add(Tool *tool, const QStringList &aliases = {});
     /// 取工具实现（含别名），不存在返回 nullptr。注册表不转移所有权。
     Tool *find(const QString &name) const;
     bool contains(const QString &name) const;
@@ -261,7 +273,15 @@ private:
         QStringList aliases;
     };
     QList<Entry> entries_;
+    /// 名字（含别名）→ 工具。仅供查找。
     QHash<QString, Tool *> index_;
+    /// 工具所有权：`add(new XxxTool())` 是最自然的写法，调用方不需要再
+    /// 单独管理生命周期。（此前用裸指针，导致 createWithBuiltins() 里
+    /// new 出来的工具无人释放。）
+    ///
+    /// 用 std::vector<unique_ptr> 而不是把 unique_ptr 放进 Entry：
+    /// Qt 的 QList 元素类型需要可拷贝，而 unique_ptr 不可拷贝。
+    std::vector<std::unique_ptr<Tool>> owned_;
 };
 
 }  // namespace zcode

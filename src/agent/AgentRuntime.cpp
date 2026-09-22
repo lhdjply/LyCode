@@ -6,7 +6,9 @@
 #include "core/Logging.h"
 #include "model/ProviderRegistry.h"
 #include "model/ReasoningLevels.h"
+#include "tools/TodoStore.h"
 
+#include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QTimer>
 
@@ -80,18 +82,252 @@ QString toToken(RunState state) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 AgentRuntime::AgentRuntime(QObject *parent) : QObject(parent) {
-    connect(&permissionGate_, &PermissionGate::requested, this,
-            &AgentRuntime::permissionRequested);
-    connect(&permissionGate_, &PermissionGate::requested, this,
-            [this](const PermissionRequest &) { setPhase(TurnPhase::AwaitingPermission); });
-    connect(&permissionGate_, &PermissionGate::resolved, this,
-            [this](const Id &requestId, const PermissionOutcome &) {
+    ownedPermissionGate_ = std::make_unique<PermissionGate>();
+    permissionGate_ = ownedPermissionGate_.get();
+    wirePermissionGate();
+}
+
+void AgentRuntime::wirePermissionGate() {
+    PermissionGate *gate = permissionGate();
+    if (gate == nullptr) {
+        qCCritical(log) << "权限门为空，权限裁决将无法进行";
+        return;
+    }
+
+    // 权限门可能与子代理共享，所以每个信号处理都要先确认"这是不是本会话的请求"。
+    // 不判定的后果是：子代理要权限时父会话也进入"等待确认"，父子状态互相污染。
+    connect(gate, &PermissionGate::requested, this, [this](const PermissionRequest &request) {
+        if (request.sessionId != session_.id) {
+            return;  // 属于别的运行时（子代理/父代理）
+        }
+        ownPendingPermissions_.insert(request.id);
+        setPhase(TurnPhase::AwaitingPermission);
+        emit permissionRequested(request);
+    });
+
+    connect(gate, &PermissionGate::resolved, this,
+            [this](const Id &requestId, const PermissionOutcome &outcome) {
+                if (!ownPendingPermissions_.remove(requestId)) {
+                    return;  // 不是本会话发出的请求
+                }
                 emit permissionResolved(requestId);
-                // 全部裁决完毕后回到执行态；否则 UI 会一直显示"等待确认"。
-                if (!permissionGate_.hasPending() && phase_ == TurnPhase::AwaitingPermission) {
+                // 本会话的请求全部裁决完毕 → 回到执行态，
+                // 否则 UI 会一直显示"等待确认"。
+                if (ownPendingPermissions_.isEmpty() &&
+                    phase_ == TurnPhase::AwaitingPermission) {
                     setPhase(TurnPhase::ExecutingTools);
                 }
+                Q_UNUSED(outcome)
             });
+}
+
+void AgentRuntime::setPermissionGate(PermissionGate *gate) {
+    if (gate == nullptr) {
+        qCCritical(log) << "拒绝注入空权限门";
+        return;
+    }
+    if (gate == permissionGate_) {
+        return;
+    }
+    // 断开与旧门的连接：不断开会让本运行时继续响应旧门的请求。
+    if (permissionGate_ != nullptr) {
+        permissionGate_->disconnect(this);
+    }
+    permissionGate_ = gate;
+    ownPendingPermissions_.clear();
+    wirePermissionGate();
+    qCInfo(log) << "已切换到共享权限门; session=" << session_.id;
+}
+
+void AgentRuntime::launchSubagent(const LaunchRequest &request, Completion done) {
+    if (done == nullptr) {
+        qCCritical(log) << "派生请求缺少回调，将被丢弃";
+        return;
+    }
+
+    const auto fail = [&done](const QString &message, const QString &code) {
+        LaunchResult result;
+        result.error = message;
+        result.errorCode = code;
+        done(result);
+    };
+
+    if (!subagentsEnabled()) {
+        fail(QStringLiteral("子代理不能再派生子代理。"), QStringLiteral("subagent_disabled"));
+        return;
+    }
+    if (request.prompt.trimmed().isEmpty()) {
+        fail(QStringLiteral("子代理的 prompt 不能为空。"), QStringLiteral("invalid_input"));
+        return;
+    }
+
+    // ── 构造子运行时 ────────────────────────────────────────────────────────
+    // 上下文隔离的全部含义都在这几行：子运行时是独立的 AgentRuntime，
+    // 有自己的 Session、自己的 Message 历史、自己的 todo。
+    auto *child = new AgentRuntime(this);
+    child->subagentDepth_ = subagentDepth_ + 1;
+    child->setProviderRegistry(providers_);
+    // 工具实现共享（工具本身无状态、可重入）；工具**面**由白名单收窄。
+    child->setToolRegistry(tools_);
+    child->setSessionStore(store_);
+    // 权限门共享：这样"谁有权限"只有一个判定点，UI 也只需向一个入口提交裁决。
+    child->setPermissionGate(permissionGate());
+    child->setToolAllowlist(request.toolAllowlist);
+    child->setMaxModelStepsPerTurn(kDefaultSubagentMaxModelSteps);
+    child->setSubagentIdentity(request.subagentType, request.description);
+    // 子代理有自己的 todo 列表，父子互不覆盖。
+    child->ownedTodoStore_ = std::make_unique<TodoStore>();
+    child->setTodoStore(child->ownedTodoStore_.get());
+
+    // 只读 profile 用 Plan 模式兜底：白名单已经收窄了可见工具，
+    // 这一层保证即使模型凭历史记忆调用写操作也会被运行时拒绝。
+    const SessionMode childMode = request.readOnlyProfile ? SessionMode::Plan : session_.mode;
+    const ModelSelection childModel = request.model.isValid() ? request.model : model_;
+    const Workspace childWorkspace =
+        request.workspace.isValid() ? request.workspace : session_.workspace;
+
+    QString error;
+    if (!child->startSession(childWorkspace, childMode, childModel, &error)) {
+        qCWarning(log) << "子代理会话创建失败:" << error;
+        child->deleteLater();
+        fail(error, QStringLiteral("subagent_launch_failed"));
+        return;
+    }
+
+    // 登记父子关系。放在 startSession 之后：startSession 会重置整个 Session。
+    child->adoptAsChild(session_.id, SessionKind::SubagentChild,
+                        request.description.isEmpty() ? QStringLiteral("子代理")
+                                                      : request.description);
+
+    // ── 让 UI 看到子会话，但不让它抢走当前会话 ──────────────────────────────
+    connect(child, &AgentRuntime::sessionChanged, this,
+            [this](const Session &updated) { emit subagentSessionChanged(updated); });
+    // 子代理的权限请求转发给父代理的信号：UI 只监听父运行时的信号，
+    // 转发后弹出确认框，用户裁决经父运行时提交到共享权限门，正好命中子代理的等待项。
+    connect(child, &AgentRuntime::permissionRequested, this,
+            &AgentRuntime::permissionRequested);
+    connect(child, &AgentRuntime::permissionResolved, this,
+            &AgentRuntime::permissionResolved);
+    // 子代理的失败提示也转给用户，否则它会静默失败、只留下一句"子代理执行失败"。
+    connect(child, &AgentRuntime::failed, this, [this, child](const QString &message) {
+        qCWarning(log) << "子代理内部失败:" << message << "child=" << child->session().id;
+    });
+
+    emit subagentSessionChanged(child->session());
+
+    QElapsedTimer elapsed;
+    elapsed.start();
+
+    connect(child, &AgentRuntime::turnFinished, this,
+            [this, child, done, elapsed](TurnResult result) {
+                LaunchResult launch;
+                launch.childSessionId = child->session().id;
+                launch.toolUseCount = child->toolCallCount();
+                launch.durationMs = elapsed.elapsed();
+                // 用会话累计用量：单条 assistant 消息的 usage 是"本轮累计"，
+                // 多步 turn 里逐条相加会重复计数。
+                launch.totalTokens = child->session().cumulativeUsage.effectiveTotal();
+
+                // 回传子代理**最后一条**有正文的 assistant 消息。
+                const QList<Message> messages = child->messages();
+                for (auto iterator = messages.crbegin(); iterator != messages.crend();
+                     ++iterator) {
+                    if (iterator->role != MessageRole::Assistant) {
+                        continue;
+                    }
+                    const QString text = iterator->plainText().trimmed();
+                    if (!text.isEmpty()) {
+                        launch.output = text;
+                        break;
+                    }
+                }
+
+                switch (result) {
+                    case TurnResult::Success:
+                        launch.ok = true;
+                        break;
+                    case TurnResult::Interrupted:
+                        // 用户中断：子代理可能已产出部分结论，交给父代理判断，
+                        // 但要让模型知道这次结果不完整。
+                        launch.ok = true;
+                        launch.truncated = true;
+                        break;
+                    case TurnResult::Failed: {
+                        launch.ok = false;
+                        launch.errorCode = QStringLiteral("subagent_failed");
+                        // 触及步数上限是最常见也最需要区分的一种失败。
+                        if (child->modelStepCount() >= child->maxModelStepsPerTurn()) {
+                            launch.truncated = true;
+                            launch.error = QStringLiteral("子代理触及模型步数上限（%1）被中止。")
+                                               .arg(child->maxModelStepsPerTurn());
+                        } else {
+                            launch.error = child->session().contextUsage.isEmpty()
+                                               ? QStringLiteral("子代理运行失败。")
+                                               : QStringLiteral("子代理运行失败。");
+                        }
+                        break;
+                    }
+                    case TurnResult::Skipped:
+                    case TurnResult::None:
+                        launch.ok = false;
+                        launch.errorCode = QStringLiteral("subagent_not_run");
+                        launch.error = QStringLiteral("子代理未执行。");
+                        break;
+                }
+
+                qCInfo(log) << "子代理结束; child=" << launch.childSessionId
+                            << "ok=" << launch.ok << "steps=" << child->modelStepCount()
+                            << "tools=" << launch.toolUseCount
+                            << "tokens=" << launch.totalTokens
+                            << "durationMs=" << launch.durationMs;
+
+                emit subagentFinished(launch.childSessionId, launch.ok);
+                child->deleteLater();
+                done(launch);
+            });
+
+    qCInfo(log) << "子代理已启动; type=" << request.subagentType
+                << "readOnly=" << request.readOnlyProfile << "child=" << child->session().id;
+
+    QString submitError;
+    if (!child->submitText(request.prompt, &submitError)) {
+        // submitText 失败不会触发 turnFinished，必须在这里收口，否则回调悬挂。
+        qCWarning(log) << "子代理首次提交失败:" << submitError;
+        child->deleteLater();
+        fail(submitError, QStringLiteral("subagent_submit_failed"));
+        return;
+    }
+}
+
+void AgentRuntime::setToolAllowlist(const QStringList &names) {
+    toolAllowlist_ = names;
+}
+
+void AgentRuntime::setMaxModelStepsPerTurn(int steps) {
+    maxModelStepsPerTurn_ = steps > 0 ? steps : kMaxModelStepsPerTurn;
+}
+
+void AgentRuntime::setSubagentIdentity(const QString &subagentType,
+                                      const QString &description) {
+    subagentType_ = subagentType;
+    subagentDescription_ = description;
+}
+
+void AgentRuntime::adoptAsChild(const Id &parentSessionId, SessionKind kind,
+                               const QString &title) {
+    session_.parentSessionId = parentSessionId;
+    session_.kind = kind;
+    if (!title.trimmed().isEmpty()) {
+        session_.title = title.trimmed();
+    }
+    session_.updatedAtMs = nowMs();
+    persistSession();
+    emit sessionChanged(session_);
+}
+
+bool AgentRuntime::subagentsEnabled() const {
+    // 子代理不能再派生子代理：否则一个任务可以无限自我复制。
+    return !isSubagent();
 }
 
 AgentRuntime::~AgentRuntime() {
@@ -154,7 +390,7 @@ bool AgentRuntime::startSession(const Workspace &workspace, SessionMode mode,
     session_.updatedAtMs = session_.createdAtMs;
 
     model_ = model;
-    permissionGate_.setMode(defaultPermissionModeFor(mode));
+    permissionGate()->setMode(defaultPermissionModeFor(mode));
 
     qCInfo(log) << "新建会话; id=" << session_.id << "workspace=" << workspace.path
                 << "mode=" << toToken(mode) << "model=" << model.displayValue();
@@ -191,7 +427,7 @@ bool AgentRuntime::loadSession(const Id &sessionId, QString *errorOut) {
     messages_ = store_->loadMessages(sessionId);
     model_.providerId = session_.providerId;
     model_.modelId = session_.modelId;
-    permissionGate_.setMode(defaultPermissionModeFor(session_.mode));
+    permissionGate()->setMode(defaultPermissionModeFor(session_.mode));
 
     // 冷恢复：上次运行留下的"运行中"状态在本次进程里没有对应实体，
     // 必须归零，否则 UI 会永远显示转圈。
@@ -219,8 +455,8 @@ void AgentRuntime::closeSession() {
     if (isRunning()) {
         abort();
     }
-    permissionGate_.cancelAll(QStringLiteral("会话已关闭"));
-    permissionGate_.reset();
+    permissionGate()->cancelAll(QStringLiteral("会话已关闭"));
+    permissionGate()->reset();
 
     session_ = Session{};
     messages_.clear();
@@ -325,7 +561,7 @@ void AgentRuntime::beginTurn(const QString &userText) {
 }
 
 bool AgentRuntime::resolvePermission(const Id &requestId, const PermissionResponse &response) {
-    return permissionGate_.resolve(requestId, response);
+    return permissionGate()->resolve(requestId, response);
 }
 
 void AgentRuntime::abort() {
@@ -344,7 +580,7 @@ void AgentRuntime::abort() {
     setPhase(TurnPhase::Completing);
 
     // 等待中的权限请求必须先收口，否则回调悬挂会让状态机停住。
-    permissionGate_.cancelAll(QStringLiteral("用户中断了本次运行"));
+    permissionGate()->cancelAll(QStringLiteral("用户中断了本次运行"));
 
     if (activeStream_ != nullptr) {
         ModelStream *stream = activeStream_;
@@ -377,10 +613,15 @@ void AgentRuntime::runModelStep() {
         return;
     }
 
-    if (modelStepCount_ >= kMaxModelStepsPerTurn) {
+    if (modelStepCount_ >= maxModelStepsPerTurn_) {
+        qCWarning(log) << "触及模型步上限; steps=" << modelStepCount_
+                       << "limit=" << maxModelStepsPerTurn_ << "subagent=" << isSubagent();
         completeTurn(TurnResult::Failed,
-                     QStringLiteral("单次回合的模型步数超过安全上限（%1），已中止。")
-                         .arg(kMaxModelStepsPerTurn));
+                     isSubagent()
+                         ? QStringLiteral("子代理的模型步数超过上限（%1），已中止。")
+                               .arg(maxModelStepsPerTurn_)
+                         : QStringLiteral("单次回合的模型步数超过安全上限（%1），已中止。")
+                               .arg(maxModelStepsPerTurn_));
         return;
     }
 
@@ -472,12 +713,17 @@ ModelRequest AgentRuntime::buildModelRequest() const {
     promptInput.workspace = session_.workspace;
     promptInput.cwd = session_.workspace.path;
     promptInput.mode = session_.mode;
-    promptInput.permissionMode = permissionGate_.mode();
+    promptInput.permissionMode = permissionGate()->mode();
     promptInput.appVersion = QStringLiteral(ZCODE_QT_VERSION);
     if (tools_ != nullptr) {
-        promptInput.tools = tools_->specs();
+        // 白名单非空时只声明这些工具：子代理的只读 profile 靠它收窄工具面，
+        // 让模型从一开始就看不到写操作。
+        promptInput.tools = toolAllowlist_.isEmpty() ? tools_->specs()
+                                                     : tools_->specsFor(toolAllowlist_);
         request.tools = promptInput.tools;
     }
+    promptInput.subagentType = subagentType_;
+    promptInput.subagentDescription = subagentDescription_;
     request.systemPrompt = SystemPromptBuilder::build(promptInput);
 
     // 只投影 user / assistant：内部 System 角色（压缩摘要等）不进请求。
@@ -924,6 +1170,17 @@ void AgentRuntime::executeToolAt(int index) {
         return;
     }
 
+    // 白名单的第二道闸门：声明层已经不给模型看这些工具了，
+    // 但历史消息里可能残留旧声明，或模型凭记忆直接调用，所以执行侧必须再拦一次。
+    if (!toolAllowlist_.isEmpty() && !toolAllowlist_.contains(call.name)) {
+        qCWarning(log) << "工具不在当前白名单内，拒绝执行:" << call.name;
+        finishToolCall(callId,
+                       ToolResult::failure(
+                           QStringLiteral("工具 %1 不在当前子代理的可用范围内。").arg(call.name),
+                           QStringLiteral("tool_not_allowed")));
+        return;
+    }
+
     const ToolMetadata metadata = tool->metadata();
 
     // 入参校验放在权限之前：不合法的调用不该让用户看到确认框。
@@ -955,6 +1212,7 @@ void AgentRuntime::executeToolAt(int index) {
     request.input = call.input;
     request.kind = kind;
     request.riskLevel = metadata.riskLevel;
+    request.needsApproval = metadata.needsApproval;
     request.title = tool->title(call.input);
     request.description = tool->permissionDescription(call.input);
     request.createdAtMs = nowMs();
@@ -998,7 +1256,7 @@ void AgentRuntime::executeToolAt(int index) {
 
     // 按值捕获：权限裁决与工具执行都可能是异步的，
     // 这个栈帧那时早已返回，引用捕获会悬空。
-    permissionGate_.request(
+    permissionGate()->request(
         request, capability, subject,
         [this, callId, partId, request, tool, toolInput](PermissionOutcome outcome) {
             Message *message = currentAssistantMessage();
@@ -1037,12 +1295,16 @@ void AgentRuntime::executeToolAt(int index) {
             ToolContext context;
             context.sessionId = session_.id;
             context.turnId = currentTurnId_;
+            context.callId = callId;
             context.workspace = session_.workspace;
             context.workingDirectory = session_.workspace.path;
-            context.permissionMode = permissionGate_.mode();
+            context.permissionMode = permissionGate()->mode();
             context.readOnly = session_.mode == SessionMode::Plan;
-            context.grantedRules = permissionGate_.grantedRules();
+            context.grantedRules = permissionGate()->grantedRules();
             context.todoStore = todos_;
+            // 子代理宿主就是本运行时。子代理里 subagentsEnabled() 为 false，
+            // Agent 工具据此拒绝递归派生。
+            context.subagentHost = this;
             // 并发执行时所有工具共享同一个取消令牌；这是刻意的：
             // 用户按一次"停止"应当让整轮的所有工具都停下。
             context.cancelled = cancelFlag_;
@@ -1419,7 +1681,7 @@ void AgentRuntime::setMode(SessionMode mode) {
     qCInfo(log) << "会话模式变更:" << toToken(session_.mode) << "->" << toToken(mode);
     session_.mode = mode;
     // 模式决定默认权限策略；用户已授予的规则保留（显式授权不该被模式切换抹掉）。
-    permissionGate_.setMode(defaultPermissionModeFor(mode));
+    permissionGate()->setMode(defaultPermissionModeFor(mode));
     session_.updatedAtMs = nowMs();
     persistSession();
     emit sessionChanged(session_);

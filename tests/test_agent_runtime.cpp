@@ -64,10 +64,16 @@ private slots:
     void nonParallelSafeToolFormsSerialBarrier();
     void stopTurnWaitsForBatchSiblings();
     void concurrencyPolicyIsTriState();
+    void agentToolIsRegisteredWithAlias();
+    void subagentProfilesDefineToolSurfaces();
+    void toolAllowlistBlocksBothDeclarationAndExecution();
+    void subagentCannotSpawnSubagents();
+    void subagentRunsItsOwnTurnAndReportsBack();
 
 private:
     /// 组装一个指向假网关的运行时。
-    bool setupRuntime(SessionMode mode, PermissionMode permissionMode);
+    bool setupRuntime(SessionMode mode, PermissionMode permissionMode,
+                      SessionStore *store = nullptr);
     /// 只配置 provider，不建会话（供需要自己组装 runtime 的测试使用）。
     void configureProviders();
 
@@ -115,14 +121,18 @@ void TestAgentRuntime::configureProviders() {
     providers_->replaceAll({config});
 }
 
-bool TestAgentRuntime::setupRuntime(SessionMode mode, PermissionMode permissionMode) {
+bool TestAgentRuntime::setupRuntime(SessionMode mode, PermissionMode permissionMode,
+                                   SessionStore *store) {
     configureProviders();
 
     *tools_ = ToolRegistry::createWithBuiltins();
     runtime_->setProviderRegistry(providers_.get());
     runtime_->setToolRegistry(tools_.get());
     runtime_->setTodoStore(todos_.get());
-    // 故意不注入 SessionStore：运行时必须能在无持久化时正常工作。
+    // 默认不注入 SessionStore：运行时必须能在无持久化时正常工作。
+    // 需要持久化的测试必须在 startSession **之前**注入，否则会话行不存在，
+    // 消息落盘会因外键失败（而且这种失败只是告警，不容易被注意到）。
+    runtime_->setSessionStore(store);
 
     Workspace workspace;
     workspace.path = tempDir_.path();
@@ -873,6 +883,218 @@ void TestAgentRuntime::concurrencyPolicyIsTriState() {
     QVERIFY2(!tools_->find(QStringLiteral("Edit"))->canRunInParallel(), "改文件不能并发");
     QVERIFY2(!tools_->find(QStringLiteral("TodoWrite"))->canRunInParallel(),
              "TodoWrite 虽然 readOnly，但会写会话状态，必须串行");
+}
+
+void TestAgentRuntime::agentToolIsRegisteredWithAlias() {
+    *tools_ = ToolRegistry::createWithBuiltins();
+
+    Tool *agent = tools_->find(QStringLiteral("Agent"));
+    QVERIFY2(agent != nullptr, "内置工具里应当有 Agent");
+    // `Task` 是 npm 里 Agent 的 Claude Code 兼容别名。
+    QCOMPARE(tools_->find(QStringLiteral("Task")), agent);
+    QVERIFY(agent->metadata().providerVisible);
+    // 多个 Agent 可以在同一条消息里并行发出。
+    QVERIFY(agent->canRunInParallel());
+
+    // 声明里必须带 subagent_type 枚举，且默认值与 profile 表一致。
+    const QJsonObject schema = agent->inputSchema();
+    const QJsonObject properties = json::object(schema, QStringLiteral("properties"));
+    QVERIFY(properties.contains(QStringLiteral("subagent_type")));
+    QVERIFY(properties.contains(QStringLiteral("description")));
+    QVERIFY(properties.contains(QStringLiteral("prompt")));
+}
+
+void TestAgentRuntime::subagentProfilesDefineToolSurfaces() {
+    const SubagentProfile *general = findSubagentProfile(QStringLiteral("general-purpose"));
+    QVERIFY(general != nullptr);
+    QVERIFY2(!general->readOnly, "general-purpose 必须能改代码");
+    QVERIFY2(general->toolAllowlist.isEmpty(), "general-purpose 继承完整工具面");
+
+    const SubagentProfile *explore = findSubagentProfile(QStringLiteral("Explore"));
+    QVERIFY(explore != nullptr);
+    QVERIFY2(explore->readOnly, "Explore 必须是只读的");
+    // 只读 profile 的工具面不能包含任何写/执行工具。
+    for (const QString &forbidden : {QStringLiteral("Write"), QStringLiteral("Edit"),
+                                     QStringLiteral("Bash"), QStringLiteral("Agent")}) {
+        QVERIFY2(!explore->toolAllowlist.contains(forbidden),
+                 qPrintable(QStringLiteral("只读 profile 不应包含 %1").arg(forbidden)));
+    }
+    QVERIFY(explore->toolAllowlist.contains(QStringLiteral("Read")));
+    QVERIFY(explore->toolAllowlist.contains(QStringLiteral("Grep")));
+
+    // 未知 profile 必须返回 nullptr，调用方据此拒绝该次调用。
+    QVERIFY(findSubagentProfile(QStringLiteral("no-such-profile")) == nullptr);
+    QCOMPARE(defaultSubagentProfileId(), QStringLiteral("general-purpose"));
+}
+
+void TestAgentRuntime::toolAllowlistBlocksBothDeclarationAndExecution() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 白名单只留 Read：声明层不该再把 Write 告诉模型。
+    runtime_->setToolAllowlist({QStringLiteral("Read")});
+
+    const QString path = tempDir_.filePath(QStringLiteral("allowlist.txt"));
+    QFile sample(path);
+    QVERIFY(sample.open(QIODevice::WriteOnly));
+    sample.write("x\n");
+    sample.close();
+
+    // 模型凭"记忆"直接调用白名单外的工具。
+    const QByteArray writeArgsFirst =
+        QByteArray(R"RAW({\"file_path\":\")RAW") + jsonEscape(path) +
+        QByteArray(R"RAW(\")RAW");
+    const QByteArray writeArgsSecond = R"RAW(,\"content\":\"hacked\"})RAW";
+    gateway_->enqueue(
+        toolCallResponse(QStringLiteral("Write"), writeArgsFirst, writeArgsSecond));
+    gateway_->enqueue(textResponse("ok"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(8000));
+
+    // 声明层：请求体里的 tools 只应有 Read。
+    const QJsonObject body = QJsonDocument::fromJson(gateway_->lastBody()).object();
+    const QJsonArray declaredTools = json::array(body, QStringLiteral("tools"));
+    QCOMPARE(declaredTools.size(), 1);
+    QCOMPARE(json::str(json::object(declaredTools.first().toObject(), QStringLiteral("function")),
+                       QStringLiteral("name")),
+             QStringLiteral("Read"));
+
+    // 执行层：绕过声明也要被拦住。
+    const ToolPart part = runtime_->messages().at(1).toolParts().first();
+    QCOMPARE(part.name, QStringLiteral("Write"));
+    QCOMPARE(part.state, ToolState::Error);
+    QCOMPARE(part.errorCode, QStringLiteral("tool_not_allowed"));
+}
+
+void TestAgentRuntime::subagentCannotSpawnSubagents() {
+    // 走真实路径验证递归拦截：让子代理**真的**去调 Agent。
+    // 没有为测试往生产代码加后门（例如强制深度的 setter）。
+    SessionStore store;
+    QVERIFY2(store.open(tempDir_.filePath(QStringLiteral("nested-test.db"))),
+             qPrintable(store.lastError()));
+
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default, &store));
+
+    const QByteArray parentArgs =
+        R"({"description":"outer","prompt":"delegate further","subagent_type":"general-purpose"})";
+    const QByteArray childArgs =
+        R"({"description":"inner","prompt":"nested attempt","subagent_type":"general-purpose"})";
+
+    // 请求顺序：父 1（派生）→ 子 1（尝试再派生）→ 子 2（放弃并给结论）→ 父 2（收尾）
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Agent"), parentArgs}}));
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Agent"), childArgs}}));
+    gateway_->enqueue(textResponse("子代理：我不能再派生子代理，已自己完成。"));
+    gateway_->enqueue(textResponse("父代理：收到。"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(15000));
+
+    QCOMPARE(finishedSpy.first().at(0).value<TurnResult>(), TurnResult::Success);
+    QCOMPARE(gateway_->requestCount(), 4);
+
+    // 父代理视角：Agent 工具成功，拿到子代理的结论。
+    const ToolPart parentAgentPart = runtime_->messages().at(1).toolParts().first();
+    QCOMPARE(parentAgentPart.state, ToolState::Success);
+    QVERIFY(parentAgentPart.output.contains(QStringLiteral("我不能再派生子代理")));
+
+    // 子代理视角：它自己的那次嵌套调用被明确拒绝。
+    const QString childSessionId =
+        parentAgentPart.metadata.value(QStringLiteral("childSessionId")).toString();
+    QVERIFY(!childSessionId.isEmpty());
+
+    const QList<Message> childMessages = store.loadMessages(childSessionId);
+    bool foundRejectedNestedCall = false;
+    for (const Message &message : childMessages) {
+        for (const ToolPart &part : message.toolParts()) {
+            if (part.name != QStringLiteral("Agent")) {
+                continue;
+            }
+            QCOMPARE(part.state, ToolState::Error);
+            QCOMPARE(part.errorCode, QStringLiteral("subagent_disabled"));
+            foundRejectedNestedCall = true;
+        }
+    }
+    QVERIFY2(foundRejectedNestedCall, "子代理的嵌套派生必须被拒绝并记录下来");
+
+    // 只应存在两个会话：父与子。嵌套尝试不得产生第三个会话。
+    const QList<SessionSummary> sessions =
+        store.listSessions(runtime_->session().workspace.key());
+    QCOMPARE(sessions.size(), 2);
+}
+
+void TestAgentRuntime::subagentRunsItsOwnTurnAndReportsBack() {
+    // 需要一个会持久化的 store：子会话要作为一条会话被记录。
+    SessionStore store;
+    QVERIFY2(store.open(tempDir_.filePath(QStringLiteral("subagent-test.db"))),
+             qPrintable(store.lastError()));
+
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default, &store));
+
+    const QByteArray args = R"({"description":"check the logs","prompt":"find the relevant lines","subagent_type":"general-purpose"})";
+    gateway_->enqueue(multiToolCallResponse({{QStringLiteral("Agent"), args}}));
+    // 子代理的第一轮（也是唯一一轮）：直接给结论。
+    gateway_->enqueue(textResponse("子代理结论：问题出在 config.cpp 第 42 行。"));
+    // 父代理消化工具结果后的收尾。
+    gateway_->enqueue(textResponse("父代理：已收到子代理结论。"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QSignalSpy childSessionSpy(runtime_.get(), &AgentRuntime::subagentSessionChanged);
+    QSignalSpy childFinishedSpy(runtime_.get(), &AgentRuntime::subagentFinished);
+
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(15000));
+
+    QCOMPARE(finishedSpy.first().at(0).value<TurnResult>(), TurnResult::Success);
+    // 父 1 次 + 子 1 次 + 父收尾 1 次
+    QCOMPARE(gateway_->requestCount(), 3);
+
+    // ── 回传内容 ───────────────────────────────────────────────────────────
+    const QList<Message> parentMessages = runtime_->messages();
+    const ToolPart agentPart = parentMessages.at(1).toolParts().first();
+    QCOMPARE(agentPart.name, QStringLiteral("Agent"));
+    QCOMPARE(agentPart.state, ToolState::Success);
+    QVERIFY2(agentPart.output.contains(QStringLiteral("子代理结论")),
+             "父代理必须收到子代理的最后一条消息");
+    // 用量摘要行与 npm 的 <usage> 标签对齐。
+    QVERIFY2(agentPart.output.contains(QStringLiteral("<usage>subagent_tokens:")),
+             qPrintable(agentPart.output));
+    QVERIFY(agentPart.output.contains(QStringLiteral("tool_uses:")));
+
+    const QString childSessionId =
+        agentPart.metadata.value(QStringLiteral("childSessionId")).toString();
+    QVERIFY(!childSessionId.isEmpty());
+    QCOMPARE(agentPart.metadata.value(QStringLiteral("subagentType")).toString(),
+             QStringLiteral("general-purpose"));
+
+    // ── 上下文隔离 ─────────────────────────────────────────────────────────
+    // 子代理的完整对话**不能**进入父代理的消息列表，父代理只看到一段结论。
+    QCOMPARE(parentMessages.size(), 4);
+    for (const Message &message : parentMessages) {
+        QVERIFY2(!message.plainText().contains(QStringLiteral("check the logs")),
+                 "子代理的派生参数不应成为父代理的消息");
+    }
+
+    // ── 子会话作为独立会话落盘 ─────────────────────────────────────────────
+    Session childSession;
+    QVERIFY2(store.loadSession(childSessionId, &childSession), "子会话必须落盘");
+    QCOMPARE(childSession.parentSessionId, runtime_->session().id);
+    QCOMPARE(childSession.kind, SessionKind::SubagentChild);
+    QCOMPARE(childSession.title, QStringLiteral("check the logs"));
+
+    // 子会话有自己的消息历史。
+    const QList<Message> childMessages = store.loadMessages(childSessionId);
+    QVERIFY2(childMessages.size() >= 2, "子会话应当有自己的完整对话");
+    QVERIFY(childMessages.first().plainText().contains(QStringLiteral("find the relevant lines")));
+
+    // ── 界面信号 ───────────────────────────────────────────────────────────
+    QVERIFY2(childSessionSpy.count() >= 1, "子会话必须通知 UI 以便出现在列表里");
+    QCOMPARE(childFinishedSpy.count(), 1);
+    QVERIFY(childFinishedSpy.first().at(1).toBool());
 }
 
 QTEST_MAIN(TestAgentRuntime)

@@ -30,11 +30,13 @@
 
 #include <QJsonObject>
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 #include "agent/PermissionGate.h"
 #include "core/Types.h"
 #include "storage/SessionStore.h"
+#include "tools/SubagentHost.h"
 #include "tools/Tool.h"
 
 namespace zcode {
@@ -80,7 +82,7 @@ enum class TurnResult {
     Skipped,  ///< 因容量或模式限制未执行
 };
 
-class AgentRuntime : public QObject {
+class AgentRuntime : public QObject, public SubagentHost {
     Q_OBJECT
 
 public:
@@ -121,13 +123,41 @@ public:
     void setMode(SessionMode mode);
     void setModel(const ModelSelection &model);
 
+    /// 工具白名单。非空时只声明与执行这些工具（子代理的只读 profile 用它收窄工具面）。
+    void setToolAllowlist(const QStringList &names);
+    QStringList toolAllowlist() const { return toolAllowlist_; }
+
+    /// 单个 turn 允许的模型步数上限。
+    void setMaxModelStepsPerTurn(int steps);
+    int maxModelStepsPerTurn() const { return maxModelStepsPerTurn_; }
+
+    /// 当前运行时是否是子代理（子代理不能再派生子代理）。
+    bool isSubagent() const { return subagentDepth_ > 0; }
+
+    /// 把本会话登记为某个父会话的子会话，并落盘。
+    void adoptAsChild(const Id &parentSessionId, SessionKind kind, const QString &title);
+
+    /// 设置子代理身份，用于生成子代理专属的系统提示词。
+    void setSubagentIdentity(const QString &subagentType, const QString &description);
+
+    // ── SubagentHost ────────────────────────────────────────────────────────
+    void launchSubagent(const LaunchRequest &request, Completion done) override;
+    bool subagentsEnabled() const override;
+
     /// 重新测量上下文用量并通知 UI。
     ///
     /// 外部改了会影响上下文窗口的东西之后必须调用它：用户在设置页调整
     /// "上下文窗口/最大输出"、或换了模型，都会改变分母。不调用的话界面会一直
     /// 显示旧值，看起来像"设置没生效"（只能等下一个 turn 结束才刷新）。
     void remeasureContext();
-    PermissionGate *permissionGate() { return &permissionGate_; }
+    /// 权限门。父会话拥有它；子代理**共享同一个实例**，
+    /// 这样"谁有权限"只有一个判定点，UI 也只需向一个入口提交裁决
+    /// （否则子代理弹出的确认框会把裁决提交到父会话的权限门上）。
+    /// const 版本返回非 const 指针：权限门本身不是本对象状态的一部分，
+    /// 在 const 方法里也需要读它的模式（buildModelRequest 就是 const）。
+    PermissionGate *permissionGate() const { return permissionGate_; }
+    /// 注入共享的权限门（子代理用）。传 nullptr 无效。
+    void setPermissionGate(PermissionGate *gate);
 
     // ── 状态查询 ────────────────────────────────────────────────────────────
     RunState runState() const;
@@ -151,8 +181,22 @@ public:
     /// 同一组内并行执行的上限。与 npm 的 ToolScheduler 默认 maxConcurrency 一致。
     static constexpr int kMaxToolConcurrency = 10;
 
+    /// 子代理的模型步上限。
+    ///
+    /// npm 的子代理 `maxTurns` 默认 4；它按"turn"计数（一次模型响应 + 其工具批），
+    /// 本实现按"模型步"计数（一步 = 一次模型响应）。一次工具往返需要两步
+    /// （请求工具 + 消化结果），所以 4 轮工具往返约等于 12 步，取 12 作为等价上限。
+    /// 目的是给子代理一个明确的边界，避免它无限自我消耗。
+    static constexpr int kDefaultSubagentMaxModelSteps = 12;
+
 signals:
     void sessionChanged(const zcode::Session &session);
+    /// 子代理的会话状态变化。与 sessionChanged 刻意分开：
+    /// 接收方对 sessionChanged 的反应是"切换到该会话"，
+    /// 而子会话只应出现在列表里，绝不能抢走当前会话。
+    void subagentSessionChanged(const zcode::Session &session);
+    /// 子代理结束（用于 UI 更新列表里的状态）。
+    void subagentFinished(const zcode::Id &childSessionId, bool ok);
     void messageAdded(const zcode::Message &message);
     void partAppended(const zcode::Id &messageId, const zcode::Part &part);
     void partUpdated(const zcode::Id &messageId, const zcode::Part &part);
@@ -189,6 +233,8 @@ private:
     void finishToolCall(const QString &callId, const ToolResult &result);
     /// 把尚未终结的调用标记为取消（中断或提前终止时）。
     void cancelPendingToolCalls(const QString &reason);
+    /// 订阅权限门的信号。切换共享门之后必须重新订阅。
+    void wirePermissionGate();
     void afterToolQueue();
     void completeTurn(TurnResult result, const QString &errorMessage = {});
 
@@ -242,7 +288,10 @@ private:
     Session session_;
     QList<Message> messages_;
     ModelSelection model_;
-    PermissionGate permissionGate_;
+    /// 默认权限门（本会话自有时使用）。
+    std::unique_ptr<PermissionGate> ownedPermissionGate_;
+    /// 生效的权限门；指向 ownedPermissionGate_ 或外部注入的实例。
+    PermissionGate *permissionGate_ = nullptr;
 
     // ── turn 状态 ───────────────────────────────────────────────────────────
     TurnPhase phase_ = TurnPhase::Idle;
@@ -265,6 +314,22 @@ private:
     TurnResult lastResult_ = TurnResult::None;
     /// 当前 turn 的标识，用于把工具执行与消息关联起来。
     Id currentTurnId_;
+    /// 工具白名单；空表示不限制。
+    QStringList toolAllowlist_;
+    /// 本运行时的模型步上限（子代理取更小的值）。
+    int maxModelStepsPerTurn_ = kMaxModelStepsPerTurn;
+    /// 子代理深度。0 = 主代理；> 0 时禁止再派生。
+    int subagentDepth_ = 0;
+    /// **本运行时自己**发出的、尚未裁决的权限请求。
+    /// 权限门可能与子代理共享，所以不能用 gate->hasPending() 判断
+    /// "我是不是在等用户"——那会把别人的等待算到自己头上。
+    QSet<Id> ownPendingPermissions_;
+    /// 子代理身份（非空表示这是子代理运行时）。
+    QString subagentType_;
+    QString subagentDescription_;
+    /// 子代理自己的 todo 存储（上下文隔离的一部分：父子不共享 todo）。
+    std::unique_ptr<TodoStore> ownedTodoStore_;
+
     /// 传给工具与权限层的取消令牌。一个 turn 一个，abort() 时置位。
     /// 用 shared_ptr 是因为工具可能在异步回调里持有它，生命周期必须独立于 turn。
     std::shared_ptr<std::atomic_bool> cancelFlag_;

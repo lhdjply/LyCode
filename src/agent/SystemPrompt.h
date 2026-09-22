@@ -47,6 +47,12 @@ struct SystemPromptInput {
     QStringList projectBuildFiles;
     /// 关闭项目说明文件读取（测试用）。
     bool skipProjectInstructions = false;
+
+    /// 非空表示这是子代理运行时：使用子代理身份与说明，
+    /// 而不是主代理身份。取值来自 SubagentProfile::id。
+    QString subagentType;
+    /// 派生子代理时给出的任务描述，用于让子代理确认自己的职责边界。
+    QString subagentDescription;
 };
 
 class SystemPromptBuilder {
@@ -70,6 +76,16 @@ public:
 
     /// 会话模式约束片段。
     static QString modeSection(SessionMode mode, PermissionMode permissionMode);
+
+    /// 子代理身份片段。取代主代理身份：子代理的职责边界与主代理不同
+    /// （无人对话、只看结论、不得再派生子代理）。
+    static QString subagentIdentitySection(const QString &subagentType,
+                                           const QString &description);
+
+    /// 子代理的模式约束。与 modeSection 分开：主代理的 plan 模式要求
+    /// "产出一份计划供用户批准"，而只读子代理要的是"把结论讲清楚"。
+    /// 混用会让只读子代理去写计划而不是给调查结果。
+    static QString subagentModeSection(SessionMode mode);
 
     /// 探测项目上下文：语言、包管理器、构建文件。
     static void detectProjectContext(const QString &workingDirectory,

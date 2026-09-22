@@ -564,6 +564,9 @@ struct PermissionRequest {
     QJsonObject input;
     PermissionKind kind = PermissionKind::Other;
     RiskLevel riskLevel = RiskLevel::Medium;
+    /// 工具显式声明"必须经用户批准"。为真时**跳过只读/模式直通**，
+    /// 直接进入询问——否则一个声明了 needsApproval 的只读工具会被静默放行。
+    bool needsApproval = false;
 
     /// 面向用户的标题与说明，由工具自身生成。
     QString title;

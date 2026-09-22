@@ -26,6 +26,7 @@
 #include "tools/GlobTool.h"
 #include "tools/GrepTool.h"
 #include "tools/ReadTool.h"
+#include "tools/AgentTool.h"
 #include "tools/TodoTool.h"
 #include "tools/WriteTool.h"
 
@@ -140,9 +141,14 @@ PermissionKind permissionKindFor(const ToolMetadata &metadata) {
         case SideEffectScope::None:
         case SideEffectScope::Session:
         case SideEffectScope::UserInteraction:
-            return PermissionKind::Other;
+            // 这三类都不触碰工作区或外部世界，因此不该按"写入/执行"处理。
+            // 归为 Read 后走只读直通；它们真正的副作用发生在**内部**工具上
+            // （例如 Agent 派生的子代理会各自走权限链），不需要在这里弹窗。
+            // npm 的 checkBuildMode 对 scope=session + risk=low + 非破坏性
+            // + 不需批准的工具同样是直接 allow。
+            return PermissionKind::Read;
     }
-    return PermissionKind::Other;
+    return PermissionKind::Read;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -418,8 +424,10 @@ ToolRegistry::ToolRegistry() = default;
 ToolRegistry::~ToolRegistry() = default;
 
 ToolRegistry::ToolRegistry(ToolRegistry &&other) noexcept
-    : entries_(std::move(other.entries_)), index_(std::move(other.index_)) {
-    // 移动后清空源对象，避免它被继续使用（例如误以为还持有条目）。
+    : entries_(std::move(other.entries_)),
+      index_(std::move(other.index_)),
+      owned_(std::move(other.owned_)) {
+    // 源对象只需清掉索引：继续用它查找会命中已经不归它所有的指针。
     other.entries_.clear();
     other.index_.clear();
 }
@@ -428,6 +436,9 @@ ToolRegistry &ToolRegistry::operator=(ToolRegistry &&other) noexcept {
     if (this == &other) {
         return *this;
     }
+    // 移动赋值必须先释放自己持有的工具（owned_ 的移动赋值会做这件事），
+    // 再接管对方的三个容器。
+    owned_ = std::move(other.owned_);
     entries_ = std::move(other.entries_);
     index_ = std::move(other.index_);
     other.entries_.clear();
@@ -435,22 +446,42 @@ ToolRegistry &ToolRegistry::operator=(ToolRegistry &&other) noexcept {
     return *this;
 }
 
-Tool *ToolRegistry::add(Tool *tool, const QStringList &aliases) {
+bool ToolRegistry::add(Tool *tool, const QStringList &aliases) {
     if (tool == nullptr) {
         qCCritical(log) << "拒绝注册空工具指针";
-        return nullptr;
+        return false;
     }
     const QString name = tool->metadata().name;
     if (name.isEmpty()) {
         qCCritical(log) << "拒绝注册无名工具（metadata().name 为空）";
-        return nullptr;
+        return false;
     }
 
-    Tool *replaced = nullptr;
     Tool *existing = index_.value(name, nullptr);
     if (existing != nullptr) {
-        // 同名覆盖：保留原位置（顺序稳定，模型看到的声明顺序不变）。
-        replaced = existing;
+        // 同名覆盖：先彻底移除旧实现（含它的别名索引），否则销毁后
+        // index_ 里会留下悬垂指针。
+        for (Entry &entry : entries_) {
+            if (entry.name != name) {
+                continue;
+            }
+            for (const QString &alias : entry.aliases) {
+                if (index_.value(alias, nullptr) == existing) {
+                    index_.remove(alias);
+                }
+            }
+            break;
+        }
+        index_.remove(name);
+        for (auto iterator = owned_.begin(); iterator != owned_.end(); ++iterator) {
+            if (iterator->get() == existing) {
+                owned_.erase(iterator);  // 析构旧实现
+                break;
+            }
+        }
+
+        // 保留原位置，模型看到的声明顺序不变。
+        owned_.emplace_back(tool);
         for (Entry &entry : entries_) {
             if (entry.name == name) {
                 entry.tool = tool;
@@ -460,6 +491,7 @@ Tool *ToolRegistry::add(Tool *tool, const QStringList &aliases) {
         }
         qCInfo(log) << "工具被覆盖注册:" << name;
     } else {
+        owned_.emplace_back(tool);
         Entry entry;
         entry.name = name;
         entry.tool = tool;
@@ -480,7 +512,7 @@ Tool *ToolRegistry::add(Tool *tool, const QStringList &aliases) {
         }
         index_.insert(alias, tool);
     }
-    return replaced;
+    return true;
 }
 
 Tool *ToolRegistry::find(const QString &name) const {
@@ -578,6 +610,8 @@ ToolRegistry ToolRegistry::createWithBuiltins() {
     registry.add(new GrepTool());
     registry.add(new TodoReadTool());
     registry.add(new TodoWriteTool());
+    // `Task` 是 npm 里 Agent 的 Claude Code 兼容别名，模型两种写法都能调到。
+    registry.add(new AgentTool(), {QStringLiteral("Task")});
     qCInfo(log) << "已注册内置工具:" << registry.names().join(QStringLiteral(", "));
     return registry;
 }

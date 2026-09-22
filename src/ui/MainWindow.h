@@ -76,6 +76,9 @@ private slots:
     void onPermissionResolved(const Id &requestId);
     void onTurnFinished(TurnResult result);
     void onFailed(const QString &message);
+    /// 子代理的会话状态变化：只更新列表，**不切换**当前会话。
+    void onSubagentSessionChanged(const zcode::Session &session);
+    void onSubagentFinished(const zcode::Id &childSessionId, bool ok);
 
     // ── 交互 ────────────────────────────────────────────────────────────────
     void onSendRequested();
