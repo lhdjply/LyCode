@@ -99,6 +99,20 @@ struct Palette {
     QColor diffRemoved;
     QColor diffRemovedForeground;
 
+    // 语法高亮
+    //
+    // ⚠ 这组**不是** npm 的设计令牌：npm 的 UI 变量里没有语法配色
+    // （Diff 那组是唯一的例外，所以上面单独列了）。这里是编辑器风格的
+    // 常用取值（One Light / One Dark 一族），挑选标准是与本主题的
+    // 代码背景对比度足够、且彼此色相可区分。
+    QColor syntaxKeyword;
+    QColor syntaxString;
+    QColor syntaxComment;
+    QColor syntaxNumber;
+    QColor syntaxType;
+    QColor syntaxFunction;
+    QColor syntaxPreproc;
+
     // 浮层
     QColor toast;
     QColor tooltip;

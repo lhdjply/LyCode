@@ -31,6 +31,18 @@ struct MarkdownStyle {
     QColor quoteBar;
     QColor tableHeader;
 
+    // 语法高亮。放在 MarkdownStyle 而不是 Theme 的控件样式表里：
+    // 富文本走的是 QTextDocument::setDefaultStyleSheet，控件样式表
+    // （QWidget::setStyleSheet）**不会**作用到文档内容上——加错地方
+    // 的结果是 token span 都生成了、却一个都没上色（实测踩到）。
+    QColor syntaxKeyword;
+    QColor syntaxString;
+    QColor syntaxComment;
+    QColor syntaxNumber;
+    QColor syntaxType;
+    QColor syntaxFunction;
+    QColor syntaxPreproc;
+
     int baseFontPx = 14;
     int codeFontPx = 14;
     QString sansFamily;

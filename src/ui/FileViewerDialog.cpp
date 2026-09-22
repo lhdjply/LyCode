@@ -65,6 +65,60 @@ CodeView::CodeView(QWidget *parent) : QPlainTextEdit(parent) {
     updateGutterWidth();
 }
 
+void CodeView::setCode(const QString &text, const QString &language,
+                       const SyntaxColors &colors) {
+    setPlainText(text);
+
+    const QList<Token> tokens = SyntaxHighlighter::tokenize(text, language);
+    if (tokens.isEmpty()) {
+        return;
+    }
+
+    // 关闭重绘再逐个上色：每个 setCharFormat 都会触发一次重新布局，
+    // 大文件上会明显卡顿（几千个 token × 一次布局）。
+    setUpdatesEnabled(false);
+    QTextCursor cursor(document());
+    for (const Token &token : tokens) {
+        cursor.setPosition(token.start);
+        cursor.setPosition(token.start + token.length, QTextCursor::KeepAnchor);
+
+        QTextCharFormat format;
+        switch (token.kind) {
+            case TokenKind::Keyword:
+                format.setForeground(colors.keyword);
+                format.setFontWeight(QFont::Bold);
+                break;
+            case TokenKind::String:
+                format.setForeground(colors.string);
+                break;
+            case TokenKind::Comment:
+                format.setForeground(colors.comment);
+                format.setFontItalic(true);
+                break;
+            case TokenKind::Number:
+                format.setForeground(colors.number);
+                break;
+            case TokenKind::Type:
+                format.setForeground(colors.type);
+                break;
+            case TokenKind::Function:
+                format.setForeground(colors.function);
+                break;
+            case TokenKind::Preprocessor:
+                format.setForeground(colors.preprocessor);
+                break;
+            case TokenKind::Plain:
+                continue;
+        }
+        cursor.setCharFormat(format);
+    }
+    setUpdatesEnabled(true);
+
+    // 光标回到开头：setCharFormat 会把光标留在最后一次编辑处，
+    // 不清掉的话打开文件看到的是文件末尾。
+    moveCursor(QTextCursor::Start);
+}
+
 int CodeView::lineNumberAreaWidth() const {
     // 宽度按**最大行号**的位数算，而不是固定值：否则文件超过 999 行时
     // 数字会被裁掉，或者留一大片空白。
@@ -313,10 +367,23 @@ void FileViewerDialog::buildTextBody(const QString &text) {
                            .arg(QString::number(bytes_.size() / 1024.0, 'f', 1)));
 
     codeView_ = new CodeView;
-    codeView_->setPlainText(text);
-    // 打开时定位到开头：QPlainTextEdit 载入长文本后光标可能在末尾，
-    // 那样用户看到的是文件最后几行，会以为文件内容不对。
-    codeView_->moveCursor(QTextCursor::Start);
+
+    // 语法着色。语言按扩展名猜，猜不出就按通用规则（仍能分出字符串/注释）。
+    const Palette &palette = Theme::instance().palette();
+    SyntaxColors colors;
+    colors.keyword = palette.syntaxKeyword;
+    colors.string = palette.syntaxString;
+    colors.comment = palette.syntaxComment;
+    colors.number = palette.syntaxNumber;
+    colors.type = palette.syntaxType;
+    colors.function = palette.syntaxFunction;
+    colors.preprocessor = palette.syntaxPreproc;
+
+    const QString language = SyntaxHighlighter::languageForFile(path_);
+    codeView_->setCode(text, language, colors);
+    if (!language.isEmpty()) {
+        subtitle_->setText(subtitle_->text() + QStringLiteral("  ·  %1").arg(language));
+    }
     layout()->addWidget(codeView_);
 }
 

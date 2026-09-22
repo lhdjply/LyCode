@@ -10,12 +10,16 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSet>
+#include <QTextBlock>
+#include <QTextFragment>
 #include <QTest>
 #include <QWidget>
 
 #include "core/Types.h"
 #include "ui/DiffView.h"
 #include "ui/FileViewerDialog.h"
+#include "ui/SyntaxHighlighter.h"
 #include "ui/Theme.h"
 #include "ui/ToolCallWidget.h"
 
@@ -57,6 +61,7 @@ private slots:
     void showsImageScaled();
     void reportsMissingFileInsteadOfBlankWindow();
     void toolCardOffersClickableEntryPoints();
+    void codeViewIsSyntaxHighlighted();
 };
 
 void TestFileViewer::showsTextWithLineNumbers() {
@@ -196,6 +201,89 @@ void TestFileViewer::toolCardOffersClickableEntryPoints() {
     auto *bashFileLink = bashCard.findChild<QPushButton *>(QStringLiteral("toolFileLink"));
     QVERIFY(bashFileLink != nullptr);
     QVERIFY2(!bashFileLink->isVisibleTo(&bashCard), "没有文件路径时不该给出查看入口");
+}
+
+void TestFileViewer::codeViewIsSyntaxHighlighted() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("sample.cpp"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("// note\n"
+               "static int factorial(int n) {\n"
+               "    const char *label = \"recursive\";\n"
+               "    if (n <= 1) return 1;\n"
+               "    return n * factorial(n - 1);\n"
+               "}\n");
+    file.close();
+
+    QScopedPointer<FileViewerDialog> dialog(
+        FileViewerDialog::create(nullptr, path, QByteArray()));
+    CodeView *view = dialog->codeView();
+    QVERIFY(view != nullptr);
+
+    // 断言**文档里真的出现了多种前景色**，而不是只看截图。
+    // 之前文件查看器就是 setPlainText，标题说支持高亮但一个字都没上色。
+    QSet<QString> colors;
+    for (QTextBlock block = view->document()->begin(); block.isValid(); block = block.next()) {
+        for (QTextBlock::iterator fragment = block.begin(); !fragment.atEnd(); ++fragment) {
+            const QTextFragment piece = fragment.fragment();
+            if (piece.isValid() && !piece.text().trimmed().isEmpty()) {
+                colors.insert(piece.charFormat().foreground().color().name());
+            }
+        }
+    }
+    QVERIFY2(colors.size() >= 4,
+             qPrintable(QStringLiteral("代码查看器必须着色（注释/关键字/字符串/数字），"
+                                       "实际只有 %1 种前景色：%2")
+                            .arg(colors.size())
+                            .arg(QStringList(colors.begin(), colors.end())
+                                     .join(QStringLiteral(", ")))));
+
+    // 注释必须是斜体、关键字必须是粗体——否则只算"有颜色"，不算语法高亮。
+    bool foundItalicComment = false;
+    bool foundBoldKeyword = false;
+    for (QTextBlock block = view->document()->begin(); block.isValid(); block = block.next()) {
+        for (QTextBlock::iterator fragment = block.begin(); !fragment.atEnd(); ++fragment) {
+            const QTextFragment piece = fragment.fragment();
+            if (!piece.isValid()) {
+                continue;
+            }
+            const QString text = piece.text();
+            if (text.contains(QStringLiteral("// note"))) {
+                foundItalicComment = piece.charFormat().fontItalic();
+            }
+            if (text == QStringLiteral("static")) {
+                foundBoldKeyword = piece.charFormat().fontWeight() >= QFont::Bold;
+            }
+        }
+    }
+    QVERIFY2(foundItalicComment, "注释应当是斜体");
+    QVERIFY2(foundBoldKeyword, "关键字应当是粗体");
+
+    // 内容完整性：着色只加格式，不改字符。
+    QVERIFY(view->toPlainText().contains(QStringLiteral("const char *label = \"recursive\";")));
+    // 载入后定位到开头。
+    QCOMPARE(view->textCursor().position(), 0);
+    // 副标题标出识别到的语言。
+    QVERIFY2(dialog->subtitleText().contains(QStringLiteral("cpp")),
+             qPrintable(dialog->subtitleText()));
+
+    // 语言探测
+    QCOMPARE(SyntaxHighlighter::languageForFile(QStringLiteral("/a/b/main.cpp")),
+             QStringLiteral("cpp"));
+    QCOMPARE(SyntaxHighlighter::languageForFile(QStringLiteral("x.py")), QStringLiteral("python"));
+    QCOMPARE(SyntaxHighlighter::languageForFile(QStringLiteral("CMakeLists.txt")),
+             QStringLiteral("cmake"));
+    QVERIFY(SyntaxHighlighter::languageForFile(QStringLiteral("notes.unknownext")).isEmpty());
+
+    dialog->show();
+    QVERIFY(QTest::qWaitForWindowExposed(dialog.data()));
+    const QString dir2 = QDir(QCoreApplication::applicationDirPath())
+                             .filePath(QStringLiteral("ui-screenshots"));
+    QDir().mkpath(dir2);
+    const QString shot = dir2 + QStringLiteral("/16-code-viewer-highlight.png");
+    QVERIFY2(dialog->grab().save(shot), qPrintable(shot));
 }
 
 QTEST_MAIN(TestFileViewer)

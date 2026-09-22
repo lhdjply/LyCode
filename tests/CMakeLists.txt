@@ -22,6 +22,8 @@ zcode_add_test(test_agent_runtime)
 zcode_add_test(test_diff_view
 test_diff_view.cpp)
 
+zcode_add_test(test_syntax_highlighter)
+
 zcode_add_test(test_file_viewer)
 
 zcode_add_test(test_ui_flow)

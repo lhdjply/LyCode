@@ -103,7 +103,14 @@ void TestMarkdown::rendersFencedCodeBlockWithLanguage() {
         QStringLiteral("before\n\n```cpp\nint main() {}\n```\n\nafter"), testStyle());
 
     QVERIFY(html.contains(QStringLiteral("<div class=\"code-lang\">cpp</div>")));
-    QVERIFY(html.contains(QStringLiteral("<pre class=\"code\">int main() {}")));
+    QVERIFY(html.contains(QStringLiteral("<pre class=\"code\">")));
+    // 代码块现在带语法着色，所以正文不再以原始文本出现——断言的是
+    // "内容还在 + 着色生效"，而不是"一字不改地原样输出"。
+    QVERIFY2(html.contains(QStringLiteral("int")), "关键字/类型必须仍然可见");
+    QVERIFY(html.contains(QStringLiteral("main")));
+    QVERIFY(html.contains(QStringLiteral("{}")));
+    QVERIFY2(html.contains(QStringLiteral("class=\"tok-")),
+             "代码块必须产生至少一个着色 span");
     // 代码块前后必须是独立段落，不能被并进代码块。
     QVERIFY(html.contains(QStringLiteral("<p>before</p>")));
     QVERIFY(html.contains(QStringLiteral("<p>after</p>")));
@@ -114,7 +121,14 @@ void TestMarkdown::rendersIndentedFenceWithTildes() {
         Markdown::toHtml(QStringLiteral("  ~~~python\nprint(1)\n  ~~~\n"), testStyle());
 
     QVERIFY(html.contains(QStringLiteral("<div class=\"code-lang\">python</div>")));
-    QVERIFY(html.contains(QStringLiteral("print(1)")));
+    // print 是函数调用，会被包进 tok-function；参数保持可见。
+    QVERIFY2(html.contains(QStringLiteral("print")), qPrintable(html));
+    // 括号是普通文本、1 是数字 span，所以不连续——分别断言。
+    QVERIFY(html.contains(QStringLiteral("(")));
+    QVERIFY2(html.contains(QStringLiteral("<span class=\"tok-number\">1</span>")),
+             qPrintable(html));
+    QVERIFY2(html.contains(QStringLiteral("<span class=\"tok-function\">print</span>")),
+             qPrintable(html));
 }
 
 void TestMarkdown::inlineCodeSurvivesEmphasisRules() {

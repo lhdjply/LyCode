@@ -1,5 +1,7 @@
 #include "ui/Markdown.h"
 
+#include "ui/SyntaxHighlighter.h"
+
 #include <QRegularExpression>
 #include <QStringList>
 #include <QUrl>
@@ -176,8 +178,21 @@ QString Markdown::toHtml(const QString &markdown, const MarkdownStyle &style) {
         const QString languageLabel =
             codeLanguage.isEmpty() ? QString() : QStringLiteral("<div class=\"code-lang\">%1</div>")
                                                   .arg(escape(codeLanguage));
+        // 上色在这里做，而不是让前端"看起来像代码"：着色逻辑与配色分离，
+        // 换主题只需改 CSS（见 Theme 的 .tok-* 规则）。
+        // 未知语言也走一遍分词器——它按通用规则兜底，仍然能分出字符串与注释。
+        SyntaxColors tokenColors;
+        tokenColors.keyword = style.syntaxKeyword;
+        tokenColors.string = style.syntaxString;
+        tokenColors.comment = style.syntaxComment;
+        tokenColors.number = style.syntaxNumber;
+        tokenColors.type = style.syntaxType;
+        tokenColors.function = style.syntaxFunction;
+        tokenColors.preprocessor = style.syntaxPreproc;
+        const QString body = SyntaxHighlighter::highlight(
+            codeLines.join(QLatin1Char('\n')), codeLanguage, tokenColors);
         html += QStringLiteral("<div class=\"code-block\">%1<pre class=\"code\">%2</pre></div>\n")
-                    .arg(languageLabel, escape(codeLines.join(QLatin1Char('\n'))));
+                    .arg(languageLabel, body);
         codeLines.clear();
         codeLanguage.clear();
         inCodeBlock = false;
@@ -358,6 +373,23 @@ QString Markdown::styleSheet(const MarkdownStyle &style) {
                .arg(style.codeBackground.name(), style.foreground.name());
 
     // 代码块外壳：独立卡片 + 语言标签。
+    // 语法着色的类名由 SyntaxHighlighter 统一产出，这里只负责上色。
+    css += QStringLiteral(
+               // 必须写成 **元素+类**（span.tok-*）。纯类选择器 .tok-* 在
+               // Qt 的富文本 CSS 里不生效——token span 都生成了却一个都不上色。
+               // 同一文件里能生效的规则（div.code-block、pre.code）都是这个形状。
+               "span.tok-keyword { color: %1; font-weight: bold; }\n"
+               "span.tok-string { color: %2; }\n"
+               "span.tok-comment { color: %3; font-style: italic; }\n"
+               "span.tok-number { color: %4; }\n"
+               "span.tok-type { color: %5; }\n"
+               "span.tok-function { color: %6; }\n"
+               "span.tok-preproc { color: %7; }\n")
+               .arg(style.syntaxKeyword.name(), style.syntaxString.name(),
+                    style.syntaxComment.name(), style.syntaxNumber.name(),
+                    style.syntaxType.name(), style.syntaxFunction.name(),
+                    style.syntaxPreproc.name());
+
     css += QStringLiteral("div.code-block { background-color: %1; margin: 8px 0; }\n")
                .arg(style.codeBackground.name());
     css += QStringLiteral("div.code-lang { color: %1; font-family: %2; font-size: %3px; "

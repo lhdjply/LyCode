@@ -30,6 +30,8 @@
 #include "tools/BackgroundTaskRegistry.h"
 #include "ui/AppConfig.h"
 
+#include <QSet>
+#include <QTextBlock>
 #include <QListWidget>
 #include <QMessageBox>
 
@@ -95,6 +97,7 @@ private slots:
     void drivesFullToolAndPermissionFlow();
     void workspacePurgeDeletesSessionsButKeepsFiles();
     void attachesImageAndSendsIt();
+    void conversationRendersHighlightedCode();
 
 private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -897,6 +900,65 @@ void TestUiFlow::attachesImageAndSendsIt() {
         QStringLiteral("attachedImage"));
     QVERIFY2(!images.isEmpty(), "对话流里必须把图片渲染出来");
     QVERIFY2(!images.first()->pixmap().isNull(), "渲染出来的必须是真图片");
+}
+
+void TestUiFlow::conversationRendersHighlightedCode() {
+    // 这条测试专门盯住一个曾经**全绿但完全没生效**的链路：
+    // 会话视图原本用的是 QTextBrowser::setMarkdown（Qt 内置解析器），
+    // 而不是自研的 Markdown::toHtml。于是语法高亮、代码块样式、
+    // 表格、任务列表全都不生效，而单元测试（直接调 Markdown::toHtml）
+    // 和截图测试（独立 QTextBrowser）都是绿的。
+    ConversationView view;
+    view.setStyleSheet(Theme::instance().styleSheet());
+    view.resize(720, 480);
+    view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+    Message message;
+    message.id = QStringLiteral("msg_highlight");
+    message.sessionId = QStringLiteral("session_x");
+    message.role = MessageRole::Assistant;
+    message.status = MessageStatus::Complete;
+    Part part = Part::makeText(QStringLiteral("说明：\n\n"
+                                              "```cpp\n"
+                                              "// note\n"
+                                              "static int factorial(int n) {\n"
+                                              "    const char *label = \"recursive\";\n"
+                                              "    if (n <= 1) return 1;\n"
+                                              "    return n * factorial(n - 1);\n"
+                                              "}\n"
+                                              "```"));
+    message.parts.append(part);
+    view.addMessage(message);
+
+    auto *browser = view.findChild<QTextBrowser *>();
+    QVERIFY2(browser != nullptr, "会话视图里应当有富文本视图");
+
+    QSet<QString> colors;
+    for (QTextBlock block = browser->document()->begin(); block.isValid(); block = block.next()) {
+        for (QTextBlock::iterator fragment = block.begin(); !fragment.atEnd(); ++fragment) {
+            const QTextFragment piece = fragment.fragment();
+            if (piece.isValid() && !piece.text().trimmed().isEmpty()) {
+                colors.insert(piece.charFormat().foreground().color().name());
+            }
+        }
+    }
+    QVERIFY2(colors.size() >= 3,
+             qPrintable(QStringLiteral("会话视图里的代码块必须着色，实际只有 %1 种前景色：%2")
+                            .arg(colors.size())
+                            .arg(QStringList(colors.begin(), colors.end())
+                                     .join(QStringLiteral(", ")))));
+
+    // 语言标签由自研渲染器的 div.code-lang 产出。它是"走对了渲染器"的另一个
+    // 证据（Qt 内置 setMarkdown 不会产出这个类名）。
+    QVERIFY2(browser->toHtml().contains(QStringLiteral("cpp")),
+             "代码块应当标出语言");
+
+    // 刻意**不**断言代码块的背景色：Qt 富文本对 `div` 上的 background-color
+    // 支持并不可靠（实测没有变成块背景画刷），断言它只会得到一条时好时坏的测试。
+    // 需要确认观感时看截图。
+
+    view.close();
 }
 
 QTEST_MAIN(TestUiFlow)

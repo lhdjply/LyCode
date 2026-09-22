@@ -11,6 +11,8 @@
 #include <QByteArray>
 #include <QDialog>
 #include <QPlainTextEdit>
+
+#include "ui/SyntaxHighlighter.h"
 #include <QString>
 
 class QLabel;
@@ -24,6 +26,15 @@ class CodeView : public QPlainTextEdit {
 
 public:
     explicit CodeView(QWidget *parent = nullptr);
+
+    /// 载入代码并**着色**。
+    ///
+    /// 用 `setPlainText` + 逐 token 设置 QTextCharFormat，而不是把文件查看器
+    /// 也换成 QTextBrowser：行号栏是挂在 QPlainTextEdit 的 viewport 边距上的，
+    /// 换控件就得重做一遍。整篇一次性分词（不是逐行），块注释这种跨行结构
+    /// 才能正确着色。
+    void setCode(const QString &text, const QString &language,
+                 const SyntaxColors &colors);
 
     /// 行号栏需要的宽度（随行数位数变化）。
     int lineNumberAreaWidth() const;

@@ -142,6 +142,13 @@ MarkdownStyle markdownStyle() {
     style.link = palette.iconBlue;
     style.quoteBar = palette.border;
     style.tableHeader = palette.surface;
+    style.syntaxKeyword = palette.syntaxKeyword;
+    style.syntaxString = palette.syntaxString;
+    style.syntaxComment = palette.syntaxComment;
+    style.syntaxNumber = palette.syntaxNumber;
+    style.syntaxType = palette.syntaxType;
+    style.syntaxFunction = palette.syntaxFunction;
+    style.syntaxPreproc = palette.syntaxPreproc;
     style.baseFontPx = theme.fontPixelSize(FontRole::UiBase);
     style.codeFontPx = theme.fontPixelSize(FontRole::Mono);
     style.sansFamily = sansFamily();
@@ -366,7 +373,17 @@ void MessageWidget::renderRichText(const Id &partId) {
     // 先设样式表再设内容：顺序反了的话首次排版用的还是旧样式。
     // 高度由 RichTextView 在 documentSizeChanged 里同步，这里不要手工设置。
     view->document()->setDefaultStyleSheet(Markdown::styleSheet(style));
-    view->setMarkdown(source);
+
+    // ⚠ 必须用自己那套 Markdown::toHtml，**不能**用 QTextBrowser::setMarkdown。
+    //
+    // Qt 内置的 setMarkdown 会自己解析 Markdown 并生成它自己的标记
+    //（`<pre><code>` 之类），于是：
+    //   * 语法高亮（tok-* span）永远不出现
+    //   * div.code-block / pre.code 这些类选择器对不上，代码块样式失效
+    //   * 自研的表格、任务列表、链接协议白名单统统不生效
+    // 这条链路一直没被走到过，是因为 Markdown::toHtml 只在单元测试里被调用，
+    // 会话视图走的是 setMarkdown——测试全绿但界面上什么都没实现。
+    view->setHtml(Markdown::toHtml(source, style));
 }
 
 void MessageWidget::appendDelta(const Id &partId, const QString &delta, bool reasoning) {

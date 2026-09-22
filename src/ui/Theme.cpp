@@ -252,6 +252,15 @@ Palette zaiLight() {
     p.diffRemoved = make(kZaiRed);                       // --color-diff-removed: #e03131 [568]
     p.diffRemovedForeground = make(kZaiWhite);           // --color-diff-removed-foreground: #ffffff [569]
 
+    // 语法高亮（浅色）。见 Theme.h 的说明：非 npm 令牌，是编辑器风格取值。
+    p.syntaxKeyword = make("#a626a4");
+    p.syntaxString = make("#50a14f");
+    p.syntaxComment = make("#a0a1a7");
+    p.syntaxNumber = make("#986801");
+    p.syntaxType = make("#c18401");
+    p.syntaxFunction = make("#4078f2");
+    p.syntaxPreproc = make("#e45649");
+
     // 浮层
     p.toast = make(kZaiWhite);                           // --color-toast: #ffffff [578]
     p.tooltip = make(kZaiSidebarLight);                  // --color-tooltip: #f0f0f0 [579]
@@ -330,6 +339,16 @@ Palette zaiDark() {
     p.diffAddedForeground = make(kZaiInk2);              // #000000 [713]
     p.diffRemoved = make(kZaiDarkRed);                   // --color-diff-removed: #ff5c5c [714]
     p.diffRemovedForeground = make(kZaiInk2);            // #000000 [715]
+
+    // 语法高亮（深色）。底色是 #161616/#2b2b2b，所以整体提亮一档，
+    // 保证在深背景上的对比度。
+    p.syntaxKeyword = make("#c678dd");
+    p.syntaxString = make("#98c379");
+    p.syntaxComment = make("#7f848e");
+    p.syntaxNumber = make("#d19a66");
+    p.syntaxType = make("#e5c07b");
+    p.syntaxFunction = make("#61afef");
+    p.syntaxPreproc = make("#e06c75");
 
     // 浮层
     p.toast = make(kZaiDarkCard);                        // --color-toast: #2b2b2b [724]
@@ -1282,6 +1301,13 @@ QSizeGrip {
         {"%IDLE_TASK%", idleTask},
         {"%DIFF_ADDED%", diffAdded},
         {"%DIFF_REMOVED%", diffRemoved},
+        {"%SYNTAX_KEYWORD%", css(p.syntaxKeyword)},
+        {"%SYNTAX_STRING%", css(p.syntaxString)},
+        {"%SYNTAX_COMMENT%", css(p.syntaxComment)},
+        {"%SYNTAX_NUMBER%", css(p.syntaxNumber)},
+        {"%SYNTAX_TYPE%", css(p.syntaxType)},
+        {"%SYNTAX_FUNCTION%", css(p.syntaxFunction)},
+        {"%SYNTAX_PREPROC%", css(p.syntaxPreproc)},
         {"%TOOLTIP%", tooltip},
         {"%TOOLTIP_FOREGROUND%", tooltipForeground},
         {"%TOAST%", css(p.toast)},
