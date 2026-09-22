@@ -277,6 +277,32 @@ void MessageWidget::buildPartWidget(const Part &part) {
         }
 
         case PartKind::File: {
+            // 图片附件直接渲染缩略图：只显示文件名的话，用户没法确认
+            // 自己发的是哪张图（尤其是粘贴进来的、文件名是自动生成的）。
+            QPixmap pixmap;
+            const bool decoded =
+                part.file.isImage() && !part.file.base64.isEmpty() &&
+                pixmap.loadFromData(QByteArray::fromBase64(part.file.base64.toLatin1()));
+            if (decoded) {
+                auto *image = new QLabel;
+                image->setObjectName(QStringLiteral("attachedImage"));
+                // 限制最大边长，避免一张 4K 截图把整条对话挤满。
+                constexpr int kMaxEdge = 320;
+                image->setPixmap(pixmap.width() > kMaxEdge || pixmap.height() > kMaxEdge
+                                     ? pixmap.scaled(kMaxEdge, kMaxEdge, Qt::KeepAspectRatio,
+                                                     Qt::SmoothTransformation)
+                                     : pixmap);
+                image->setToolTip(QStringLiteral("%1（%2 · %3×%4）")
+                                      .arg(part.file.fileName.isEmpty()
+                                               ? QStringLiteral("图片")
+                                               : part.file.fileName,
+                                           part.file.mimeType)
+                                      .arg(pixmap.width())
+                                      .arg(pixmap.height()));
+                addPartWidget(image);
+                break;
+            }
+
             auto *label = new QLabel(part.file.fileName.isEmpty() ? part.file.path
                                                                  : part.file.fileName);
             label->setFont(Theme::instance().font(FontRole::UiSm));

@@ -498,8 +498,14 @@ void AgentRuntime::closeSession() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 bool AgentRuntime::submitText(const QString &text, QString *errorOut) {
+    return submitMessage(text, {}, errorOut);
+}
+
+bool AgentRuntime::submitMessage(const QString &text, const QList<FilePart> &attachments,
+                                 QString *errorOut) {
     const QString trimmed = text.trimmed();
-    if (trimmed.isEmpty()) {
+    // 只发图片、不写文字是合法用法（"这张图里是什么？"）。
+    if (trimmed.isEmpty() && attachments.isEmpty()) {
         if (errorOut != nullptr) {
             *errorOut = QStringLiteral("输入为空。");
         }
@@ -524,12 +530,13 @@ bool AgentRuntime::submitText(const QString &text, QString *errorOut) {
         return false;
     }
 
-    beginTurn(trimmed);
+    beginTurn(trimmed, attachments);
     return true;
 }
 
-void AgentRuntime::beginTurn(const QString &userText) {
-    qCInfo(log) << "开始 turn; session=" << session_.id << "输入长度=" << userText.size();
+void AgentRuntime::beginTurn(const QString &userText, const QList<FilePart> &attachments) {
+    qCInfo(log) << "开始 turn; session=" << session_.id << "输入长度=" << userText.size()
+                << "附件数=" << attachments.size();
 
     // 每个 turn 一个取消令牌：上一轮的工具可能还在异步收尾，
     // 复用同一个令牌会让上一轮的收尾被误认为本轮已取消。
@@ -556,7 +563,12 @@ void AgentRuntime::beginTurn(const QString &userText) {
     userMessage.status = MessageStatus::Complete;
     userMessage.createdAtMs = nowMs();
     userMessage.updatedAtMs = userMessage.createdAtMs;
-    userMessage.parts.append(Part::makeText(userText));
+    if (!userText.isEmpty()) {
+        userMessage.parts.append(Part::makeText(userText));
+    }
+    for (const FilePart &attachment : attachments) {
+        userMessage.parts.append(Part::makeFile(attachment));
+    }
 
     messages_.append(userMessage);
     emit messageAdded(userMessage);
@@ -1099,6 +1111,8 @@ void AgentRuntime::finishToolCall(const QString &callId, const ToolResult &resul
             target->tool.output = result.output;
             target->tool.error = result.error;
             target->tool.errorCode = result.errorCode;
+            // 图片随 part 一起持久化：重启后工具卡片还能显示出当时读到的图。
+            target->tool.images = result.images;
             // QJsonObject 没有 merge：逐键写入，工具的 metadata 覆盖同名键。
             for (auto it = result.metadata.constBegin(); it != result.metadata.constEnd(); ++it) {
                 target->tool.metadata.insert(it.key(), it.value());
@@ -1467,6 +1481,13 @@ void AgentRuntime::afterToolQueue() {
                 break;
         }
         toolResults.parts.append(result);
+
+        // 结果里的图片要以 **File part** 的形式进这条消息，而不是只留在
+        // Tool part 的字段里：provider 的图片序列化走的是 File part，
+        // 只挂在 Tool 上模型依然看不到像素。
+        for (const FilePart &image : result.tool.images) {
+            toolResults.parts.append(Part::makeFile(image));
+        }
     }
 
     if (!toolResults.parts.isEmpty()) {

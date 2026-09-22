@@ -17,6 +17,7 @@
 
 #include "core/Types.h"
 
+class QHBoxLayout;
 class QLabel;
 class QPlainTextEdit;
 class QToolButton;
@@ -45,6 +46,8 @@ private:
     void buildUi();
     void refreshHeader();
     void refreshBodies();
+    /// 同步工具读到的图片缩略图。
+    void syncImages();
 
     /// 状态灯的颜色。
     QColor stateColor() const;
@@ -66,6 +69,9 @@ private:
     QLabel *outputCaption_ = nullptr;
     QPlainTextEdit *outputView_ = nullptr;
     QLabel *emptyHint_ = nullptr;
+    /// 工具读到的图片（Read 读图片文件时产生）。空时整块隐藏。
+    QWidget *imageStrip_ = nullptr;
+    QHBoxLayout *imageLayout_ = nullptr;
 };
 
 }  // namespace zcode::ui

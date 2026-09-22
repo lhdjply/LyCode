@@ -28,6 +28,12 @@
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMenuBar>
+#include <QBuffer>
+#include <QClipboard>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QMimeDatabase>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -233,12 +239,24 @@ void MainWindow::buildUi() {
     composerLayout->setContentsMargins(16, 8, 16, 12);
     composerLayout->setSpacing(6);
 
+    // 附件条放在输入框**上方**：它描述的是"这次要发什么"，
+    // 与输入框同属一个编辑单元，因此必须紧贴输入框而不是放到工具条上。
+    attachmentStrip_ = new QWidget;
+    attachmentStrip_->setObjectName(QStringLiteral("attachmentStrip"));
+    attachmentLayout_ = new QHBoxLayout(attachmentStrip_);
+    attachmentLayout_->setContentsMargins(0, 0, 0, 0);
+    attachmentLayout_->setSpacing(6);
+    attachmentStrip_->hide();  // 没有附件时不占位置
+    composerLayout->addWidget(attachmentStrip_);
+
     composer_ = new QPlainTextEdit;
     composer_->setObjectName(QStringLiteral("composer"));
     composer_->setPlaceholderText(
-        QStringLiteral("描述你想完成的任务…（Enter 发送，Shift+Enter 换行）"));
+        QStringLiteral("描述你想完成的任务…（Enter 发送，Shift+Enter 换行，可粘贴图片）"));
     composer_->setFixedHeight(96);
     composer_->installEventFilter(this);
+    // 拖入图片文件即可附加。
+    composer_->setAcceptDrops(true);
     composerLayout->addWidget(composer_);
 
     // ── 操作行：模式在左，模型/思考/停止/发送在右 ───────────────────────────
@@ -258,6 +276,12 @@ void MainWindow::buildUi() {
     modeCombo_->addItem(QStringLiteral("yolo 免确认"), static_cast<int>(SessionMode::Yolo));
     connect(modeCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModeChanged);
     actionRow->addWidget(modeCombo_);
+
+    attachButton_ = new QPushButton(QStringLiteral("图片"));
+    attachButton_->setObjectName(QStringLiteral("attachButton"));
+    attachButton_->setToolTip(QStringLiteral("附加图片（也可以直接 Ctrl+V 粘贴或拖入）"));
+    connect(attachButton_, &QPushButton::clicked, this, &MainWindow::onAttachImagesRequested);
+    actionRow->addWidget(attachButton_);
 
     actionRow->addStretch(1);
 
@@ -452,6 +476,10 @@ void MainWindow::wireRuntime() {
             &MainWindow::onSessionDeleteRequested);
     connect(sidebar_, &SidebarPanel::workspaceChangeRequested, this,
             &MainWindow::onWorkspaceChangeRequested);
+    connect(sidebar_, &SidebarPanel::workspaceRemoveRequested, this,
+            &MainWindow::onWorkspaceRemoveRequested);
+    connect(sidebar_, &SidebarPanel::workspacePurgeRequested, this,
+            &MainWindow::onWorkspacePurgeRequested);
     connect(sidebar_, &SidebarPanel::workspaceRecentRequested, this,
             &MainWindow::onOpenWorkspacePath);
     connect(sidebar_, &SidebarPanel::settingsRequested, this, &MainWindow::onSettingsRequested);
@@ -709,6 +737,13 @@ void MainWindow::openSessionOrCreate() {
 }
 
 void MainWindow::onNewSessionRequested() {
+    // 待发附件属于"这次编辑"，换会话就作废——否则用户会以为图片跟着
+    // 新会话走了，实际上悄悄发到了另一个会话里。
+    if (!pendingAttachments_.isEmpty()) {
+        pendingAttachments_.clear();
+        refreshAttachmentStrip();
+    }
+
     if (runtime_.isRunning()) {
         const auto answer = QMessageBox::question(
             this, QStringLiteral("会话正在运行"),
@@ -830,6 +865,76 @@ void MainWindow::onSessionDeleteRequested(const Id &sessionId) {
     if (activeSessionId_.isEmpty()) {
         openSessionOrCreate();
     }
+}
+
+void MainWindow::onWorkspaceRemoveRequested(const QString &path) {
+    // 只动列表，不动数据。工作区目录与它的会话都原样保留，
+    // 下次打开该目录时会重新出现在列表里。
+    const int removed = settings_.recentWorkspaces.removeAll(path);
+    if (removed == 0) {
+        setStatusMessage(QStringLiteral("该工作区不在最近列表里。"));
+        return;
+    }
+    saveSettings();
+    sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
+    qCInfo(log) << "已从最近工作区移除:" << path;
+    setStatusMessage(QStringLiteral("已从最近列表移除：%1（会话与文件都还在）").arg(path));
+}
+
+void MainWindow::onWorkspacePurgeRequested(const QString &path) {
+    // 本地工作区的身份 key 就是路径（identity 只可能来自外部写入的会话），
+    // 与 listSessions / 建会话时的口径一致。
+    Workspace target;
+    target.path = QDir(path).absolutePath();
+    const QString key = target.key();
+
+    const QList<SessionSummary> sessions =
+        store_.isOpen() ? store_.listSessions(key) : QList<SessionSummary>{};
+    if (sessions.isEmpty()) {
+        setStatusMessage(QStringLiteral("该工作区没有可删除的会话。"));
+        return;
+    }
+
+    // 二次确认必须说清"删什么"与"不删什么"：用户对"删除工作区"的直觉
+    // 往往是删磁盘目录，而我们只删数据库里的会话记录。
+    const auto answer = QMessageBox::warning(
+        this, QStringLiteral("删除工作区的会话"),
+        QStringLiteral("将删除「%1」下的全部 %2 个会话及其消息。\n\n"
+                       "此操作不可撤销。\n"
+                       "工作区目录本身和其中的文件**不会**被删除。")
+            .arg(target.path)
+            .arg(sessions.size()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    // 当前会话也在被删之列时，先把它干净地收掉，否则运行时还持有一个
+    // 即将从库里消失的会话，后续落盘会一路报外键失败。
+    const bool activeAffected = target.path == workspace_.path;
+    if (activeAffected && !activeSessionId_.isEmpty()) {
+        if (runtime_.isRunning()) {
+            runtime_.abort();
+        }
+        runtime_.closeSession();
+        conversation_->clear();
+        activeSessionId_.clear();
+    }
+
+    if (!store_.deleteSessionsForWorkspace(key)) {
+        setStatusMessage(QStringLiteral("删除失败：") + store_.lastError());
+        return;
+    }
+
+    loadWorkspaceSessions();
+    qCInfo(log) << "已删除工作区全部会话:" << target.path << "数量=" << sessions.size();
+
+    if (activeSessionId_.isEmpty() && target.path == workspace_.path) {
+        openSessionOrCreate();  // 当前工作区被清空 → 直接开一个新的空会话
+    }
+    setStatusMessage(QStringLiteral("已删除「%1」的 %2 个会话（工作区文件未受影响）。")
+                         .arg(QDir(target.path).dirName())
+                         .arg(sessions.size()));
 }
 
 void MainWindow::onWorkspaceChangeRequested() {
@@ -1049,9 +1154,144 @@ void MainWindow::onPermissionResolved(const Id &requestId) {
 // 输入与配置
 // ─────────────────────────────────────────────────────────────────────────────
 
+void MainWindow::onAttachImagesRequested() {
+    const QStringList paths = QFileDialog::getOpenFileNames(
+        this, QStringLiteral("附加图片"), QString(),
+        QStringLiteral("图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;所有文件 (*)"));
+    if (paths.isEmpty()) {
+        return;
+    }
+    attachImages(paths);
+}
+
+void MainWindow::attachImages(const QStringList &paths) {
+    for (const QString &path : paths) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            setStatusMessage(QStringLiteral("无法读取：%1").arg(path));
+            continue;
+        }
+        const QByteArray bytes = file.readAll();
+        // MIME 交给 QMimeDatabase 判定，而不是按扩展名硬编码：
+        // 用户可能把 png 存成 .jpg，按扩展名会给出错误的 media_type，
+        // 而 Anthropic/OpenAI 都会拒绝 media_type 与实际内容不符的图片。
+        const QString mime =
+            QMimeDatabase().mimeTypeForFileNameAndData(path, bytes).name();
+        attachImageData(bytes, mime, QFileInfo(path).fileName());
+        // 记住磁盘路径只是为了显示与排查；provider 用的是 base64，
+        // 所以粘贴来的图片没有路径也完全正常。
+    }
+}
+
+void MainWindow::attachImageData(const QByteArray &bytes, const QString &mimeType,
+                                 const QString &suggestedName) {
+    if (bytes.isEmpty()) {
+        return;
+    }
+    if (!mimeType.startsWith(QStringLiteral("image/"), Qt::CaseInsensitive)) {
+        setStatusMessage(QStringLiteral("只支持图片附件，收到的是 %1。").arg(mimeType));
+        return;
+    }
+
+    // 单张上限：base64 之后还要进 SQLite 与 HTTP body，过大既慢又容易失败。
+    constexpr qint64 kMaxImageBytes = 8 * 1024 * 1024;
+    if (bytes.size() > kMaxImageBytes) {
+        setStatusMessage(QStringLiteral("图片过大（%1 MB），上限 8 MB。")
+                             .arg(QString::number(bytes.size() / 1024.0 / 1024.0, 'f', 1)));
+        return;
+    }
+
+    FilePart part;
+    part.mimeType = mimeType;
+    part.fileName = suggestedName.isEmpty() ? QStringLiteral("粘贴的图片") : suggestedName;
+    part.sizeBytes = bytes.size();
+    part.base64 = QString::fromLatin1(bytes.toBase64());
+    // 粘贴来的图片没有磁盘路径，留空即可——provider 只用 base64。
+    pendingAttachments_.append(part);
+
+    qCInfo(log) << "已附加图片;" << part.fileName << mimeType << part.sizeBytes << "字节";
+    refreshAttachmentStrip();
+}
+
+void MainWindow::refreshAttachmentStrip() {
+    if (attachmentStrip_ == nullptr || attachmentLayout_ == nullptr) {
+        return;
+    }
+
+    // 整体重建而不是增量更新：附件数量是个位数，重建更不容易出现
+    // "删了一个但界面还留着"这类状态不同步。
+    while (QLayoutItem *item = attachmentLayout_->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+
+    if (pendingAttachments_.isEmpty()) {
+        attachmentStrip_->hide();
+        return;
+    }
+
+    for (int index = 0; index < pendingAttachments_.size(); ++index) {
+        const FilePart &part = pendingAttachments_.at(index);
+
+        auto *chip = new QWidget;
+        chip->setObjectName(QStringLiteral("attachmentChip"));
+        auto *chipLayout = new QHBoxLayout(chip);
+        chipLayout->setContentsMargins(6, 4, 6, 4);
+        chipLayout->setSpacing(6);
+
+        // 缩略图直接由 base64 解出：不依赖原文件还在不在（粘贴的图没有路径）。
+        auto *thumb = new QLabel;
+        QPixmap pixmap;
+        if (pixmap.loadFromData(QByteArray::fromBase64(part.base64.toLatin1()))) {
+            thumb->setPixmap(pixmap.scaled(36, 36, Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation));
+        }
+        thumb->setFixedSize(36, 36);
+        thumb->setAlignment(Qt::AlignCenter);
+        chipLayout->addWidget(thumb);
+
+        // 小于 1KB 时显示字节数：固定用 KB 会把小图显示成"0 KB"，
+        // 看起来像数据丢了。
+        const QString sizeText =
+            part.sizeBytes < 1024
+                ? QStringLiteral("%1 B").arg(part.sizeBytes)
+                : QStringLiteral("%1 KB").arg(QString::number(part.sizeBytes / 1024.0, 'f', 0));
+        auto *label = new QLabel(QStringLiteral("%1  ·  %2").arg(part.fileName, sizeText));
+        label->setFont(Theme::instance().font(FontRole::UiXs));
+        label->setToolTip(QStringLiteral("%1（%2）").arg(part.fileName, part.mimeType));
+        chipLayout->addWidget(label);
+
+        auto *remove = new QPushButton(QStringLiteral("×"));
+        remove->setObjectName(QStringLiteral("attachmentRemove"));
+        remove->setFixedSize(20, 20);
+        remove->setToolTip(QStringLiteral("移除这张图片"));
+        remove->setCursor(Qt::PointingHandCursor);
+        connect(remove, &QPushButton::clicked, this, [this, index]() {
+            if (index >= 0 && index < pendingAttachments_.size()) {
+                qCDebug(log) << "移除附件" << pendingAttachments_.at(index).fileName;
+                pendingAttachments_.removeAt(index);
+                refreshAttachmentStrip();
+            }
+        });
+        chipLayout->addWidget(remove);
+
+        attachmentLayout_->addWidget(chip);
+    }
+    attachmentLayout_->addStretch(1);
+    attachmentStrip_->show();
+}
+
 void MainWindow::onSendRequested() {
     const QString text = composer_->toPlainText().trimmed();
-    if (text.isEmpty()) {
+    // **先快照附件**：没有会话时下面会先建会话，而 onNewSessionRequested()
+    // 会清空待发附件（它们属于"上一次编辑"）。不快照的话，用户在空会话里
+    // 第一次发送时图片会在提交前被自己清掉——实测被测试抓到过。
+    const QList<FilePart> attachments = pendingAttachments_;
+
+    // 只发图片不写字是合法用法，所以两者都空才算空。
+    if (text.isEmpty() && attachments.isEmpty()) {
         return;
     }
     if (!runtime_.hasSession()) {
@@ -1063,13 +1303,15 @@ void MainWindow::onSendRequested() {
     }
 
     QString error;
-    if (!runtime_.submitText(text, &error)) {
+    if (!runtime_.submitMessage(text, attachments, &error)) {
         setStatusMessage(error);
-        return;
+        return;  // 失败时保留输入与附件，避免用户白选一遍
     }
 
-    // 提交成功才清空输入框：失败时保留内容，避免用户白打字。
+    // 提交成功才清空：失败时保留内容，避免用户白打字/白选图。
     composer_->clear();
+    pendingAttachments_.clear();
+    refreshAttachmentStrip();
     refreshRunState();
 }
 
@@ -1203,7 +1445,53 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
             onSendRequested();
             return true;
         }
+
+        // Ctrl+V 粘贴图片：截图后直接粘贴是最常用的附加方式，
+        // 比"另存为文件再选文件"少两步。
+        if (keyEvent->matches(QKeySequence::Paste) && QApplication::clipboard() != nullptr) {
+            const QMimeData *mime = QApplication::clipboard()->mimeData();
+            if (mime != nullptr && mime->hasImage()) {
+                const QImage image = qvariant_cast<QImage>(mime->imageData());
+                if (!image.isNull()) {
+                    QByteArray bytes;
+                    QBuffer buffer(&bytes);
+                    buffer.open(QIODevice::WriteOnly);
+                    // 统一转 PNG：剪贴板里的 QImage 没有"原始格式"，
+                    // 直接声明 image/png 并转码，避免 media_type 与实际字节不符。
+                    image.save(&buffer, "PNG");
+                    attachImageData(bytes, QStringLiteral("image/png"),
+                                    QStringLiteral("粘贴的图片.png"));
+                    return true;  // 吃掉这次粘贴，不要把二进制塞进输入框
+                }
+            }
+        }
     }
+
+    // 拖入图片文件。
+    if (watched == composer_ && event->type() == QEvent::Drop) {
+        auto *dropEvent = static_cast<QDropEvent *>(event);
+        QStringList paths;
+        if (dropEvent->mimeData() != nullptr && dropEvent->mimeData()->hasUrls()) {
+            for (const QUrl &url : dropEvent->mimeData()->urls()) {
+                if (url.isLocalFile()) {
+                    paths.append(url.toLocalFile());
+                }
+            }
+        }
+        if (!paths.isEmpty()) {
+            attachImages(paths);
+            dropEvent->acceptProposedAction();
+            return true;
+        }
+    }
+    if (watched == composer_ && event->type() == QEvent::DragEnter) {
+        auto *dragEvent = static_cast<QDragEnterEvent *>(event);
+        if (dragEvent->mimeData() != nullptr && dragEvent->mimeData()->hasUrls()) {
+            dragEvent->acceptProposedAction();
+            return true;
+        }
+    }
+
     return QMainWindow::eventFilter(watched, event);
 }
 

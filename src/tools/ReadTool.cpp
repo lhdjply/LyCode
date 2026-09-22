@@ -69,16 +69,29 @@ ToolResult readImage(const QString &path, const QFileInfo &info, const QString &
     QJsonObject meta;
     meta.insert(QStringLiteral("filePath"), path);
     meta.insert(QStringLiteral("mimeType"), mime);
-    meta.insert(QStringLiteral("imageBase64"), QString::fromLatin1(bytes.toBase64()));
+    // 图片走 ToolResult::images（真正的图片内容块），不再塞进 metadata：
+    // 放在 metadata 里模型只会收到一行文字、看不到像素，于是会退回去用
+    // Bash+Python 猜图片内容——这正是用户报的问题。
+    FilePart image;
+    image.path = path;
+    image.mimeType = mime;
+    image.fileName = QFileInfo(path).fileName();
+    image.sizeBytes = bytes.size();
+    image.base64 = QString::fromLatin1(bytes.toBase64());
     meta.insert(QStringLiteral("sizeBytes"), static_cast<double>(bytes.size()));
     meta.insert(QStringLiteral("totalLines"), 0);
     meta.insert(QStringLiteral("numLines"), 0);
     meta.insert(QStringLiteral("truncated"), false);
 
-    return ToolResult::success(QStringLiteral("Image read: %1 (%2, %3 bytes)")
-                                   .arg(path, mime)
-                                   .arg(bytes.size()),
-                               meta);
+    // 正文里明确告诉模型"图已经附在结果里了"，避免它再去用外部命令确认。
+    ToolResult result = ToolResult::success(
+        QStringLiteral("已读取图片 %1（%2，%3 字节）。图片内容已随本次结果附上，"
+                       "直接看图回答即可，不需要借助外部命令。")
+            .arg(path, mime)
+            .arg(bytes.size()),
+        meta);
+    result.images.append(image);
+    return result;
 }
 
 }  // namespace

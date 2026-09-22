@@ -26,9 +26,12 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QMenu>
+#include "storage/SessionStore.h"
 #include "tools/BackgroundTaskRegistry.h"
+#include "ui/AppConfig.h"
 
 #include <QListWidget>
+#include <QMessageBox>
 
 #ifdef Q_OS_UNIX
 #include <csignal>
@@ -90,6 +93,8 @@ private slots:
     void cleanupTestCase();
 
     void drivesFullToolAndPermissionFlow();
+    void workspacePurgeDeletesSessionsButKeepsFiles();
+    void attachesImageAndSendsIt();
 
 private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -688,6 +693,210 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
 
     // 会话应当已落盘（标题取自首条用户输入）。
     QVERIFY(QFile::exists(dataDir_->path() + QStringLiteral("/qt/sessions.db")));
+}
+
+void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles() {
+    // 这个测试只关心"删什么/不删什么"，不需要模型，所以不走网关。
+    QTemporaryDir workspaceDir;
+    QVERIFY(workspaceDir.isValid());
+    // 放一个真实文件进去：删除工作区会话**绝不能**碰到它。
+    const QString markerPath = workspaceDir.filePath(QStringLiteral("keep-me.txt"));
+    QFile marker(markerPath);
+    QVERIFY(marker.open(QIODevice::WriteOnly));
+    marker.write("must survive");
+    marker.close();
+
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    QVERIFY(sidebar != nullptr);
+    auto *conversation = window.findChild<ConversationView *>(QStringLiteral("conversation"));
+    QVERIFY(conversation != nullptr);
+
+    // 切到这个工作区并建两个会话。
+    sidebar->setWorkspace(Workspace{workspaceDir.path(), {}, {}});
+    emit sidebar->workspaceRecentRequested(workspaceDir.path());
+    QVERIFY(waitFor([&]() { return conversation->messageCount() >= 0; }, 3000));
+
+    SessionStore probe;
+    QVERIFY(probe.open(dataDir_->path() + QStringLiteral("/qt/sessions.db")));
+    const QString key = Workspace{workspaceDir.path(), {}, {}}.key();
+    QVERIFY2(!probe.listSessions(key).isEmpty(), "切换工作区后应当自动建了一个会话");
+    const int sessionsBefore = probe.listSessions(key).size();
+    QStringList oldSessionIds;
+    for (const SessionSummary &summary : probe.listSessions(key)) {
+        oldSessionIds.append(summary.session.id);
+    }
+
+    // ⓪ 菜单结构本身必须提供这两个动作。
+    // 上面的断言都是直接 emit 信号，绕过了菜单；不单独验一次的话，
+    // "菜单里根本没有入口"这种缺陷会完全漏过去。
+    QStringList menuTexts;
+    bool submenuShotTaken = false;
+    QTimer::singleShot(150, [&]() {
+        auto *popup = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (popup == nullptr) {
+            return;
+        }
+        popup->grab().save(screenshotDir() + QStringLiteral("/10-workspace-menu.png"));
+        for (QAction *entry : popup->actions()) {
+            QMenu *sub = entry->menu();
+            if (sub == nullptr) {
+                continue;
+            }
+            for (QAction *action : sub->actions()) {
+                if (!action->isSeparator()) {
+                    menuTexts.append(action->text());
+                }
+            }
+            // 展开子菜单再截一张：这样截图能真正看到两个新动作，
+            // 而不只是一个带 ▸ 的父条目。
+            if (!submenuShotTaken) {
+                submenuShotTaken = true;
+                sub->popup(popup->mapToGlobal(QPoint(popup->width() - 4, 4)));
+                QTimer::singleShot(120, [sub, popup]() {
+                    sub->grab().save(screenshotDir() +
+                                     QStringLiteral("/11-workspace-submenu.png"));
+                    sub->close();
+                    popup->close();
+                });
+                return;  // 交给内层定时器收尾
+            }
+        }
+        popup->close();
+    });
+    // 按**真实用户路径**触发：点工作区按钮。它会 exec 出模态菜单，
+    // 定时器在嵌套事件循环里截图并关闭。
+    auto *workspaceButton = window.findChild<QPushButton *>(QStringLiteral("workspaceButton"));
+    QVERIFY2(workspaceButton != nullptr, "侧边栏应当有工作区按钮");
+    workspaceButton->click();
+    QVERIFY2(menuTexts.contains(QStringLiteral("从最近列表移除")),
+             qPrintable(QStringLiteral("菜单里应当有「从最近列表移除」，实际：%1")
+                            .arg(menuTexts.join(QStringLiteral(" / ")))));
+    QVERIFY2(menuTexts.contains(QStringLiteral("删除该工作区的全部会话…")),
+             qPrintable(QStringLiteral("菜单里应当有「删除该工作区的全部会话…」，实际：%1")
+                            .arg(menuTexts.join(QStringLiteral(" / ")))));
+
+    // ① 从最近列表移除：只动列表。
+    AppSettings settingsSnapshot;
+    QVERIFY(AppConfig::load(&settingsSnapshot));
+    const QStringList recentBefore = settingsSnapshot.recentWorkspaces;
+    QVERIFY2(recentBefore.contains(workspaceDir.path()),
+             qPrintable(QStringLiteral("最近列表里应当有该工作区: %1")
+                            .arg(recentBefore.join(QStringLiteral(", ")))));
+    emit sidebar->workspaceRemoveRequested(workspaceDir.path());
+    settingsSnapshot = AppSettings{};
+    QVERIFY(AppConfig::load(&settingsSnapshot));
+    const QStringList recentAfter = settingsSnapshot.recentWorkspaces;
+    QVERIFY2(!recentAfter.contains(workspaceDir.path()), "应当已从最近列表移除");
+    // 关键：移除列表项**不删**会话。
+    QCOMPARE(probe.listSessions(key).size(), sessionsBefore);
+
+    // ② 删除该工作区全部会话：需要确认，用一个定时器在模态循环里点「是」。
+    // 用**重复**定时器而不是 0ms 单发：单发有可能在对话框成为模态窗口之前
+    // 就触发，于是找不到它、没人点「是」，删除被静默取消（实测踩到）。
+    QTimer confirmer;
+    confirmer.setInterval(20);
+    QObject::connect(&confirmer, &QTimer::timeout, [&confirmer]() {
+        for (QWidget *widget : QApplication::topLevelWidgets()) {
+            auto *box = qobject_cast<QMessageBox *>(widget);
+            if (box != nullptr && box->isVisible()) {
+                confirmer.stop();
+                box->button(QMessageBox::Yes)->click();
+                return;
+            }
+        }
+    });
+    confirmer.start();
+    emit sidebar->workspacePurgeRequested(workspaceDir.path());
+    confirmer.stop();  // 模态循环已返回；确保后续不再误点别的框
+
+    // 断言"旧会话都不在了"，而不是"一条都不剩"：删空当前工作区之后
+    // MainWindow 会立刻开一个新的空会话，否则界面没法用。
+    // 直接再查一次即可——store 每次查询都读库，MainWindow 的删除已提交。
+    const QList<SessionSummary> after = probe.listSessions(key);
+    for (const SessionSummary &summary : after) {
+        QVERIFY2(!oldSessionIds.contains(summary.session.id),
+                 qPrintable(QStringLiteral("旧会话 %1 必须已被删除").arg(summary.session.id)));
+    }
+    QVERIFY2(after.size() <= 1, "删空后最多只剩一个新开的空会话");
+
+    // ★ 最重要的一条：只删会话，绝不碰磁盘上的文件。
+    QVERIFY2(QFile::exists(markerPath), "工作区目录里的文件绝不能被删除");
+    QFile verify(markerPath);
+    QVERIFY(verify.open(QIODevice::ReadOnly));
+    QCOMPARE(verify.readAll(), QByteArray("must survive"));
+    QVERIFY2(QDir(workspaceDir.path()).exists(), "工作区目录本身必须保留");
+
+    // 当前工作区被清空后应当自动开一个新的空会话，而不是留下空界面。
+    QVERIFY2(waitFor([&]() { return conversation->messageCount() <= 1; }, 3000),
+             "清空后应当回到干净的新会话状态");
+}
+
+void TestUiFlow::attachesImageAndSendsIt() {
+    // 造一张真图片文件（不是空字节），这样 MIME 判定与解码都能走通。
+    QTemporaryDir imageDir;
+    QVERIFY(imageDir.isValid());
+    QImage source(48, 32, QImage::Format_RGB32);
+    source.fill(QColor(200, 60, 60));
+    const QString imagePath = imageDir.filePath(QStringLiteral("probe.png"));
+    QVERIFY2(source.save(imagePath, "PNG"), "测试图片应当能写入磁盘");
+
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+    QVERIFY(composer != nullptr);
+    auto *sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+    QVERIFY(sendButton != nullptr);
+    auto *attachButton = window.findChild<QPushButton *>(QStringLiteral("attachButton"));
+    QVERIFY2(attachButton != nullptr, "输入区必须有附加图片的入口");
+    auto *strip = window.findChild<QWidget *>(QStringLiteral("attachmentStrip"));
+    QVERIFY(strip != nullptr);
+    auto *conversation = window.findChild<ConversationView *>(QStringLiteral("conversation"));
+    QVERIFY(conversation != nullptr);
+
+    // 没有附件时附件条不占位置。
+    QVERIFY2(!strip->isVisible(), "没有附件时附件条应当隐藏");
+
+    // 直接走"拖入/选择后"的入口：attachImages 是按钮与拖拽共用的落点。
+    QMetaObject::invokeMethod(&window, "attachImages", Qt::DirectConnection,
+                              Q_ARG(QStringList, QStringList{imagePath}));
+    QVERIFY2(waitFor([&]() { return strip->isVisible(); }, 3000),
+             "附加图片后附件条必须出现");
+    QVERIFY2(window.findChild<QWidget *>(QStringLiteral("attachmentChip")) != nullptr,
+             "附件条里应当有一张缩略图块");
+    QVERIFY2(window.findChild<QPushButton *>(QStringLiteral("attachmentRemove")) != nullptr,
+             "每个附件必须有移除按钮");
+
+    const QString shot = screenshotDir() + QStringLiteral("/12-image-attachment.png");
+    QVERIFY2(window.grab().save(shot), qPrintable(shot));
+
+    // 发送：请求里必须带图，会话里必须渲染出图片。
+    gateway_->enqueue(textResponse("我看到了一张红色的图"));
+    composer->setPlainText(QStringLiteral("这是什么颜色？"));
+    const int before = conversation->messageCount();
+    sendButton->click();
+    QVERIFY2(waitFor([&]() { return conversation->messageCount() >= before + 2; }, 15000),
+             "发送附件消息后应当收到回复");
+    QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }, 15000));
+
+    // 发送成功后附件条必须清空，否则用户会以为还要再发一次。
+    QVERIFY2(!strip->isVisible(), "发送成功后附件条应当清空");
+
+    const QByteArray body = gateway_->lastBody();
+    QVERIFY2(body.contains("image_url"),
+             qPrintable(QStringLiteral("UI 发出的请求里必须带图片。请求体片段：%1")
+                            .arg(QString::fromUtf8(body.left(600)))));
+
+    // 会话里渲染出缩略图，而不是只有文件名。
+    const QList<QLabel *> images = conversation->findChildren<QLabel *>(
+        QStringLiteral("attachedImage"));
+    QVERIFY2(!images.isEmpty(), "对话流里必须把图片渲染出来");
+    QVERIFY2(!images.first()->pixmap().isNull(), "渲染出来的必须是真图片");
 }
 
 QTEST_MAIN(TestUiFlow)

@@ -114,6 +114,10 @@ public:
     /// 运行中提交会被拒绝（返回 false）——输入排队属于 UI 层职责，
     /// 运行时只保证"一次只有一个 turn"。
     bool submitText(const QString &text, QString *errorOut = nullptr);
+    /// 带附件的提交。`attachments` 里的每个 FilePart 会作为独立的 Part
+    /// 追加到用户消息上（图片走 base64 内联，见各 provider 的序列化）。
+    bool submitMessage(const QString &text, const QList<FilePart> &attachments,
+                       QString *errorOut = nullptr);
     /// 提交权限裁决。
     bool resolvePermission(const Id &requestId, const PermissionResponse &response);
     /// 请求中断当前 turn。幂等。
@@ -218,7 +222,7 @@ signals:
 
 private:
     // ── turn 流程 ───────────────────────────────────────────────────────────
-    void beginTurn(const QString &userText);
+    void beginTurn(const QString &userText, const QList<FilePart> &attachments);
     void runModelStep();
     void handleStreamEvent(const StreamEvent &event);
     void finishModelStep(const QString &finishReason);

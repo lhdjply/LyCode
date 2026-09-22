@@ -142,12 +142,59 @@ QJsonArray buildMessages(const QString &systemPrompt, const QList<Message> &mess
             }
 
             const QString text = joinTextParts(message);
-            if (!text.isEmpty()) {
-                QJsonObject user;
-                user.insert(QStringLiteral("role"), QStringLiteral("user"));
-                user.insert(QStringLiteral("content"), text);
-                result.append(user);
+
+            // 收集图片附件。没有图片时 content 保持**纯字符串**：
+            // 数组形式（content parts）并非所有 OpenAI 兼容服务都实现了，
+            // 无谓地改形状会让本来能用的后端报错。
+            QJsonArray imageParts;
+            for (const Part &part : message.parts) {
+                if (part.kind != PartKind::File) {
+                    continue;
+                }
+                if (!part.file.isImage()) {
+                    qCWarning(log) << "跳过非图片附件（本实现不支持上传）; mime="
+                                   << part.file.mimeType << "name=" << part.file.fileName;
+                    continue;
+                }
+                if (part.file.base64.isEmpty()) {
+                    qCWarning(log) << "图片附件缺少 base64 数据，已跳过; name="
+                                   << part.file.fileName;
+                    continue;
+                }
+                QJsonObject url;
+                url.insert(QStringLiteral("url"),
+                           QStringLiteral("data:%1;base64,%2")
+                               .arg(part.file.mimeType, part.file.base64));
+                QJsonObject item;
+                item.insert(QStringLiteral("type"), QStringLiteral("image_url"));
+                item.insert(QStringLiteral("image_url"), url);
+                imageParts.append(item);
             }
+
+            if (imageParts.isEmpty()) {
+                if (!text.isEmpty()) {
+                    QJsonObject user;
+                    user.insert(QStringLiteral("role"), QStringLiteral("user"));
+                    user.insert(QStringLiteral("content"), text);
+                    result.append(user);
+                }
+                continue;
+            }
+
+            QJsonArray contentParts;
+            if (!text.isEmpty()) {
+                QJsonObject textItem;
+                textItem.insert(QStringLiteral("type"), QStringLiteral("text"));
+                textItem.insert(QStringLiteral("text"), text);
+                contentParts.append(textItem);
+            }
+            for (const QJsonValue &item : imageParts) {
+                contentParts.append(item);
+            }
+            QJsonObject user;
+            user.insert(QStringLiteral("role"), QStringLiteral("user"));
+            user.insert(QStringLiteral("content"), contentParts);
+            result.append(user);
             continue;
         }
 

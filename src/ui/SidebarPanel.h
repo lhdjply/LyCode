@@ -53,6 +53,13 @@ signals:
     void newSessionRequested();
     void sessionSelected(const zcode::Id &sessionId);
     void workspaceChangeRequested();
+    /// 从最近工作区列表移除（**不碰任何数据**）。
+    /// 与下一个信号分开，是因为"不想在菜单里看到它"和"删掉它的会话"
+    /// 是两件性质完全不同的事，不能合成一个动作。
+    void workspaceRemoveRequested(const QString &path);
+    /// 删除该工作区下的全部会话（调用方负责二次确认）。
+    void workspacePurgeRequested(const QString &path);
+
     void workspaceRecentRequested(const QString &path);
     void sessionDeleteRequested(const zcode::Id &sessionId);
     void settingsRequested();

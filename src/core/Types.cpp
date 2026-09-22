@@ -428,6 +428,14 @@ Part Part::makeText(const QString &value) {
     return part;
 }
 
+Part Part::makeFile(const FilePart &value) {
+    Part part;
+    part.id = newId(QStringLiteral("part"));
+    part.kind = PartKind::File;
+    part.file = value;
+    return part;
+}
+
 Part Part::makeReasoning(const QString &value) {
     Part part;
     part.id = newPartId();
@@ -476,7 +484,11 @@ bool Part::isEmpty() const {
             // 工具块即使还没有输出也必须在场：它是权限请求的载体。
             return tool.name.isEmpty() && tool.callId.isEmpty();
         case PartKind::File:
-            return file.path.isEmpty() && file.ref.isEmpty();
+            // base64 也是载荷：粘贴进来的图片没有磁盘路径，
+            // 只看 path/ref 会把一个有内容的图片附件判成"空"，
+            // 于是它被界面整个跳过——图发出去了，用户却什么都看不到。
+            return file.path.isEmpty() && file.ref.isEmpty() && file.base64.isEmpty() &&
+                   file.fileName.isEmpty();
         case PartKind::Artifact:
             return artifact.artifactId.isEmpty() && artifact.path.isEmpty();
         case PartKind::Subagent:
@@ -524,6 +536,19 @@ QJsonObject Part::toJson() const {
             payload.insert(QStringLiteral("startedAtMs"), static_cast<double>(tool.startedAtMs));
             payload.insert(QStringLiteral("endedAtMs"), static_cast<double>(tool.endedAtMs));
             payload.insert(QStringLiteral("approvalInteractionId"), tool.approvalInteractionId);
+            if (!tool.images.isEmpty()) {
+                QJsonArray images;
+                for (const FilePart &image : tool.images) {
+                    QJsonObject item;
+                    item.insert(QStringLiteral("mimeType"), image.mimeType);
+                    item.insert(QStringLiteral("fileName"), image.fileName);
+                    item.insert(QStringLiteral("sizeBytes"), static_cast<double>(image.sizeBytes));
+                    item.insert(QStringLiteral("path"), image.path);
+                    item.insert(QStringLiteral("base64"), image.base64);
+                    images.append(item);
+                }
+                payload.insert(QStringLiteral("images"), images);
+            }
             result.insert(QStringLiteral("tool"), payload);
             break;
         }
@@ -633,6 +658,16 @@ Part Part::fromJson(const QJsonObject &value) {
             part.tool.endedAtMs = json::integer64(payload, QStringLiteral("endedAtMs"));
             part.tool.approvalInteractionId =
                 json::str(payload, QStringLiteral("approvalInteractionId"));
+            for (const QJsonValue &imageValue : json::array(payload, QStringLiteral("images"))) {
+                const QJsonObject item = imageValue.toObject();
+                FilePart image;
+                image.mimeType = json::str(item, QStringLiteral("mimeType"));
+                image.fileName = json::str(item, QStringLiteral("fileName"));
+                image.sizeBytes = json::integer64(item, QStringLiteral("sizeBytes"));
+                image.path = json::str(item, QStringLiteral("path"));
+                image.base64 = json::str(item, QStringLiteral("base64"));
+                part.tool.images.append(image);
+            }
             break;
         }
 

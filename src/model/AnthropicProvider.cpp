@@ -133,6 +133,32 @@ QJsonArray buildMessages(const QList<Message> &messages) {
                 block.insert(QStringLiteral("type"), QStringLiteral("text"));
                 block.insert(QStringLiteral("text"), part.text.text);
                 blocks.append(block);
+            } else if (part.kind == PartKind::File) {
+                // 图片以 base64 内联（Anthropic 的 image source）。
+                // assistant 侧不回传图片：模型没有"发出"过图片，硬塞会被拒。
+                if (isAssistant) {
+                    continue;
+                }
+                if (!part.file.isImage()) {
+                    // 非图片附件本实现不上传。明确告警而不是静默丢弃，
+                    // 否则用户会以为文件已经给模型看过了。
+                    qCWarning(log) << "跳过非图片附件（本实现不支持上传）; mime="
+                                   << part.file.mimeType << "name=" << part.file.fileName;
+                    continue;
+                }
+                if (part.file.base64.isEmpty()) {
+                    qCWarning(log) << "图片附件缺少 base64 数据，已跳过; name="
+                                   << part.file.fileName;
+                    continue;
+                }
+                QJsonObject source;
+                source.insert(QStringLiteral("type"), QStringLiteral("base64"));
+                source.insert(QStringLiteral("media_type"), part.file.mimeType);
+                source.insert(QStringLiteral("data"), part.file.base64);
+                QJsonObject block;
+                block.insert(QStringLiteral("type"), QStringLiteral("image"));
+                block.insert(QStringLiteral("source"), source);
+                blocks.append(block);
             } else if (part.kind == PartKind::Tool) {
                 if (isAssistant) {
                     if (part.tool.callId.isEmpty() || part.tool.name.isEmpty()) {

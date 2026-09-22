@@ -116,6 +116,13 @@ struct ToolResult {
     /// 结构化补充：cwd、exitCode、durationMs、path、diff 等。
     QJsonObject metadata;
 
+    /// 随结果返回的图片（目前只有 Read 读图片文件时会产生）。
+    ///
+    /// 刻意**不是** metadata 里的一个 base64 字段：那样模型只会收到一行
+    /// "Image read: …" 文字、看不到任何像素，于是会退回去用 Bash+Python
+    /// 猜图片内容。图片必须走真正的图片内容块才能被看见。
+    QList<FilePart> images;
+
     /// 成功后是否终止本轮 turn。由工具按 metadata.stopTurnOnSuccess 或
     /// 动态条件（如 ExitPlanMode 被拒）设置。
     bool stopTurnAfterResult = false;

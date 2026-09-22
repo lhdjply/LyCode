@@ -79,6 +79,8 @@ private slots:
     void taskToolsRejectUnknownIds();
     void autoBackgroundsOnTimeout();
     void detachedTaskSurvivesRegistryRestart();
+    void imageAttachmentReachesProvider();
+    void readToolReturnsImageToTheModel();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -1560,6 +1562,115 @@ void TestAgentRuntime::detachedTaskSurvivesRegistryRestart() {
     QVERIFY(notification.contains(QStringLiteral("<recovered>true</recovered>")));
 
     QFile::remove(outputPath);
+}
+
+void TestAgentRuntime::imageAttachmentReachesProvider() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 1×1 的 PNG：够小，也不会因为尺寸被任何一层的上限拦掉。
+    const QByteArray png = QByteArray::fromBase64(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/"
+        "q842iQAAAABJRU5ErkJggg==");
+    QVERIFY(!png.isEmpty());
+
+    FilePart image;
+    image.mimeType = QStringLiteral("image/png");
+    image.fileName = QStringLiteral("probe.png");
+    image.sizeBytes = png.size();
+    image.base64 = QString::fromLatin1(png.toBase64());
+
+    gateway_->enqueue(textResponse("我看到了这张图"));
+    QSignalSpy spy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitMessage(QStringLiteral("看看这张图"), {image}, &error),
+             qPrintable(error));
+    QVERIFY(spy.wait(8000));
+    QCOMPARE(spy.first().at(0).value<TurnResult>(), TurnResult::Success);
+
+    // ① 附件成为用户消息上的一个 File part，能被存储与界面复用。
+    const QList<Message> messages = runtime_->messages();
+    QCOMPARE(messages.first().role, MessageRole::User);
+    bool foundFilePart = false;
+    for (const Part &part : messages.first().parts) {
+        if (part.kind == PartKind::File) {
+            foundFilePart = true;
+            QCOMPARE(part.file.mimeType, QStringLiteral("image/png"));
+            QCOMPARE(part.file.base64, image.base64);
+        }
+    }
+    QVERIFY2(foundFilePart, "附件必须挂在用户消息上");
+
+    // ② base64 绝不能进 plainText：否则它会污染会话列表预览、
+    //    压缩摘要，甚至被当成正文回传给模型。
+    QVERIFY2(!messages.first().plainText().contains(QStringLiteral("iVBORw0KGgo")),
+             "plainText 不得包含 base64 数据");
+
+    // ③ 真正发出去。
+    const QByteArray body = gateway_->lastBody();
+    QVERIFY2(body.contains("image_url"), "请求体必须包含 image_url 内容块");
+    QVERIFY2(body.contains("data:image/png;base64,"), "图片必须以 data URL 内联");
+    QVERIFY2(body.contains(QStringLiteral("看看这张图").toUtf8()), "文字部分必须一起发出");
+}
+
+void TestAgentRuntime::readToolReturnsImageToTheModel() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 造一张真图片，让 Read 走图片分支。
+    QImage source(64, 40, QImage::Format_RGB32);
+    source.fill(QColor(30, 120, 200));
+    const QString imagePath = tempDir_.filePath(QStringLiteral("screenshot.png"));
+    QVERIFY2(source.save(imagePath, "PNG"), "测试图片应当能写入磁盘");
+
+    // 第一轮让模型调 Read，第二轮验证工具结果里带上了图片。
+    gateway_->enqueue(toolCallResponse(QStringLiteral("Read"),
+                                       QByteArray("{\"file_path\":\"") +
+                                           jsonEscape(imagePath) + QByteArray("\""),
+                                       "}"));
+    gateway_->enqueue(textResponse("我看到一张蓝色的图"));
+
+    QSignalSpy spy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("看看这张图是什么"), &error), qPrintable(error));
+    QVERIFY(spy.wait(10000));
+    QCOMPARE(spy.first().at(0).value<TurnResult>(), TurnResult::Success);
+
+    // ① 工具结果自己带上了图片，而不是只在 metadata 里留一个 base64 字符串。
+    const ToolPart readPart = runtime_->messages().at(1).toolParts().first();
+    QCOMPARE(readPart.name, QStringLiteral("Read"));
+    QCOMPARE(readPart.state, ToolState::Success);
+    QVERIFY2(!readPart.images.isEmpty(),
+             "Read 读图片必须把图片放进 ToolResult::images");
+    QCOMPARE(readPart.images.first().mimeType, QStringLiteral("image/png"));
+    QVERIFY(!readPart.images.first().base64.isEmpty());
+    // 正文要明确告诉模型"图已附上"，否则它仍可能去跑外部命令确认。
+    QVERIFY2(readPart.output.contains(QStringLiteral("已随本次结果附上")),
+             qPrintable(readPart.output));
+
+    // ② 工具结果消息里必须有 File part：provider 的图片序列化只认 File part，
+    //    图片只挂在 Tool part 上模型依然看不到。
+    bool toolResultHasImage = false;
+    for (const Message &message : runtime_->messages()) {
+        if (!message.modelOnly) {
+            continue;
+        }
+        for (const Part &part : message.parts) {
+            if (part.kind == PartKind::File && part.file.isImage()) {
+                toolResultHasImage = true;
+            }
+        }
+    }
+    QVERIFY2(toolResultHasImage, "工具结果消息必须带上 File part");
+
+    // ③ 决定性的一条：**第二次请求体里有图片**。
+    //    这才是"模型能直接看图"的证明——用户报的问题正是模型看不到图、
+    //    只好去用 Bash+Python 猜。
+    const QByteArray body = gateway_->lastBody();
+    QVERIFY2(body.contains("image_url"),
+             qPrintable(QStringLiteral("模型请求里必须带图片，否则它仍然看不见。片段：%1")
+                            .arg(QString::fromUtf8(body.right(400)))));
+    QVERIFY(body.contains("data:image/png;base64,"));
+    // 图片的 base64 必须真的在请求里（不是占位）。
+    QVERIFY(body.contains(readPart.images.first().base64.left(40).toUtf8()));
 }
 
 QTEST_MAIN(TestAgentRuntime)

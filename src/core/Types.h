@@ -243,6 +243,8 @@ struct ToolPart {
     QString title;
     /// 结构化补充信息：cwd、退出码、耗时、文件路径、diff 等。
     QJsonObject metadata;
+    /// 随结果返回的图片，供界面渲染缩略图，并随 part 一起持久化。
+    QList<FilePart> images;
     /// 执行进度（字节数、预览行、更新时间），终态清空。
     QJsonObject progress;
 
@@ -270,6 +272,8 @@ struct Part {
     StepPart step;
 
     static Part makeText(const QString &value);
+    /// 附件（图片走这里，见 FilePart::isImage）。
+    static Part makeFile(const FilePart &value);
     static Part makeReasoning(const QString &value);
     static Part makeTool(const QString &name, const QString &callId);
     static Part makeStep(int index, const QString &title);

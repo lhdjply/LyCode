@@ -14,6 +14,8 @@
 //   权限弹窗队列    → MainWindow（UI 关注点，运行时只负责决策）
 #pragma once
 
+class QHBoxLayout;
+
 #include <QElapsedTimer>
 #include <QHash>
 #include <QMainWindow>
@@ -61,6 +63,10 @@ private slots:
     void onSessionSelected(const Id &sessionId);
     void onSessionDeleteRequested(const Id &sessionId);
     void onWorkspaceChangeRequested();
+    /// 把某个工作区从最近列表移除（不碰数据）。
+    void onWorkspaceRemoveRequested(const QString &path);
+    /// 删除某个工作区下的全部会话（二次确认后执行）。
+    void onWorkspacePurgeRequested(const QString &path);
     void onOpenWorkspacePath(const QString &path);
 
     // ── 运行时信号 ──────────────────────────────────────────────────────────
@@ -84,6 +90,12 @@ private slots:
 
     // ── 交互 ────────────────────────────────────────────────────────────────
     void onSendRequested();
+    /// 选择图片附件（文件对话框）。
+    void onAttachImagesRequested();
+    /// 粘贴/拖入的图片直接进待发附件。
+    void attachImages(const QStringList &paths);
+    void attachImageData(const QByteArray &bytes, const QString &mimeType,
+                         const QString &suggestedName);
     void onStopRequested();
     void onModelChanged(int index);
     void onModeChanged(int index);
@@ -141,6 +153,14 @@ private:
     QProgressBar *contextBar_ = nullptr;
 
     QPlainTextEdit *composer_ = nullptr;
+    /// 附件条：待发图片的缩略图与移除按钮。空时隐藏。
+    QPushButton *attachButton_ = nullptr;
+    QWidget *attachmentStrip_ = nullptr;
+    QHBoxLayout *attachmentLayout_ = nullptr;
+    /// 待发附件。发送成功后清空；切换会话时清空（它们属于"这次编辑"）。
+    QList<FilePart> pendingAttachments_;
+    /// 重建附件条。
+    void refreshAttachmentStrip();
     QPushButton *sendButton_ = nullptr;
     QPushButton *stopButton_ = nullptr;
 

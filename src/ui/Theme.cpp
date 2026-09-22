@@ -589,6 +589,26 @@ QWidget[role="surface"] {
     background: %SURFACE%;
 }
 
+/* 附件条：一个淡底圆角的小块，含 36px 缩略图、文件名与移除按钮。
+   用背景色而不是边框来区分，避免和输入框的边框抢视觉。 */
+#attachmentChip {
+    background: %SURFACE%;
+    border-radius: 6px;
+}
+
+/* 移除按钮要"轻"：它紧挨着缩略图，做成普通按钮会显得比图片本身还重。 */
+#attachmentRemove {
+    background: transparent;
+    border: none;
+    color: %FOREGROUND_SUBTLE%;
+    font-size: 14px;
+    padding: 0;
+}
+
+#attachmentRemove:hover {
+    color: %DESTRUCTIVE%;
+}
+
 QPushButton {
     background: %CARD%;
     color: %FOREGROUND%;

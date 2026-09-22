@@ -85,6 +85,8 @@ void SidebarPanel::buildUi() {
     workspaceLayout->setSpacing(2);
 
     workspaceButton_ = new QPushButton;
+    // 命名以便测试能按真实用户路径点击它（而不是绕过菜单直接发信号）。
+    workspaceButton_->setObjectName(QStringLiteral("workspaceButton"));
     workspaceButton_->setFlat(true);
     workspaceButton_->setCursor(Qt::PointingHandCursor);
     workspaceButton_->setToolTip(QStringLiteral("切换工作区目录"));
@@ -241,30 +243,45 @@ void SidebarPanel::setWorkspace(const Workspace &workspace) {
 }
 
 void SidebarPanel::showWorkspaceMenu() {
-    // 最近工作区菜单 + "选择其它目录"，避免每次都要走文件对话框。
+    // 每个工作区一个**子菜单**，而不是一个平铺的菜单项：
+    // 一个菜单项只能有一个触发动作，而每个工作区需要「打开 / 从列表移除 /
+    // 删除全部会话」三件事，平铺会让菜单变成一长串分不清归属的条目。
     QMenu menu(this);
 
-    if (!workspace_.path.isEmpty()) {
-        QAction *current = menu.addAction(QStringLiteral("当前：") + workspace_.path);
-        current->setEnabled(false);
-        menu.addSeparator();
-    }
+    const auto addWorkspaceEntry = [this, &menu](const QString &path, bool isCurrent) {
+        const QString name = QDir(path).dirName().isEmpty() ? path : QDir(path).dirName();
+        QMenu *submenu = menu.addMenu((isCurrent ? QStringLiteral("当前：") : QString()) + name +
+                                      QStringLiteral("  —  ") + path);
 
+        if (!isCurrent) {
+            QAction *open = submenu->addAction(QStringLiteral("打开"));
+            connect(open, &QAction::triggered, this,
+                    [this, path]() { emit workspaceRecentRequested(path); });
+            submenu->addSeparator();
+        }
+
+        QAction *remove = submenu->addAction(QStringLiteral("从最近列表移除"));
+        remove->setToolTip(QStringLiteral("只是不在这个列表里显示，不会删除任何会话或文件"));
+        connect(remove, &QAction::triggered, this,
+                [this, path]() { emit workspaceRemoveRequested(path); });
+
+        QAction *purge = submenu->addAction(QStringLiteral("删除该工作区的全部会话…"));
+        purge->setToolTip(QStringLiteral("删除数据库里该工作区的会话记录，不动磁盘上的文件"));
+        connect(purge, &QAction::triggered, this,
+                [this, path]() { emit workspacePurgeRequested(path); });
+    };
+
+    if (!workspace_.path.isEmpty()) {
+        addWorkspaceEntry(workspace_.path, true);
+    }
     for (const QString &recent : recentWorkspaces_) {
         if (recent == workspace_.path) {
-            continue;
+            continue;  // 当前工作区上面已经加过了
         }
-        QAction *entry = menu.addAction(QDir(recent).dirName().isEmpty()
-                                            ? recent
-                                            : QDir(recent).dirName() + QStringLiteral("  —  ") +
-                                                  recent);
-        connect(entry, &QAction::triggered, this,
-                [this, recent]() { emit workspaceRecentRequested(recent); });
-    }
-    if (!recentWorkspaces_.isEmpty()) {
-        menu.addSeparator();
+        addWorkspaceEntry(recent, false);
     }
 
+    menu.addSeparator();
     QAction *browse = menu.addAction(QStringLiteral("选择其它目录…"));
     connect(browse, &QAction::triggered, this, &SidebarPanel::workspaceChangeRequested);
     menu.exec(workspaceButton_->mapToGlobal(workspaceButton_->rect().bottomLeft()));
