@@ -2,14 +2,17 @@
 
 #include "core/Json.h"
 #include "ui/DiffView.h"
+#include "ui/FileViewerDialog.h"
 #include "ui/Theme.h"
 
+#include <QFileInfo>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLoggingCategory>
 #include <QPlainTextEdit>
+#include <QPushButton>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -152,6 +155,22 @@ void ToolCallWidget::buildUi() {
     diffView_->hide();
     bodyLayout->addWidget(diffCaption_);
     bodyLayout->addWidget(diffView_);
+
+    // 文件入口：卡片里的输出是给模型看的（被预算截断、被限高），
+    // 用户想核对完整内容需要一个出口。做成看起来像链接的按钮。
+    fileCaption_ = new QPushButton;
+    fileCaption_->setObjectName(QStringLiteral("toolFileLink"));
+    fileCaption_->setFlat(true);
+    fileCaption_->setCursor(Qt::PointingHandCursor);
+    fileCaption_->setFont(Theme::instance().font(FontRole::UiXs));
+    fileCaption_->hide();
+    connect(fileCaption_, &QPushButton::clicked, this, [this]() {
+        const QString path = json::str(part_.tool.metadata, QStringLiteral("filePath"));
+        if (!path.isEmpty()) {
+            FileViewerDialog::showContent(window(), path, {});
+        }
+    });
+    bodyLayout->addWidget(fileCaption_, 0, Qt::AlignLeft);
 
     // 图片单独一块：读图时"看到的那张图"比一句话摘要有用得多，
     // 用户也需要能确认模型看的确实是这张。
@@ -336,6 +355,33 @@ void ToolCallWidget::refreshBodies() {
 
     syncDiff();
     syncImages();
+    syncFileLink();
+}
+
+bool ToolCallWidget::eventFilter(QObject *watched, QEvent *event) {
+    if (event->type() == QEvent::MouseButtonRelease) {
+        auto *label = qobject_cast<QLabel *>(watched);
+        if (label != nullptr && label->objectName() == QLatin1String("toolImage")) {
+            openImageViewer(label);
+            return true;
+        }
+    }
+    return QFrame::eventFilter(watched, event);
+}
+
+void ToolCallWidget::openImageViewer(QWidget *source) {
+    // 从缩略图反查它是第几张图：标签顺序与 part_.tool.images 一一对应。
+    const QList<QLabel *> labels =
+        imageStrip_->findChildren<QLabel *>(QStringLiteral("toolImage"));
+    const int index = labels.indexOf(qobject_cast<QLabel *>(source));
+    if (index < 0 || index >= part_.tool.images.size()) {
+        return;
+    }
+    const FilePart &image = part_.tool.images.at(index);
+    // 直接传 base64 解码后的字节：粘贴来的图片没有磁盘路径，
+    // 只有 bytes 才能保证查看器一定能显示。
+    FileViewerDialog::showContent(window(), image.path,
+                                  QByteArray::fromBase64(image.base64.toLatin1()));
 }
 
 void ToolCallWidget::syncDiff() {
@@ -356,6 +402,23 @@ void ToolCallWidget::syncDiff() {
                               .arg(diffView_->deletions()));
     diffCaption_->show();
     diffView_->show();
+}
+
+void ToolCallWidget::syncFileLink() {
+    if (fileCaption_ == nullptr) {
+        return;
+    }
+    // 只在工具确实读/写了某个文件时给入口。有图片时不重复给：
+    // 图片本身已经可点，多一个按钮只是噪音。
+    const QString path = json::str(part_.tool.metadata, QStringLiteral("filePath"));
+    const bool show = !path.isEmpty() && part_.tool.images.isEmpty();
+    if (!show) {
+        fileCaption_->hide();
+        return;
+    }
+    fileCaption_->setText(QStringLiteral("查看文件  %1  ▸").arg(QFileInfo(path).fileName()));
+    fileCaption_->setToolTip(QStringLiteral("点击查看完整内容：%1").arg(path));
+    fileCaption_->show();
 }
 
 void ToolCallWidget::syncImages() {
@@ -380,6 +443,12 @@ void ToolCallWidget::syncImages() {
             pixmap.loadFromData(QByteArray::fromBase64(image.base64.toLatin1()))) {
             auto *label = new QLabel;
             label->setObjectName(QStringLiteral("toolImage"));
+            // 缩略图只有 240px，看不清细节。整块可点，点开看原尺寸。
+            label->setCursor(Qt::PointingHandCursor);
+            label->setToolTip(QStringLiteral("点击查看原图（%1）")
+                                  .arg(image.fileName.isEmpty() ? QStringLiteral("图片")
+                                                                : image.fileName));
+            label->installEventFilter(const_cast<ToolCallWidget *>(this));
             constexpr int kMaxEdge = 240;
             label->setPixmap(pixmap.width() > kMaxEdge || pixmap.height() > kMaxEdge
                                  ? pixmap.scaled(kMaxEdge, kMaxEdge, Qt::KeepAspectRatio,

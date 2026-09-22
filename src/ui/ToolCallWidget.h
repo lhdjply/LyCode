@@ -25,6 +25,7 @@ namespace zcode::ui {
 class DiffView;
 }
 
+class QPushButton;
 class QToolButton;
 class QVBoxLayout;
 
@@ -47,12 +48,18 @@ public:
     /// 展开/收起。用户点击头部或调用此方法都会切换。
     void setExpanded(bool expanded);
 
+protected:
+    /// 点击图片缩略图打开查看器。
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
     void buildUi();
     void refreshHeader();
     void refreshBodies();
     /// 同步工具读到的图片缩略图。
     void syncImages();
+    /// 打开第 index 张图片的查看器。
+    void openImageViewer(QWidget *source);
 
     /// 状态灯的颜色。
     QColor stateColor() const;
@@ -81,6 +88,9 @@ private:
     DiffView *diffView_ = nullptr;
     /// 同步补丁视图。
     void syncDiff();
+    /// 非图片文件：给出"查看完整内容"的入口。
+    void syncFileLink();
+    QPushButton *fileCaption_ = nullptr;
     /// 工具读到的图片（Read 读图片文件时产生）。空时整块隐藏。
     QWidget *imageStrip_ = nullptr;
     QHBoxLayout *imageLayout_ = nullptr;
