@@ -1,4 +1,4 @@
-// ZCode Qt — 侧边栏（工作区 + 会话列表）
+// LyCode — 侧边栏（工作区 + 会话列表）
 //
 // 结构（自上而下）：
 //   1. 工作区切换行：显示当前工作区名与路径，点击可换目录
@@ -28,7 +28,7 @@ class QResizeEvent;
 
 #include <QTreeWidget>
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class SidebarPanel : public QWidget {
     Q_OBJECT
@@ -67,7 +67,7 @@ public:
 
 signals:
     void newSessionRequested();
-    void sessionSelected(const zcode::Id &sessionId);
+    void sessionSelected(const lycode::Id &sessionId);
     void workspaceChangeRequested();
     /// 从最近工作区列表移除（**不碰任何数据**）。
     /// 与下一个信号分开，是因为"不想在菜单里看到它"和"删掉它的会话"
@@ -84,7 +84,7 @@ signals:
     void newSessionRequestedInWorkspace(const QString &path);
     /// 工作区节点被展开且子节点尚未加载。
     void workspaceExpandRequested(const QString &path);
-    void sessionDeleteRequested(const zcode::Id &sessionId);
+    void sessionDeleteRequested(const lycode::Id &sessionId);
     void settingsRequested();
 
 private:
@@ -120,4 +120,4 @@ private:
     QStringList recentWorkspaces_;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

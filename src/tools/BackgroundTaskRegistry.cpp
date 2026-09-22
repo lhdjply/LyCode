@@ -18,14 +18,14 @@
 #include <unistd.h>
 #endif
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tools.background")
+Q_LOGGING_CATEGORY(log, "lycode.tools.background")
 
 QString dataRoot() {
-    const QString base = qEnvironmentVariable("ZCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.zcode") : base;
+    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
+    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
 }
 
 }  // namespace
@@ -588,7 +588,7 @@ void BackgroundTaskRegistry::handleFinished(Entry &entry, int exitCode, bool kil
 }
 
 QString BackgroundTaskRegistry::buildNotification(const Entry &entry) {
-    // 与 npm 的 <task-notification> 同形：模型读到的是一段结构化文本，
+    // <task-notification> 同形：模型读到的是一段结构化文本，
     // 而不是一句自由描述，便于它稳定地解析出"哪个任务、什么结果、去哪看完整输出"。
     const BackgroundTask &task = entry.task;
 
@@ -751,4 +751,4 @@ void BackgroundTaskRegistry::detachAll() {
     persistLedger();
 }
 
-}  // namespace zcode
+}  // namespace lycode

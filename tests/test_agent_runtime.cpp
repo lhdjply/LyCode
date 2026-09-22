@@ -1,4 +1,4 @@
-// ZCode Qt — Agent 运行时集成测试
+// LyCode — Agent 运行时集成测试
 //
 // 这里用**本地假网关**（QTcpServer 返回预置的 SSE 响应）真实驱动整条链路：
 //
@@ -31,13 +31,13 @@
 
 #include "support/FakeGateway.h"
 
-using namespace zcode;
-using zcode::test::FakeGateway;
-using zcode::test::jsonEscape;
-using zcode::test::textResponse;
-using zcode::test::multiToolCallResponse;
-using zcode::test::textResponseWithCache;
-using zcode::test::toolCallResponse;
+using namespace lycode;
+using lycode::test::FakeGateway;
+using lycode::test::jsonEscape;
+using lycode::test::textResponse;
+using lycode::test::multiToolCallResponse;
+using lycode::test::textResponseWithCache;
+using lycode::test::toolCallResponse;
 
 namespace {
 
@@ -101,8 +101,8 @@ private:
 
 void TestAgentRuntime::init() {
     // 数据根指向临时目录：后台任务的输出文件默认落在 <数据根>/qt/tasks，
-    // 测试不应该往用户的 ~/.zcode 里写东西。
-    qputenv("ZCODE_DATA_BASE_DIR", tempDir_.path().toUtf8());
+    // 测试不应该往用户的 ~/.lycode 里写东西。
+    qputenv("LYCODE_DATA_BASE_DIR", tempDir_.path().toUtf8());
     // 账本是全局文件：不清掉的话上一个测试的遗留任务会被下一个测试认领，
     // 断言就不再互不干扰。
     QFile::remove(BackgroundTaskRegistry::ledgerPath());
@@ -267,7 +267,7 @@ void TestAgentRuntime::bashToolWaitsForPermissionAndRunsAfterAllow() {
     QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
 
     gateway_->enqueue(toolCallResponse(
-        QStringLiteral("Bash"), R"({"command":"echo zcode-ok")", "}"));
+        QStringLiteral("Bash"), R"({"command":"echo lycode-ok")", "}"));
 
     QSignalSpy permissionSpy(runtime_.get(), &AgentRuntime::permissionRequested);
     QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
@@ -300,7 +300,7 @@ void TestAgentRuntime::bashToolWaitsForPermissionAndRunsAfterAllow() {
     const QList<Message> messages = runtime_->messages();
     const ToolPart toolPart = messages.at(1).toolParts().first();
     QCOMPARE(toolPart.state, ToolState::Success);
-    QVERIFY(toolPart.output.contains(QStringLiteral("zcode-ok")));
+    QVERIFY(toolPart.output.contains(QStringLiteral("lycode-ok")));
 
     // 执行前必须是 PendingApproval 而不是直接 Running。
     QCOMPARE(toolPart.metadata.value(QStringLiteral("exitCode")).toInt(), 0);
@@ -897,7 +897,7 @@ void TestAgentRuntime::concurrencyPolicyIsTriState() {
     ProbeTool serial(QStringLiteral("SerialProbe"), 0, false, &ignored);
     QVERIFY2(!serial.canRunInParallel(), "显式声明串行的只读工具不得被判为可并发");
 
-    // 内置工具的期望分类（与 npm 版的 metadata 一致）。
+    // 内置工具的期望分类（metadata 一致）。
     *tools_ = ToolRegistry::createWithBuiltins();
     QVERIFY(tools_->find(QStringLiteral("Read"))->canRunInParallel());
     QVERIFY(tools_->find(QStringLiteral("Glob"))->canRunInParallel());
@@ -917,7 +917,7 @@ void TestAgentRuntime::agentToolIsRegisteredWithAlias() {
 
     Tool *agent = tools_->find(QStringLiteral("Agent"));
     QVERIFY2(agent != nullptr, "内置工具里应当有 Agent");
-    // `Task` 是 npm 里 Agent 的 Claude Code 兼容别名。
+    // `Task` 是 本实现里 Agent 的 Claude Code 兼容别名。
     QCOMPARE(tools_->find(QStringLiteral("Task")), agent);
     QVERIFY(agent->metadata().providerVisible);
     // 多个 Agent 可以在同一条消息里并行发出。
@@ -1086,7 +1086,7 @@ void TestAgentRuntime::subagentRunsItsOwnTurnAndReportsBack() {
     QCOMPARE(agentPart.state, ToolState::Success);
     QVERIFY2(agentPart.output.contains(QStringLiteral("子代理结论")),
              "父代理必须收到子代理的最后一条消息");
-    // 用量摘要行与 npm 的 <usage> 标签对齐。
+    // 用量摘要行<usage> 标签对齐。
     QVERIFY2(agentPart.output.contains(QStringLiteral("<usage>subagent_tokens:")),
              qPrintable(agentPart.output));
     QVERIFY(agentPart.output.contains(QStringLiteral("tool_uses:")));

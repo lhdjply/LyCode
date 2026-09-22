@@ -1,4 +1,4 @@
-// ZCode Qt — JSON 读取辅助
+// LyCode — JSON 读取辅助
 //
 // 与外部协议（模型 API、工具输入、持久化文件）打交道时，绝大多数字段都是
 // "可能缺失、类型可能不符"的。直接 QJsonObject::value().toString() 会把
@@ -13,7 +13,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace zcode::json {
+namespace lycode::json {
 
 QString str(const QJsonObject &obj, const QString &key, const QString &fallback = {});
 int integer(const QJsonObject &obj, const QString &key, int fallback = 0);
@@ -40,4 +40,4 @@ QByteArray toPrettyBytes(const QJsonObject &obj);
 /// 按长度截断字符串，并在截断处追加标记，用于展示预算控制。
 QString truncate(const QString &value, int maxChars, const QString &marker = QStringLiteral("…[truncated]"));
 
-}  // namespace zcode::json
+}  // namespace lycode::json

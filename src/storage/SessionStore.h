@@ -1,4 +1,4 @@
-// ZCode Qt — 会话持久化
+// LyCode — 会话持久化
 //
 // 存储选型：SQLite（Qt6::Sql 的 QSQLITE 驱动）。
 // 理由：会话是典型的一对多读写模型（session → messages → parts），
@@ -22,7 +22,7 @@
 
 #include "core/Types.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 一次会话列表查询的结果行（不携带消息体，供列表展示）。
 struct SessionSummary {
@@ -89,4 +89,4 @@ private:
     QString connectionName_;
 };
 
-}  // namespace zcode
+}  // namespace lycode

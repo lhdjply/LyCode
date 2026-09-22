@@ -1,4 +1,4 @@
-// ZCode Qt — 语法高亮测试
+// LyCode — 语法高亮测试
 //
 // 分词器是手写的，最容易错的是**规则优先级**：
 //   * 字符串/注释里的关键字不能着色（`"for"`、`// for`）
@@ -19,7 +19,7 @@
 #include "ui/SyntaxHighlighter.h"
 #include "ui/Theme.h"
 
-using namespace zcode::ui;
+using namespace lycode::ui;
 
 class TestSyntaxHighlighter : public QObject {
     Q_OBJECT

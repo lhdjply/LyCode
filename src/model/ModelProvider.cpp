@@ -1,4 +1,4 @@
-// ZCode Qt — 模型 Provider 抽象实现
+// LyCode — 模型 Provider 抽象实现
 //
 // 这里只放与具体协议无关的部分：StreamEvent 的静态工厂、终止判定、
 // 事件类型词表、ModelStream 的事件投递，以及 ModelInfo 的默认推断。
@@ -8,10 +8,10 @@
 
 #include <iterator>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.model")
+Q_LOGGING_CATEGORY(log, "lycode.model")
 
 /// 事件类型 ↔ 字符串。与 Types.cpp 的表驱动风格保持一致，
 /// 便于日志与测试断言使用稳定字面量。
@@ -118,4 +118,4 @@ ModelInfo ModelProvider::modelInfo(const QString &modelId) const {
     return info;
 }
 
-}  // namespace zcode
+}  // namespace lycode

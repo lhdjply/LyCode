@@ -9,22 +9,22 @@
 #include <QLoggingCategory>
 #include <QSysInfo>
 
-namespace zcode {
+namespace lycode {
 
 const QStringList kProjectInstructionFileNames = {QStringLiteral("AGENTS.md")};
 
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.prompt")
+Q_LOGGING_CATEGORY(log, "lycode.prompt")
 
 /// 目录树上行的最大层数。纯粹是防御性兜底：任何真实路径都不可能接近这个深度，
 /// 它的存在是为了保证"即使路径形态异常，也绝不出现死循环"。
 constexpr int kMaxDirectoryWalkDepth = 128;
 
-/// 数据根目录：与 npm 版一致，允许用 ZCODE_DATA_BASE_DIR 覆盖。
+/// 数据根目录：按既定语义，允许用 LYCODE_DATA_BASE_DIR 覆盖。
 QString dataRoot() {
-    const QString base = qEnvironmentVariable("ZCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.zcode") : base;
+    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
+    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
 }
 
 /// 读一个文件并截断。读不到时返回空字符串。
@@ -137,6 +137,8 @@ void SystemPromptBuilder::detectProjectContext(const QString &workingDirectory,
 
     // 包管理器按优先级判定：锁定文件比清单文件更能说明实际使用的工具。
     if (packageManagerOut != nullptr) {
+        // 这里读的是包管理器**工具名**（npm / pnpm / yarn 与 git、make 同类），
+        // 用于告诉模型该用哪个命令装依赖——不是对任何项目的引用。
         if (exists(QStringLiteral("pnpm-lock.yaml"))) {
             *packageManagerOut = QStringLiteral("pnpm");
         } else if (exists(QStringLiteral("yarn.lock"))) {
@@ -270,7 +272,7 @@ QString SystemPromptBuilder::environmentSection(const SystemPromptInput &input) 
         lines << QStringLiteral("- Build files: ") + buildFiles.join(QStringLiteral(", "));
     }
     if (!input.appVersion.isEmpty()) {
-        lines << QStringLiteral("- ZCode version: ") + input.appVersion;
+        lines << QStringLiteral("- LyCode version: ") + input.appVersion;
     }
     return lines.join(QLatin1Char('\n'));
 }
@@ -345,7 +347,7 @@ QString SystemPromptBuilder::subagentIdentitySection(const QString &subagentType
 
     QStringList parts;
     parts << QStringLiteral(
-        "You are a ZCode subagent. You were launched by the main ZCode agent to complete one "
+        "You are a LyCode subagent. You were launched by the main LyCode agent to complete one "
         "self-contained task. You have your own context: the caller cannot see your "
         "intermediate steps, only the final message you produce.");
 
@@ -389,7 +391,7 @@ QString SystemPromptBuilder::build(const SystemPromptInput &input) {
         sections << subagentIdentitySection(input.subagentType, input.subagentDescription);
     } else {
         sections << QStringLiteral(
-        "You are ZCode, an interactive coding agent. You help users with software "
+        "You are LyCode, an interactive coding agent. You help users with software "
         "engineering tasks by reading and editing files and running commands in their "
         "workspace.\n"
         "\n"
@@ -434,4 +436,4 @@ QString SystemPromptBuilder::build(const SystemPromptInput &input) {
     return sections.join(QStringLiteral("\n\n"));
 }
 
-}  // namespace zcode
+}  // namespace lycode

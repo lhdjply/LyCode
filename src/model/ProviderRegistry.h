@@ -1,4 +1,4 @@
-// ZCode Qt — Provider 注册表
+// LyCode — Provider 注册表
 //
 // 持有全部已配置的 provider 实例，按 id 解析。
 // 唯一写入路径：replaceAll() / upsert()，避免多个地方各自改配置导致漂移。
@@ -11,7 +11,7 @@
 #include "core/Types.h"
 #include "model/ModelProvider.h"
 
-namespace zcode {
+namespace lycode {
 
 class ProviderRegistry : public QObject {
     Q_OBJECT
@@ -66,4 +66,4 @@ private:
     QHash<QString, ModelOptionOverride> overrides_;
 };
 
-}  // namespace zcode
+}  // namespace lycode

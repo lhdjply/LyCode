@@ -1,4 +1,4 @@
-// ZCode Qt — Skills 测试
+// LyCode — Skills 测试
 //
 // 覆盖发现、frontmatter 解析、覆盖优先级，以及"清单只放名字+描述、
 // 正文按需加载"这条核心设计——正文如果混进提示词，几十个 skill 就会把
@@ -14,7 +14,7 @@
 #include "skills/SkillLibrary.h"
 #include "tools/Tool.h"
 
-using namespace zcode;
+using namespace lycode;
 
 namespace {
 

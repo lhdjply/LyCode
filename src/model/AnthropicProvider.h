@@ -1,6 +1,6 @@
-// ZCode Qt — Anthropic Messages API 流式 Provider
+// LyCode — Anthropic Messages API 流式 Provider
 //
-// 协议要点（对齐 npm 版）：
+// 协议要点（按既定语义）：
 //   POST {baseUrl}/v1/messages
 //   x-api-key + anthropic-version: 2023-06-01
 //   SSE 事件 message_start / content_block_* / message_delta / message_stop / error / ping
@@ -10,7 +10,7 @@
 
 class QNetworkAccessManager;
 
-namespace zcode {
+namespace lycode {
 
 class AnthropicProvider : public ModelProvider {
     Q_OBJECT
@@ -36,4 +36,4 @@ private:
     QNetworkAccessManager *network_ = nullptr;
 };
 
-}  // namespace zcode
+}  // namespace lycode

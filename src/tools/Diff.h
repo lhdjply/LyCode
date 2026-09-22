@@ -1,4 +1,4 @@
-// ZCode Qt — 统一 diff 生成
+// LyCode — 统一 diff 生成
 //
 // 用途：Write / Edit 工具在改动文件后返回结构化补丁，UI 直接渲染，
 // 模型也能据此确认"我到底改了什么"。
@@ -7,7 +7,7 @@
 //   * 用经典 LCS + 动态规划，而不是 Myers。文件规模在工具场景下是
 //     "单文件、几万行以内"，O(N*M) 的 DP 完全够用，且实现短、易审计。
 //     同时加了公共前后缀裁剪与规模上限保护，避免病态输入打爆内存。
-//   * 输出格式与 npm 版 structuredPatch 对齐：按 hunk 分组，每行带 type。
+//   * 输出格式与 本实现 structuredPatch 对齐：按 hunk 分组，每行带 type。
 //     这样 UI 不需要解析文本 diff，也就不会因为格式细节（"\ No newline"）
 //     而出现展示偏差。
 //   * 行内容一律以 '\n' 切分，不保留行尾符；渲染端自己决定换行。
@@ -16,7 +16,7 @@
 #include <QJsonArray>
 #include <QString>
 
-namespace zcode {
+namespace lycode {
 
 /// 结构化补丁生成器。
 class Diff {
@@ -39,4 +39,4 @@ public:
     static QStringList splitLines(const QString &text);
 };
 
-}  // namespace zcode
+}  // namespace lycode

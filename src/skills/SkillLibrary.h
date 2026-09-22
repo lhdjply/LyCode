@@ -1,4 +1,4 @@
-// ZCode Qt — Skills 库
+// LyCode — Skills 库
 //
 // Skill 是一份**可复用的指令包**：一个目录里放 SKILL.md，带 name/description
 // 与正文。系统提示词里只列出"名字 + 一句话描述"，模型按需用 Skill 工具把
@@ -18,7 +18,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace zcode::skills {
+namespace lycode::skills {
 
 /// 一个已发现的 skill。
 struct Skill {
@@ -37,7 +37,7 @@ struct Skill {
 class Library {
 public:
     /// 默认搜索目录：用户级 + 项目级。
-    /// 用户级 `<数据根>/qt/skills`；项目级 `<workspace>/.zcode/skills`。
+    /// 用户级 `<数据根>/qt/skills`；项目级 `<workspace>/.lycode/skills`。
     static QStringList defaultDirectories(const QString &workspacePath);
 
     /// 重新扫描。`directories` 里不存在的会被跳过。
@@ -62,4 +62,4 @@ private:
     QList<Skill> skills_;
 };
 
-}  // namespace zcode::skills
+}  // namespace lycode::skills

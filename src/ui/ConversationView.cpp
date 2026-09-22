@@ -14,10 +14,10 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.conversation")
+Q_LOGGING_CATEGORY(log, "lycode.ui.conversation")
 
 /// 触发"贴底跟随"的阈值（像素）。太大会导致用户刚往上滚一点就被拉回底部。
 constexpr int kFollowBottomThreshold = 60;
@@ -27,7 +27,7 @@ QString roleDisplayName(MessageRole role) {
         case MessageRole::User:
             return QStringLiteral("你");
         case MessageRole::Assistant:
-            return QStringLiteral("ZCode");
+            return QStringLiteral("LyCode");
         case MessageRole::System:
             return QStringLiteral("系统");
     }
@@ -544,7 +544,7 @@ ConversationView::ConversationView(QWidget *parent) : QWidget(parent) {
     emptyState_->setWordWrap(true);
     emptyState_->setText(
         QStringLiteral("开始一个新会话\n\n在工作区里描述你想完成的任务，"
-                       "ZCode 会读取代码、执行命令并给出改动。"));
+                       "LyCode 会读取代码、执行命令并给出改动。"));
     containerLayout_->insertWidget(0, emptyState_, 1);
 
     scroll_->setWidget(container_);
@@ -660,4 +660,4 @@ void ConversationView::refreshEmptyState() {
     emptyState_->setVisible(messages_.isEmpty());
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

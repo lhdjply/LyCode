@@ -1,4 +1,4 @@
-// ZCode Qt — Markdown 渲染
+// LyCode — Markdown 渲染
 //
 // 为什么不用 QTextDocument::setMarkdown()：它能解析 Markdown，但产出的结构
 // 无法按设计规范定制（代码块需要带语言标签的卡片外壳、引用块需要左侧色条、
@@ -17,7 +17,7 @@
 #include <QColor>
 #include <QString>
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 /// 渲染所需的样式令牌。全部来自 Theme，不在这里硬编码颜色。
 struct MarkdownStyle {
@@ -61,4 +61,4 @@ public:
     static QString toPlainPreview(const QString &markdown, int maxChars = 120);
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

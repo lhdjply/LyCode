@@ -1,4 +1,4 @@
-// ZCode Qt — Write 工具实现
+// LyCode — Write 工具实现
 #include "tools/WriteTool.h"
 
 #include "core/Json.h"
@@ -11,10 +11,10 @@
 #include <QJsonObject>
 #include <QLoggingCategory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.write")
+Q_LOGGING_CATEGORY(log, "lycode.tool.write")
 
 constexpr int kMaxOutputBytes = 1'000'000;
 
@@ -198,4 +198,4 @@ void WriteTool::execute(const QJsonObject &input, const ToolContext &context, To
     finish(ToolResult::success(output, resultMeta));
 }
 
-}  // namespace zcode
+}  // namespace lycode

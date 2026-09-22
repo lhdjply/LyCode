@@ -5,10 +5,10 @@
 
 #include "skills/SkillLibrary.h"
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.skill")
+Q_LOGGING_CATEGORY(log, "lycode.tool.skill")
 
 }  // namespace
 
@@ -85,4 +85,4 @@ void SkillTool::execute(const QJsonObject &input, const ToolContext &context, To
     done(std::move(result));
 }
 
-}  // namespace zcode
+}  // namespace lycode

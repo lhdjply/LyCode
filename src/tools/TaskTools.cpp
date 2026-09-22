@@ -8,12 +8,12 @@
 #include "core/Json.h"
 #include "tools/BackgroundTaskRegistry.h"
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.task")
+Q_LOGGING_CATEGORY(log, "lycode.tool.task")
 
-/// 阻塞等待的默认与上限（与 npm 的 TaskOutput 一致）。
+/// 阻塞等待的默认与上限（TaskOutput 一致）。
 constexpr int kDefaultBlockTimeoutMs = 30000;
 constexpr int kMaxBlockTimeoutMs = 600000;
 /// 回给模型的输出上限。完整内容在 outputPath 指向的文件里。
@@ -229,7 +229,7 @@ QJsonObject TaskStopTool::inputSchema() const {
                       QJsonObject{{QStringLiteral("type"), QStringLiteral("string")},
                                   {QStringLiteral("description"),
                                    QStringLiteral("The background task id to stop.")}});
-    // npm 的 TaskStop 还接受 shell_id（已废弃的别名），这里也接住，
+    // 本实现的 TaskStop 还接受 shell_id（已废弃的别名），这里也接住，
     // 免得旧习惯的调用直接失败。
     properties.insert(QStringLiteral("shell_id"),
                       QJsonObject{{QStringLiteral("type"), QStringLiteral("string")},
@@ -301,4 +301,4 @@ void TaskStopTool::execute(const QJsonObject &input, const ToolContext &context,
     done(std::move(result));
 }
 
-}  // namespace zcode
+}  // namespace lycode

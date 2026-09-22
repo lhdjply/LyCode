@@ -1,4 +1,4 @@
-// ZCode Qt — 应用配置
+// LyCode — 应用配置
 //
 // 与会话数据分开存放：会话在 SQLite（`<数据根>/qt/sessions.db`），
 // 应用配置在 `<数据根>/qt/settings.json`。
@@ -21,7 +21,7 @@
 #include "mcp/McpProtocol.h"
 #include "ui/Theme.h"
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 /// 全局应用设置。整份替换语义。
 struct AppSettings {
@@ -62,7 +62,7 @@ struct AppSettings {
     bool generateSessionTitles = true;
 
     /// MCP 服务器列表。见 src/mcp/McpProtocol.h。
-    QList<zcode::mcp::ServerConfig> mcpServers;
+    QList<lycode::mcp::ServerConfig> mcpServers;
 
     /// 上一次退出时**处于展开状态**的工作区。
     ///
@@ -111,4 +111,4 @@ public:
     static bool save(const AppSettings &settings, QString *errorOut = nullptr);
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

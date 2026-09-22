@@ -1,4 +1,4 @@
-// ZCode Qt — 模型 Provider 抽象
+// LyCode — 模型 Provider 抽象
 //
 // 一次模型调用是"流式"的：provider 在收到 HTTP 分块时就产出增量事件，
 // Agent 主循环消费这些事件并实时更新 UI。
@@ -15,7 +15,7 @@
 
 #include "core/Types.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 暴露给模型的工具声明（JSON Schema 形式）。
 struct ToolSpec {
@@ -119,7 +119,7 @@ public:
     bool isFinished() const { return finished_; }
 
 signals:
-    void event(const zcode::StreamEvent &streamEvent);
+    void event(const lycode::StreamEvent &streamEvent);
     /// 在最后一个 event 之后恰好发出一次。
     void finished();
 
@@ -156,6 +156,6 @@ public:
     virtual ModelInfo modelInfo(const QString &modelId) const;
 };
 
-}  // namespace zcode
+}  // namespace lycode
 
-Q_DECLARE_METATYPE(zcode::StreamEvent)
+Q_DECLARE_METATYPE(lycode::StreamEvent)

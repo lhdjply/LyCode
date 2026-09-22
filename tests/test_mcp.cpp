@@ -1,4 +1,4 @@
-// ZCode Qt — MCP 集成测试
+// LyCode — MCP 集成测试
 //
 // 用 tests/support/fake_mcp_server.cpp 那个**真的子进程**做端到端验证：
 // 走的是 stdio + 换行分隔 JSON-RPC，和接真实 MCP 服务器完全同一条路径。
@@ -19,8 +19,8 @@
 #include "mcp/McpManager.h"
 #include "tools/Tool.h"
 
-using namespace zcode;
-using namespace zcode::mcp;
+using namespace lycode;
+using namespace lycode::mcp;
 
 namespace {
 

@@ -1,4 +1,4 @@
-// ZCode Qt — 统一 diff 生成实现
+// LyCode — 统一 diff 生成实现
 #include "tools/Diff.h"
 
 #include <QJsonObject>
@@ -7,10 +7,10 @@
 #include <QLoggingCategory>
 #include <algorithm>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.diff")
+Q_LOGGING_CATEGORY(log, "lycode.tool.diff")
 
 /// 单行编辑操作。type 取值与结构化补丁一致。
 enum class EditType { Context, Add, Remove };
@@ -325,4 +325,4 @@ QString Diff::render(const QJsonArray &hunks, const QString &path) {
     return out;
 }
 
-}  // namespace zcode
+}  // namespace lycode

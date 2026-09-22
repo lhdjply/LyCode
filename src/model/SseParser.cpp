@@ -1,6 +1,6 @@
-// ZCode Qt — Server-Sent Events 解析器实现
+// LyCode — Server-Sent Events 解析器实现
 //
-// 实现要点（与 npm 版行为对齐）：
+// 实现要点（与 本实现行为对齐）：
 //   * 帧分隔符是空行（\n\n / \r\n\r\n），不是单个换行；
 //   * 全程按字节缓冲：UTF-8 多字节字符可能被网络分块切开，先转 QString 会乱码；
 //   * `data:` 多行用 \n 拼接；`event:` 缺省为 "message"；以 `:` 开头的是注释；
@@ -11,10 +11,10 @@
 #include <QList>
 #include <QLoggingCategory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.model")
+Q_LOGGING_CATEGORY(log, "lycode.model")
 
 /// 在 buffer 中从 `from` 开始寻找"空行"帧边界。
 ///
@@ -175,4 +175,4 @@ void SseParser::parseBlock(const QByteArray &block) {
     readyEvents_.append(event);
 }
 
-}  // namespace zcode
+}  // namespace lycode

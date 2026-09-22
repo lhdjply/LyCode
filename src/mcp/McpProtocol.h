@@ -1,4 +1,4 @@
-// ZCode Qt — MCP 协议类型
+// LyCode — MCP 协议类型
 //
 // MCP（Model Context Protocol）的 stdio 传输：客户端把服务器作为子进程拉起，
 // 双方用**换行分隔的 JSON-RPC 2.0** 通信（不是 LSP 的 Content-Length 头）。
@@ -14,7 +14,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace zcode::mcp {
+namespace lycode::mcp {
 
 /// 一个 MCP 服务器的配置。对应 settings.json 里 mcpServers 的一项。
 struct ServerConfig {
@@ -57,4 +57,4 @@ enum class ServerState {
 
 QString serverStateToken(ServerState state);
 
-}  // namespace zcode::mcp
+}  // namespace lycode::mcp

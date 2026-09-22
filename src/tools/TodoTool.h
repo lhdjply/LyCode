@@ -1,4 +1,4 @@
-// ZCode Qt — Todo 工具（TodoRead / TodoWrite）
+// LyCode — Todo 工具（TodoRead / TodoWrite）
 //
 // 两个类放在同一对文件里：它们共享同一份字段校验与格式化逻辑，
 // 分开反而要复制粘贴一遍（字段名必须逐字一致，是最容易漂移的地方）。
@@ -6,7 +6,7 @@
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 读取当前会话的 todo 列表。
 class TodoReadTool : public Tool {
@@ -32,4 +32,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

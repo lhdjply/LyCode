@@ -1,4 +1,4 @@
-// ZCode Qt — Provider 注册表实现
+// LyCode — Provider 注册表实现
 //
 // 唯一写入路径是 replaceAll() / upsert()：所有 provider 实例都挂在本对象下，
 // 按 id 解析；配置不完整的实例仍会保留（便于设置页展示与修复），
@@ -10,10 +10,10 @@
 
 #include <QLoggingCategory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.model.registry")
+Q_LOGGING_CATEGORY(log, "lycode.model.registry")
 
 /// 按 ProviderKind 构造具体实现并灌入配置。
 /// 未知 kind 返回 nullptr；配置不完整只告警，不阻止实例创建。
@@ -204,4 +204,4 @@ bool ProviderRegistry::hasUsableProvider() const {
     return false;
 }
 
-}  // namespace zcode
+}  // namespace lycode

@@ -1,4 +1,4 @@
-// ZCode Qt — Server-Sent Events 解析器
+// LyCode — Server-Sent Events 解析器
 //
 // 所有主流模型 API 的流式响应都用 SSE。QNetworkReply::readyRead 给出的是
 // 任意切分的字节块，可能把一个事件劈成两半，也可能一次给出多个事件。
@@ -12,7 +12,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace zcode {
+namespace lycode {
 
 /// 一个 SSE 事件：event 名 + 拼接后的 data 负载。
 struct SseEvent {
@@ -67,4 +67,4 @@ private:
     QList<SseEvent> readyEvents_;
 };
 
-}  // namespace zcode
+}  // namespace lycode

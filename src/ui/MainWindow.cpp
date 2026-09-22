@@ -45,7 +45,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 /// 第一次请求最多为 MCP 握手等多久。卡住的服务器不该把用户的输入一起卡住。
 constexpr int kMcpWaitTimeoutMs = 8000;
@@ -55,7 +55,7 @@ constexpr int kMcpPollIntervalMs = 150;
 
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.main")
+Q_LOGGING_CATEGORY(log, "lycode.ui.main")
 
 /// 上下文用量超过该比例时用警示色，提示用户即将触发压缩。
 constexpr double kContextWarnPercent = 75.0;
@@ -138,7 +138,7 @@ QString usageTooltipText(const Usage &cumulative, const Usage &lastTurn) {
 }  // namespace
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
-    setWindowTitle(QStringLiteral("ZCode"));
+    setWindowTitle(QStringLiteral("LyCode"));
     resize(1280, 820);
     setMinimumSize(900, 600);
 
@@ -529,14 +529,14 @@ void MainWindow::buildMenus() {
     });
 
     QMenu *helpMenu = menuBar()->addMenu(QStringLiteral("帮助"));
-    QAction *about = helpMenu->addAction(QStringLiteral("关于 ZCode"));
+    QAction *about = helpMenu->addAction(QStringLiteral("关于 LyCode"));
     connect(about, &QAction::triggered, this, [this]() {
         QMessageBox::about(
-            this, QStringLiteral("关于 ZCode"),
-            QStringLiteral("<b>ZCode</b> %1<br/><br/>"
+            this, QStringLiteral("关于 LyCode"),
+            QStringLiteral("<b>LyCode</b> %1<br/><br/>"
                            "AI 编程工作台 —— Qt6 / C++ 原生实现。<br/>"
-                           "基于 ZCode 的设计规范与 Agent 语义重写。")
-                .arg(QStringLiteral(ZCODE_QT_VERSION)));
+                           "基于 LyCode 的设计规范与 Agent 语义重写。")
+                .arg(QStringLiteral(LYCODE_QT_VERSION)));
     });
 }
 
@@ -1801,4 +1801,4 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
     return QMainWindow::eventFilter(watched, event);
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

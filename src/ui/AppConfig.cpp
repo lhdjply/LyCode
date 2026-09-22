@@ -10,14 +10,17 @@
 #include <QLoggingCategory>
 #include <QSaveFile>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.config")
+Q_LOGGING_CATEGORY(log, "lycode.config")
 
 QString dataRoot() {
-    const QString base = qEnvironmentVariable("ZCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.zcode") : base;
+    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
+    if (!base.isEmpty()) {
+        return base;
+    }
+    return QDir::homePath() + QStringLiteral("/.lycode");
 }
 
 }  // namespace
@@ -146,7 +149,7 @@ QJsonObject AppSettings::toJson() const {
     result.insert(QStringLiteral("generateSessionTitles"), generateSessionTitles);
 
     QJsonArray servers;
-    for (const zcode::mcp::ServerConfig &server : mcpServers) {
+    for (const lycode::mcp::ServerConfig &server : mcpServers) {
         QJsonObject item;
         item.insert(QStringLiteral("id"), server.id);
         item.insert(QStringLiteral("command"), server.command);
@@ -231,7 +234,7 @@ AppSettings AppSettings::fromJson(const QJsonObject &json) {
 
     for (const QJsonValue &value : json::array(json, QStringLiteral("mcpServers"))) {
         const QJsonObject item = value.toObject();
-        zcode::mcp::ServerConfig server;
+        lycode::mcp::ServerConfig server;
         server.id = json::str(item, QStringLiteral("id"));
         server.command = json::str(item, QStringLiteral("command"));
         for (const QJsonValue &argument : json::array(item, QStringLiteral("args"))) {
@@ -335,4 +338,4 @@ bool AppConfig::save(const AppSettings &settings, QString *errorOut) {
     return true;
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

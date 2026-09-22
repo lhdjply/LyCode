@@ -1,4 +1,4 @@
-// ZCode Qt — 工具调用卡片
+// LyCode — 工具调用卡片
 //
 // 对话流里每次工具调用渲染成一张可折叠的卡片：
 //   头部：状态灯 + 工具名 + 一行摘要 + 耗时 + 展开箭头
@@ -21,7 +21,7 @@ class QHBoxLayout;
 class QLabel;
 class QPlainTextEdit;
 
-namespace zcode::ui {
+namespace lycode::ui {
 class DiffView;
 }
 
@@ -29,7 +29,7 @@ class QPushButton;
 class QToolButton;
 class QVBoxLayout;
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class ToolCallWidget : public QFrame {
     Q_OBJECT
@@ -96,4 +96,4 @@ private:
     QHBoxLayout *imageLayout_ = nullptr;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

@@ -8,10 +8,10 @@
 #include <QRegularExpression>
 #include <QLoggingCategory>
 
-namespace zcode::mcp {
+namespace lycode::mcp {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.mcp")
+Q_LOGGING_CATEGORY(log, "lycode.mcp")
 
 /// 一个远端 MCP 工具在本地的适配器。
 ///
@@ -274,4 +274,4 @@ int Manager::toolCount(const QString &serverId) const {
     return 0;
 }
 
-}  // namespace zcode::mcp
+}  // namespace lycode::mcp

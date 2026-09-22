@@ -8,10 +8,10 @@
 #include <QJsonValue>
 #include <QLoggingCategory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.types")
+Q_LOGGING_CATEGORY(log, "lycode.types")
 
 /// 统一的枚举 ↔ 字符串表驱动转换。
 /// 用表而不是 if 链，保证 to/from 两个方向不会各自漂移。
@@ -33,7 +33,7 @@ QString nameOf(const EnumName<Enum> (&table)[N], Enum value, const QString &fall
 }
 
 /// 解析失败时降级到 fallback，并记录原始字面量。
-/// 明确不抛异常、不丢弃记录：npm 版多次因为闭集枚举加值而整帧被丢。
+/// 明确不抛异常、不丢弃记录：本实现多次因为闭集枚举加值而整帧被丢。
 template <typename Enum, size_t N>
 Enum valueOf(const EnumName<Enum> (&table)[N], const QString &text, Enum fallback) {
     for (const auto &entry : table) {
@@ -180,7 +180,7 @@ constexpr EnumName<AccountUnavailableReason> kAccountUnavailableReasons[] = {
     {AccountUnavailableReason::NotEntitled, "not-entitled"},
 };
 
-/// npm 的 ZCODE_MODEL_REASONING_SEPARATOR。
+/// 本实现的 LYCODE_MODEL_REASONING_SEPARATOR。
 constexpr char kReasoningSeparator = '$';
 
 }  // namespace
@@ -195,7 +195,7 @@ TimestampMs nowMs() {
 
 QString Workspace::key() const {
     const QString trimmed = identity.trimmed();
-    // 身份优先，缺失时回退到路径——与 npm 版 workspaceIdentity 口径一致。
+    // 身份优先，缺失时回退到路径——与 本实现 workspaceIdentity 口径一致。
     return trimmed.isEmpty() ? path : trimmed;
 }
 
@@ -350,7 +350,7 @@ bool toolStateIsTerminal(ToolState state) {
 }
 
 bool toolStateIsActive(ToolState state) {
-    // 与 npm 的 conversationSharePublicProjection 活跃集判定一致。
+    // conversationSharePublicProjection 活跃集判定一致。
     return state == ToolState::InputStreaming || state == ToolState::PendingApproval ||
            state == ToolState::Running;
 }
@@ -878,7 +878,7 @@ QJsonObject Message::toJson() const {
     result.insert(QStringLiteral("errorMessage"), errorMessage);
     result.insert(QStringLiteral("parentMessageId"), parentMessageId);
     if (modelOnly) {
-        // 与 npm 的 visibility 字段对齐：只在 true 时写出，保持旧数据体积不变。
+        // visibility 字段对齐：只在 true 时写出，保持旧数据体积不变。
         result.insert(QStringLiteral("visibility"), QStringLiteral("model-only"));
     }
     return result;
@@ -955,7 +955,7 @@ QJsonObject Session::toJson() const {
     result.insert(QStringLiteral("id"), id);
     result.insert(QStringLiteral("title"), title);
     result.insert(QStringLiteral("titleGenerated"), titleGenerated);
-    // 工作区字段摊平到同一层，与 npm 的 WorkspaceRef 形状一致。
+    // 工作区字段摊平到同一层，WorkspaceRef 形状一致。
     const QJsonObject workspaceJson = workspace.toJson();
     for (auto it = workspaceJson.constBegin(); it != workspaceJson.constEnd(); ++it) {
         result.insert(it.key(), it.value());
@@ -1088,7 +1088,7 @@ void ModelOptionOverride::applyTo(ModelInfo *info) const {
 }
 
 QString ModelSelection::displayValue() const {
-    // 与 npm 的 formatModelPickerValue 一致：providerId/modelId[$level]
+    // formatModelPickerValue 一致：providerId/modelId[$level]
     QString result = providerId + QLatin1Char('/') + modelId;
     if (!reasoningLevel.isEmpty()) {
         result += QLatin1Char(kReasoningSeparator) + reasoningLevel;
@@ -1120,4 +1120,4 @@ ModelSelection ModelSelection::parseDisplayValue(const QString &value) {
     return selection;
 }
 
-}  // namespace zcode
+}  // namespace lycode

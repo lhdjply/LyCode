@@ -1,4 +1,4 @@
-// ZCode Qt — Diff 视图测试
+// LyCode — Diff 视图测试
 //
 // 关注三件容易出错的事：
 //   1. 行/增删统计是否准确（卡片头部的 "+N −M" 直接来自它）
@@ -16,8 +16,8 @@
 #include "ui/DiffView.h"
 #include "ui/Theme.h"
 
-using namespace zcode;
-using namespace zcode::ui;
+using namespace lycode;
+using namespace lycode::ui;
 
 namespace {
 

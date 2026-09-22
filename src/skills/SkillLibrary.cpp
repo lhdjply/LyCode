@@ -8,14 +8,14 @@
 #include <QLoggingCategory>
 #include <QRegularExpression>
 
-namespace zcode::skills {
+namespace lycode::skills {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.skills")
+Q_LOGGING_CATEGORY(log, "lycode.skills")
 
 QString dataRoot() {
-    const QString base = qEnvironmentVariable("ZCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.zcode") : base;
+    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
+    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
 }
 
 /// 把 id 归一成可用作工具入参的形式（小写、空格换连字符）。
@@ -33,7 +33,7 @@ QStringList Library::defaultDirectories(const QString &workspacePath) {
     // 于是项目级 skill 会覆盖同名的用户级 skill——项目级更具体，应当胜出。
     directories.append(dataRoot() + QStringLiteral("/qt/skills"));
     if (!workspacePath.isEmpty()) {
-        directories.append(QDir(workspacePath).filePath(QStringLiteral(".zcode/skills")));
+        directories.append(QDir(workspacePath).filePath(QStringLiteral(".lycode/skills")));
     }
     return directories;
 }
@@ -192,4 +192,4 @@ QString Library::promptSection() const {
     return lines.join(QLatin1Char('\n'));
 }
 
-}  // namespace zcode::skills
+}  // namespace lycode::skills

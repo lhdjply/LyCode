@@ -1,4 +1,4 @@
-// ZCode Qt — Read 工具实现
+// LyCode — Read 工具实现
 #include "tools/ReadTool.h"
 
 #include "core/Json.h"
@@ -11,10 +11,10 @@
 #include <QStringList>
 #include <algorithm>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.read")
+Q_LOGGING_CATEGORY(log, "lycode.tool.read")
 
 /// 默认最多返回多少行。2000 行足以覆盖绝大多数源码文件，
 /// 又不至于一次吃掉整个上下文预算。
@@ -305,4 +305,4 @@ void ReadTool::execute(const QJsonObject &input, const ToolContext &context, Too
     finish(ToolResult::success(output, resultMeta));
 }
 
-}  // namespace zcode
+}  // namespace lycode

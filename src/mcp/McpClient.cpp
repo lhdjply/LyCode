@@ -11,10 +11,10 @@
 #include <QProcessEnvironment>
 #include <QTimer>
 
-namespace zcode::mcp {
+namespace lycode::mcp {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.mcp")
+Q_LOGGING_CATEGORY(log, "lycode.mcp")
 
 /// 协议版本。写死一个我们确实实现的版本，而不是声明"最新"——
 /// 服务器会按协商结果决定用哪套能力，虚报会导致它发来我们解析不了的东西。
@@ -104,7 +104,7 @@ void Client::start() {
 
     // ── 握手 ────────────────────────────────────────────────────────────────
     QJsonObject clientInfo;
-    clientInfo.insert(QStringLiteral("name"), QStringLiteral("zcode-qt"));
+    clientInfo.insert(QStringLiteral("name"), QStringLiteral("lycode"));
     clientInfo.insert(QStringLiteral("version"), QCoreApplication::applicationVersion());
 
     QJsonObject params;
@@ -375,4 +375,4 @@ void Client::callTool(const QString &toolName, const QJsonObject &arguments, Cal
         });
 }
 
-}  // namespace zcode::mcp
+}  // namespace lycode::mcp

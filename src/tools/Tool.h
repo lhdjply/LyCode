@@ -1,6 +1,6 @@
-// ZCode Qt — 工具系统契约
+// LyCode — 工具系统契约
 //
-// 工具是 Agent 与真实世界交互的唯一通道。设计核心（照搬 npm 版最值得复用的
+// 工具是 Agent 与真实世界交互的唯一通道。设计核心（本实现最值得复用的
 // 一处设计）：**策略完全由声明式 metadata 驱动，执行器与权限判定从不按工具名
 // 猜测行为**。
 //
@@ -29,7 +29,7 @@
 #include "core/Types.h"
 #include "model/ModelProvider.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 工具副作用范围。
 ///
@@ -52,7 +52,7 @@ bool sideEffectScopeWritesWorkspace(SideEffectScope scope);
 /// 该范围是否触碰会话之外的世界。
 bool sideEffectScopeTouchesOutsideWorld(SideEffectScope scope);
 
-/// 工具声明式元数据。字段语义与 npm 版 ToolMetadata 对齐。
+/// 工具声明式元数据。字段语义与 ToolMetadata 对齐。
 struct ToolMetadata {
     QString name;
     QString description;
@@ -67,7 +67,7 @@ struct ToolMetadata {
     bool destructive = false;
     /// 并发策略。**三态**，不是 bool。
     ///
-    /// npm 里 `concurrentSafe` 是 `boolean | undefined`：显式 true、显式 false、
+    /// 本实现里 `concurrentSafe` 是 `boolean | undefined`：显式 true、显式 false、
     /// 未声明是三件不同的事。用 bool 会把"显式声明必须串行"和"未声明"混为一谈——
     /// 于是显式声明串行的只读工具会被"只读且无副作用 ⇒ 可并发"的豁免分支
     /// 错误地放行。这个缺陷在写测试时被真实暴露出来。
@@ -111,7 +111,7 @@ struct ToolResult {
     QString output;
     /// 失败原因；ok == false 时应填写。
     QString error;
-    /// 错误码，便于程序化处理（与 npm 的 toolCallRow.error.code 对齐）。
+    /// 错误码，便于程序化处理（toolCallRow.error.code 对齐）。
     QString errorCode;
     /// 结构化补充：cwd、exitCode、durationMs、path、diff 等。
     QJsonObject metadata;
@@ -215,10 +215,10 @@ public:
     virtual QString permissionCapability() const;
 
     /// 该次调用的规则主体：从入参里取一个有代表性的字符串（命令、路径、URL）。
-    /// 用于 `allow Bash(npm test:*)` 这类规则的匹配。
+    /// 用于 `allow Bash(make test:*)` 这类规则的匹配。
     virtual QString ruleSubject(const QJsonObject &input) const;
 
-    /// 一行人类可读摘要，例如 `Bash: pnpm build`。
+    /// 一行人类可读摘要，例如 `Bash: make build`。
     virtual QString title(const QJsonObject &input) const;
 
     /// 生成权限请求的说明文案。默认给出通用描述。
@@ -238,7 +238,7 @@ public:
     /// 拼装给模型的声明。
     ToolSpec spec() const;
 
-    /// 并发分组判定（照搬 npm 的 canRunInParallel）。
+    /// 并发分组判定（本实现的 canRunInParallel）。
     bool canRunInParallel() const;
 
 protected:
@@ -307,4 +307,4 @@ private:
     std::vector<std::unique_ptr<Tool>> owned_;
 };
 
-}  // namespace zcode
+}  // namespace lycode

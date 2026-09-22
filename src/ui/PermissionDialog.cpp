@@ -20,10 +20,10 @@
 #include <algorithm>
 #include <utility>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.dialogs")
+Q_LOGGING_CATEGORY(log, "lycode.ui.dialogs")
 
 /// 入参展示预算。超长入参（MCP 工具可能塞进整篇文档）既拖慢布局又让用户抓不到重点，
 /// 因此截断后明确告知，而不是静默丢弃。
@@ -365,7 +365,7 @@ void PermissionDialog::keyPressEvent(QKeyEvent *event) {
 
 void PermissionDialog::buildUi() {
     auto *root = new QVBoxLayout(this);
-    // 对话框内部留白 20px（DESIGN.md：对话框 20-24px），控件间距 12px = 列表项间距。
+    // 对话框内部留白 20px（对话框 20-24px），控件间距 12px = 列表项间距。
     root->setContentsMargins(20, 20, 20, 20);
     root->setSpacing(12);
 
@@ -594,4 +594,4 @@ void PermissionDialog::chooseOption(const PermissionOption &option) {
     accept();
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

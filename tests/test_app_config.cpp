@@ -1,4 +1,4 @@
-// ZCode Qt — 应用配置单元测试
+// LyCode — 应用配置单元测试
 //
 // 配置是"用户设置能否生效"的唯一通路，而且它是整份替换语义的小文档，
 // 一旦某个字段读写不一致，表现是"设置改了没反应"这类很难定位的问题。
@@ -18,8 +18,8 @@
 #include "ui/AppConfig.h"
 #include "ui/SettingsDialog.h"
 
-using namespace zcode;
-using namespace zcode::ui;
+using namespace lycode;
+using namespace lycode::ui;
 
 class TestAppConfig : public QObject {
     Q_OBJECT
@@ -43,11 +43,11 @@ void TestAppConfig::init() {
     dataDir_ = std::make_unique<QTemporaryDir>();
     QVERIFY(dataDir_->isValid());
     // 必须在任何 AppConfig 调用之前设置：配置路径按调用时读环境变量。
-    qputenv("ZCODE_DATA_BASE_DIR", dataDir_->path().toUtf8());
+    qputenv("LYCODE_DATA_BASE_DIR", dataDir_->path().toUtf8());
 }
 
 void TestAppConfig::cleanup() {
-    qunsetenv("ZCODE_DATA_BASE_DIR");
+    qunsetenv("LYCODE_DATA_BASE_DIR");
     dataDir_.reset();
 }
 

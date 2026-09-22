@@ -1,10 +1,10 @@
-// ZCode Qt — Bash 工具实现
+// LyCode — Bash 工具实现
 //
 // 关键实现点（每一条都对应一个真实故障场景）：
 //   1. `/bin/bash -lc <command>`：`-l` 让登录 shell 的 PATH 生效。GUI 进程从
 //      Finder/Dock 启动时 PATH 往往只有 /usr/bin:/bin，不加 -l 会导致
 //      `node`、`cargo`、`brew` 全都"找不到命令"。
-//   2. setsid + kill(-pid)：命令可能自己再 fork（`npm run dev` 会拉起一堆
+//   2. setsid + kill(-pid)：命令可能自己再 fork（`make -j` 会拉起一堆
 //      子进程）。只 kill 直接子进程会留下孤儿进程继续跑；建立独立进程组后
 //      对整组发信号才能真正终止。
 //   3. stdout/stderr 分开累积：模型需要区分"正常输出"和"报错"，合并成一路
@@ -36,10 +36,10 @@
 #include <unistd.h>
 #endif
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.bash")
+Q_LOGGING_CATEGORY(log, "lycode.tool.bash")
 
 constexpr int kDefaultTimeoutMs = 120000;
 constexpr int kMinTimeoutMs = 1000;
@@ -128,7 +128,7 @@ QString BashTool::validateInput(const QJsonObject &input) const {
 }
 
 QString BashTool::permissionCapability() const {
-    // 权限能力名与工具名解耦：规则写成 `bash`，与 npm 版词表一致。
+    // 权限能力名与工具名解耦：规则写成 `bash`，与 本实现词表一致。
     return QStringLiteral("bash");
 }
 
@@ -355,7 +355,7 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
 
                          // 超时不一定要杀掉：命令还在跑，说明它可能只是慢。
                          // 有注册表时**自动转入后台**，把控制权还给模型，
-                         // 让它去做别的事、稍后再读结果（npm 的 assistantAutoBackgrounded）。
+                         // 让它去做别的事、稍后再读结果（本实现的 assistantAutoBackgrounded）。
                          if (context.backgroundTasks == nullptr) {
                              state->timedOut = true;
                              qCWarning(log) << "Bash 超时且无后台任务支持，终止进程组; timeoutMs="
@@ -554,4 +554,4 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
     process->start();
 }
 
-}  // namespace zcode
+}  // namespace lycode

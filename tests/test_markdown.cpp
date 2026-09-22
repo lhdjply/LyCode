@@ -1,4 +1,4 @@
-// ZCode Qt — Markdown 渲染单元测试
+// LyCode — Markdown 渲染单元测试
 //
 // 渲染器直接产出 HTML，任何一处转义遗漏都是安全问题（模型输出不可信），
 // 任何一处规则顺序错误都会破坏代码块的显示。因此两个方向都要覆盖。
@@ -6,7 +6,7 @@
 
 #include "ui/Markdown.h"
 
-using namespace zcode::ui;
+using namespace lycode::ui;
 
 namespace {
 

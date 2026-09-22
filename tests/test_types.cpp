@@ -1,4 +1,4 @@
-// ZCode Qt — 领域模型单元测试
+// LyCode — 领域模型单元测试
 //
 // 重点验证：
 //   1. 枚举转换的双向一致性（一旦漂移，持久化与 UI 渲染会出现难查的错位）
@@ -11,7 +11,7 @@
 #include "core/Json.h"
 #include "core/Types.h"
 
-using namespace zcode;
+using namespace lycode;
 
 class TestTypes : public QObject {
     Q_OBJECT

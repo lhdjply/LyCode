@@ -1,4 +1,4 @@
-// ZCode Qt — Grep 工具
+// LyCode — Grep 工具
 //
 // 优先用系统 ripgrep（快、尊重 .gitignore）；找不到时退回纯 Qt 实现。
 // 两个后端产出同一种结果行格式，分页与展示逻辑只有一份。
@@ -6,7 +6,7 @@
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 按正则搜索文件内容。只读、可并发。
 class GrepTool : public Tool {
@@ -19,4 +19,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

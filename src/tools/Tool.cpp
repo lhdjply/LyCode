@@ -1,4 +1,4 @@
-// ZCode Qt — 工具系统基础设施实现
+// LyCode — 工具系统基础设施实现
 //
 // 本文件只放"与具体工具无关"的部分：枚举转换、工具基类默认行为、
 // 执行上下文（路径安全）、注册表。具体工具在各自的 .cpp 里。
@@ -38,10 +38,10 @@
 #include "tools/TodoTool.h"
 #include "tools/WriteTool.h"
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.base")
+Q_LOGGING_CATEGORY(log, "lycode.tool.base")
 
 // ── 枚举 ↔ 字面量 ────────────────────────────────────────────────────────────
 // 与 Types.cpp 一样用表驱动，保证 to/from 两个方向不会各自漂移。
@@ -152,7 +152,7 @@ PermissionKind permissionKindFor(const ToolMetadata &metadata) {
             // 这三类都不触碰工作区或外部世界，因此不该按"写入/执行"处理。
             // 归为 Read 后走只读直通；它们真正的副作用发生在**内部**工具上
             // （例如 Agent 派生的子代理会各自走权限链），不需要在这里弹窗。
-            // npm 的 checkBuildMode 对 scope=session + risk=low + 非破坏性
+            // 本实现的 checkBuildMode 对 scope=session + risk=low + 非破坏性
             // + 不需批准的工具同样是直接 allow。
             return PermissionKind::Read;
     }
@@ -296,7 +296,7 @@ QString Tool::permissionCapability() const {
 }
 
 QString Tool::ruleSubject(const QJsonObject &input) const {
-    // 顺序照抄 npm 版的候选键优先级：命令 > URL > 文件路径 > 通用路径 > 模式。
+    // 顺序照抄 本实现的候选键优先级：命令 > URL > 文件路径 > 通用路径 > 模式。
     static const QStringList candidates = {
         QStringLiteral("command"), QStringLiteral("url"), QStringLiteral("file_path"),
         QStringLiteral("path"), QStringLiteral("pattern"),
@@ -387,7 +387,7 @@ ToolSpec Tool::spec() const {
 }
 
 bool Tool::canRunInParallel() const {
-    // 判定顺序照抄 npm 版 canRunInParallel：
+    // 判定顺序照抄 本实现 canRunInParallel：
     //   1. destructive 一律串行（破坏性操作并发执行无法审计）
     //   2. 显式 Safe   → 可并发
     //   3. 显式 Serial → 串行
@@ -618,9 +618,9 @@ ToolRegistry ToolRegistry::createWithBuiltins() {
     registry.add(new GrepTool());
     registry.add(new TodoReadTool());
     registry.add(new TodoWriteTool());
-    // `Task` 是 npm 里 Agent 的 Claude Code 兼容别名，模型两种写法都能调到。
+    // `Task` 是 本实现里 Agent 的 Claude Code 兼容别名，模型两种写法都能调到。
     registry.add(new AgentTool(), {QStringLiteral("Task")});
-    // 别名与 npm 对齐，兼容按 Claude Code 习惯发起的调用。
+    // 别名按既定语义，兼容按 Claude Code 习惯发起的调用。
     registry.add(new TaskOutputTool(),
                  {QStringLiteral("BashOutput"), QStringLiteral("AgentOutput")});
     registry.add(new SkillTool());
@@ -640,7 +640,7 @@ ToolRegistry ToolRegistry::createWithBuiltins() {
 namespace toolutil {
 namespace {
 
-Q_LOGGING_CATEGORY(utilLog, "zcode.tool.utils")
+Q_LOGGING_CATEGORY(utilLog, "lycode.tool.utils")
 
 /// 递归扫描时跳过的目录名。`build*` 用前缀匹配（build / build-tools / build-debug），
 /// 其余按名字精确匹配。
@@ -841,7 +841,7 @@ QString commandFirstWord(const QString &command) {
     if (trimmed.isEmpty()) {
         return {};
     }
-    // 跳过 `FOO=1 npm test` 这类前置赋值，取真正的可执行名。
+    // 跳过 `FOO=1 make test` 这类前置赋值，取真正的可执行名。
     static const QRegularExpression whitespace(QStringLiteral("\\s+"));
     static const QRegularExpression identifier(QStringLiteral("\\A[A-Za-z_][A-Za-z0-9_]*\\z"));
     for (const QString &token : trimmed.split(whitespace, Qt::SkipEmptyParts)) {
@@ -1057,4 +1057,4 @@ void killProcessGroup(QProcess *process) {
 
 }  // namespace toolutil
 
-}  // namespace zcode
+}  // namespace lycode

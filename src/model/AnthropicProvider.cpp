@@ -1,4 +1,4 @@
-// ZCode Qt — Anthropic Messages API 流式客户端实现
+// LyCode — Anthropic Messages API 流式客户端实现
 //
 // 一次调用 = 一个 AnthropicStream。它自己持有 QNetworkReply、SSE 解析器与
 // 一个空闲看门狗，终止后自行 deleteLater()；调用方只需要消费 event()/finished()。
@@ -20,10 +20,10 @@
 #include <QTimer>
 #include <QUrl>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.model.anthropic")
+Q_LOGGING_CATEGORY(log, "lycode.model.anthropic")
 
 /// 与设置里"最长单次请求"一致；流式调用整体超时 10 分钟。
 constexpr int kTransferTimeoutMs = 600000;
@@ -793,4 +793,4 @@ ModelInfo AnthropicProvider::modelInfo(const QString &modelId) const {
     return info;
 }
 
-}  // namespace zcode
+}  // namespace lycode

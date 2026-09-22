@@ -1,4 +1,4 @@
-// ZCode Qt — 思考等级
+// LyCode — 思考等级
 //
 // "思考等级"是同一件事在两种协议里的不同表达：
 //   * Anthropic Messages：`thinking: { type: "enabled", budget_tokens: N }`
@@ -17,7 +17,7 @@
 
 #include "core/Types.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 一个思考档位。
 struct ReasoningLevel {
@@ -60,4 +60,4 @@ bool modelSupportsReasoning(const ModelInfo &info);
 /// 默认档位列表：模型自报为空时使用的保守集合（off + low/medium/high）。
 QStringList defaultReasoningLevelIds();
 
-}  // namespace zcode
+}  // namespace lycode

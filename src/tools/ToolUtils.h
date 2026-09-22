@@ -1,4 +1,4 @@
-// ZCode Qt — 内置工具共享辅助（内部头，非公共契约）
+// LyCode — 内置工具共享辅助（内部头，非公共契约）
 //
 // 这里的函数只服务于 src/tools 下的实现，刻意不放进 Tool.h：
 // 它们描述的是"怎么实现一个工具"的细节（路径归一、glob 展开、输出预算），
@@ -23,7 +23,7 @@
 
 #include "tools/Tool.h"
 
-namespace zcode::toolutil {
+namespace lycode::toolutil {
 
 /// 目录名跳过表：这些目录只包含构建产物或依赖，递归扫描它们纯属浪费
 /// （node_modules 常常有几十万文件）。Glob/Grep 会跳过并在 metadata 里说明。
@@ -52,7 +52,7 @@ QString joinPath(const QString &base, const QString &relative);
 /// 用带分隔符的前缀比较，避免 `/foo/bar` 被 `/foo/b` 误判为包含。
 bool pathWithin(const QString &root, const QString &absolutePath);
 
-/// 命令行首词（用于生成 `always allow Bash(npm:*)` 这类规则）。
+/// 命令行首词（用于生成 `always allow Bash(make:*)` 这类规则）。
 QString commandFirstWord(const QString &command);
 
 /// 目录前缀（用于生成 `always allow Write(/src)` 这类规则）。
@@ -60,7 +60,7 @@ QString directoryPrefix(const QString &path);
 
 /// 让子进程成为独立会话的组长（Unix 下 setsid）。
 ///
-/// 命令可能自己再 fork（`npm run dev` 会拉起一堆子进程），只 kill 直接子进程
+/// 命令可能自己再 fork（`make -j` 会拉起一堆子进程），只 kill 直接子进程
 /// 会留下孤儿继续占着端口或文件锁。建立独立进程组后 killProcessGroup 能命中整组。
 /// 由 BashTool 与 BackgroundTaskRegistry 共用——两处各写一份迟早会漂移。
 void configureProcessGroup(QProcess *process);
@@ -129,4 +129,4 @@ private:
 /// 把可能被 OutputBudget 硬切开的 UTF-8 尾巴修掉，避免尾部出现半个字符。
 QByteArray trimIncompleteUtf8(QByteArray bytes);
 
-}  // namespace zcode::toolutil
+}  // namespace lycode::toolutil

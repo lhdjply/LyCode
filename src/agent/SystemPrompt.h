@@ -1,4 +1,4 @@
-// ZCode Qt — 系统提示词组装
+// LyCode — 系统提示词组装
 //
 // 提示词由若干独立片段拼成，顺序固定，便于缓存（前缀稳定 = 命中 provider 的
 // prompt cache）与测试。任何片段的内容变化都要先改这里，不允许 Agent 循环里
@@ -11,7 +11,7 @@
 //   4. 会话模式附加约束（plan / build / edit / yolo）
 //   5. 项目说明文件（AGENTS.md，按层级合并）
 //
-// ⚠ 重要约束（照搬 npm 版的既定设计）：**工具的参数说明只经 provider 的
+// ⚠ 重要约束（本实现的既定设计）：**工具的参数说明只经 provider 的
 // `tools` 字段下发，绝不再镜像进系统提示词**。把 schema 抄进提示词会造成
 // 两处定义漂移，并白白占用上下文预算。
 #pragma once
@@ -22,12 +22,12 @@
 #include "core/Types.h"
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 项目说明文件的候选名，按优先级排列。
 extern const QStringList kProjectInstructionFileNames;
 
-/// 项目说明文件的默认读取上限（与 npm 版一致：单文件 100KiB）。
+/// 项目说明文件的默认读取上限（按既定语义：单文件 100KiB）。
 constexpr int kProjectInstructionMaxBytes = 100 * 1024;
 
 struct SystemPromptInput {
@@ -102,5 +102,5 @@ public:
     static QString findProjectRoot(const QString &startDirectory);
 };
 
-}  // namespace zcode
+}  // namespace lycode
 

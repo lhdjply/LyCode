@@ -1,4 +1,4 @@
-// ZCode Qt — Diff 视图
+// LyCode — Diff 视图
 //
 // 渲染 Write / Edit 工具产生的结构化补丁（`metadata.structuredPatch`）。
 //
@@ -15,7 +15,7 @@
 #include <QJsonArray>
 #include <QTextBrowser>
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class DiffView : public QTextBrowser {
     Q_OBJECT
@@ -51,4 +51,4 @@ private:
     int deletions_ = 0;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

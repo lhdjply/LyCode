@@ -1,4 +1,4 @@
-// ZCode Qt — 文件查看器
+// LyCode — 文件查看器
 //
 // 点击工具卡片里的图片缩略图 / "查看文件"按钮打开。
 //
@@ -18,7 +18,7 @@
 class QLabel;
 class QScrollArea;
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 /// 带行号的只读代码视图。
 class CodeView : public QPlainTextEdit {
@@ -98,4 +98,4 @@ private:
     QSize imageSize_;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

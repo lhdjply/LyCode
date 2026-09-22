@@ -16,10 +16,10 @@
 
 #include <utility>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.agent")
+Q_LOGGING_CATEGORY(log, "lycode.agent")
 
 /// 展示预算：工具输出回灌给模型的字符上限。
 /// 超出部分留在 ToolPart::output 里供 UI 展示，但下发时截断，
@@ -753,7 +753,7 @@ ModelRequest AgentRuntime::buildModelRequest() const {
     promptInput.cwd = session_.workspace.path;
     promptInput.mode = session_.mode;
     promptInput.permissionMode = permissionGate()->mode();
-    promptInput.appVersion = QStringLiteral(ZCODE_QT_VERSION);
+    promptInput.appVersion = QStringLiteral(LYCODE_QT_VERSION);
     if (tools_ != nullptr) {
         // 白名单非空时只声明这些工具：子代理的只读 profile 靠它收窄工具面，
         // 让模型从一开始就看不到写操作。
@@ -1003,14 +1003,14 @@ void AgentRuntime::finishModelStep(const QString &finishReason) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 工具调度与执行
 //
-// 语义照搬 npm 的 ToolScheduler + batch-runner：
+// 语义本实现的 ToolScheduler + batch-runner：
 //   * 组内并行、组间串行
 //   * 不并行安全的工具独占一组，与前后调用形成串行屏障
 //   * 组内上限 kMaxToolConcurrency
 //   * 某个调用要求终止本轮时，**等同组兄弟全部结束**再中断后续组
 //   * 失败不截断后续组（只影响该调用自己的结果）
 //
-// 与 npm 的差异：npm 的调度器还做依赖图的拓扑排序，因为工具可以声明 dependencies。
+// 与 本实现的差异：本实现的调度器还做依赖图的拓扑排序，因为工具可以声明 dependencies。
 // 本实现的工具不声明依赖，顺序约束只来自模型给出的调用次序，
 // 所以"顺序扫描 + 独占组"就是完整语义，不需要拓扑排序。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1590,7 +1590,7 @@ void AgentRuntime::afterToolQueue() {
     // 正常跑完时所有调用都已终结，这里是空操作；而某组要求提前终止时
     // （stopTurnAfterResult 会让后续组直接跳过），剩下的调用否则会永远停在
     // "接收参数中"，UI 一直显示未完成，回灌给模型的结果里也是半成品。
-    // 对应 npm 的 batch-runner：命中 stopTurnAfterResult 时把后续组标为 ToolCancelled。
+    // 对应 batch-runner：命中 stopTurnAfterResult 时把后续组标为 ToolCancelled。
     cancelPendingToolCalls(QStringLiteral("本轮已结束，未执行。"));
 
     Message *assistant = currentAssistantMessage();
@@ -1965,4 +1965,4 @@ void AgentRuntime::remeasureContext() {
     emit sessionChanged(session_);
 }
 
-}  // namespace zcode
+}  // namespace lycode

@@ -1,4 +1,4 @@
-// ZCode Qt — 测试用假模型网关
+// LyCode — 测试用假模型网关
 //
 // 一个极简的 HTTP 服务器，按预定队列返回 SSE 响应体。用途是把
 // **真实的** Provider + SSE 解析 + Agent 循环 + UI 一起驱动起来，
@@ -19,7 +19,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 
-namespace zcode::test {
+namespace lycode::test {
 
 class FakeGateway : public QObject {
 public:
@@ -225,4 +225,4 @@ inline QByteArray jsonEscape(const QString &value) {
         .chopped(2);
 }
 
-}  // namespace zcode::test
+}  // namespace lycode::test

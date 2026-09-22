@@ -11,19 +11,19 @@
 #include <cstdio>
 #include <memory>
 
-namespace zcode::logging {
+namespace lycode::logging {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.logging")
+Q_LOGGING_CATEGORY(log, "lycode.logging")
 
 QMutex g_mutex;
 std::unique_ptr<QFile> g_logFile;
 
-/// 与 npm 版一致的数据目录约定：~/.zcode。
+/// 按既定语义的数据目录约定：~/.lycode。
 QString resolveLogDirectory() {
-    const QString base = qEnvironmentVariable("ZCODE_DATA_BASE_DIR");
+    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
     const QString root = base.isEmpty()
-                             ? QDir::homePath() + QStringLiteral("/.zcode")
+                             ? QDir::homePath() + QStringLiteral("/.lycode")
                              : base;
     return root + QStringLiteral("/qt/logs");
 }
@@ -81,7 +81,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &context, const QSt
 void init(bool verbose) {
     const QString directory = resolveLogDirectory();
     if (!directory.isEmpty() && QDir().mkpath(directory)) {
-        auto file = std::make_unique<QFile>(directory + QStringLiteral("/zcode-qt.log"));
+        auto file = std::make_unique<QFile>(directory + QStringLiteral("/lycode.log"));
         // 追加模式，保留历史；轮转由外部工具负责，避免日志系统复杂化。
         if (file->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
             QMutexLocker locker(&g_mutex);
@@ -92,12 +92,12 @@ void init(bool verbose) {
     // 过滤规则语法是 `<category>[.<type>]=true|false`，type 只能是
     // debug / info / warning / critical。
     //
-    // ⚠ 不能写成 `zcode.*=info`——`info` 会被当成类别名，整条规则被判为
+    // ⚠ 不能写成 `lycode.*=info`——`info` 会被当成类别名，整条规则被判为
     // malformed 并**静默忽略**（Qt 只在 qt.core.logging 里打印一句 warning），
     // 结果是 debug 日志照样落盘。这里用"全开 + 关掉 debug"表达同样的意图。
     const QString rules = verbose
-                              ? QStringLiteral("zcode.*=true")
-                              : QStringLiteral("zcode.*=true\nzcode.*.debug=false");
+                              ? QStringLiteral("lycode.*=true")
+                              : QStringLiteral("lycode.*=true\nlycode.*.debug=false");
     QLoggingCategory::setFilterRules(rules);
 
     qInstallMessageHandler(messageHandler);
@@ -127,4 +127,4 @@ QString redact(const QString &secret) {
     return trimmed.left(4) + QStringLiteral("***") + trimmed.right(4);
 }
 
-}  // namespace zcode::logging
+}  // namespace lycode::logging

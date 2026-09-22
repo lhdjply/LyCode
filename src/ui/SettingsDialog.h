@@ -1,4 +1,4 @@
-// ZCode Qt — 设置对话框
+// LyCode — 设置对话框
 //
 // 职责边界：
 //   * 只负责「收集 + 校验」AppSettings，**不做持久化**（不调用 AppConfig::save）：
@@ -33,7 +33,7 @@ class QTabWidget;
 class QVBoxLayout;
 class QWidget;
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -52,7 +52,7 @@ public:
 
 signals:
     /// 设置变化时发出，供调用方实时预览主题（在 accept 之前）。
-    void settingsPreviewChanged(const zcode::ui::AppSettings &settings);
+    void settingsPreviewChanged(const lycode::ui::AppSettings &settings);
 
 private:
     // ── 页面构建 ────────────────────────────────────────────────────────────
@@ -192,4 +192,4 @@ private:
     bool syncing_ = false;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

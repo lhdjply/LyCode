@@ -5,10 +5,10 @@
 
 #include "tools/SubagentHost.h"
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.agent")
+Q_LOGGING_CATEGORY(log, "lycode.tool.agent")
 
 constexpr char kDefaultProfileId[] = "general-purpose";
 
@@ -19,7 +19,7 @@ constexpr char kDefaultProfileId[] = "general-purpose";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const QList<SubagentProfile> &subagentProfiles() {
-    // 与 npm 一致的两个内建 profile：
+    // 语义一致的两个内建 profile：
     //   general-purpose —— 继承父代理的完整工具面与权限模式，能改代码
     //   Explore         —— 只读，工具面收窄到"读/搜/查"，适合调研而不动手
     //
@@ -84,7 +84,7 @@ ToolMetadata AgentTool::metadata() const {
     // 子代理会改文件、跑命令，所以不是只读、也不是破坏性（它自己受权限约束）。
     meta.readOnly = false;
     meta.destructive = false;
-    // 多个 Agent 调用并行发出是 npm 明确鼓励的用法，因此显式声明可并发。
+    // 多个 Agent 调用并行发出是 本实现 明确鼓励的用法，因此显式声明可并发。
     meta.concurrency = ToolMetadata::Concurrency::Safe;
     // 作用域是会话：它不直接碰工作区，真正碰工作区的是子代理内部的工具，
     // 那些工具会各自走权限链。
@@ -165,7 +165,7 @@ QString AgentTool::formatResultForModel(const SubagentHost::LaunchResult &result
     QStringList lines;
     lines << output;
     lines << QString();
-    // 用量行与 npm 的 <usage> 标签对齐，便于模型判断"这次派生值不值"。
+    // 用量行<usage> 标签对齐，便于模型判断"这次派生值不值"。
     lines << QStringLiteral("<usage>subagent_tokens: %1 tool_uses: %2 duration_ms: %3</usage>")
                  .arg(result.totalTokens)
                  .arg(result.toolUseCount)
@@ -266,4 +266,4 @@ void AgentTool::execute(const QJsonObject &input, const ToolContext &context, To
         });
 }
 
-}  // namespace zcode
+}  // namespace lycode

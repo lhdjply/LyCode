@@ -4,7 +4,7 @@
 #include <QHash>
 #include <QSet>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
 /// 注释风格。
@@ -614,4 +614,4 @@ QString SyntaxHighlighter::highlight(const QString &code, const QString &languag
     return html;
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

@@ -1,4 +1,4 @@
-// ZCode Qt — Skill 工具
+// LyCode — Skill 工具
 //
 // 模型用名字取出某个 skill 的正文。清单（名字 + 描述）在系统提示词里，
 // 正文按需加载——这样几十个 skill 也不会把上下文塞满。
@@ -11,7 +11,7 @@
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 class SkillTool : public Tool {
 public:
@@ -23,4 +23,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

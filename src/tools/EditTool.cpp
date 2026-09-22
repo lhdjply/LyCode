@@ -1,4 +1,4 @@
-// ZCode Qt — Edit 工具实现
+// LyCode — Edit 工具实现
 #include "tools/EditTool.h"
 
 #include "core/Json.h"
@@ -11,10 +11,10 @@
 #include <QLoggingCategory>
 #include <QList>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.edit")
+Q_LOGGING_CATEGORY(log, "lycode.tool.edit")
 
 constexpr int kMaxOutputBytes = 1'000'000;
 
@@ -264,4 +264,4 @@ void EditTool::execute(const QJsonObject &input, const ToolContext &context, Too
     finish(ToolResult::success(output, resultMeta));
 }
 
-}  // namespace zcode
+}  // namespace lycode

@@ -1,11 +1,11 @@
-// ZCode Qt — Write 工具
+// LyCode — Write 工具
 //
 // 整文件写入。存在的文件会覆盖，并返回结构化 diff 供 UI 展示。
 #pragma once
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 写入（覆盖）一个文件。必要时创建父目录。
 class WriteTool : public Tool {
@@ -19,4 +19,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

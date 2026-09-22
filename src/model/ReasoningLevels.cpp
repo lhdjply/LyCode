@@ -4,10 +4,10 @@
 
 #include <algorithm>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.model.reasoning")
+Q_LOGGING_CATEGORY(log, "lycode.model.reasoning")
 
 /// 标准档位表。
 ///
@@ -127,4 +127,4 @@ QStringList defaultReasoningLevelIds() {
             QStringLiteral("high")};
 }
 
-}  // namespace zcode
+}  // namespace lycode

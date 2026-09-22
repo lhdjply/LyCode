@@ -1,7 +1,7 @@
-// ZCode Qt — 设计令牌与主题
+// LyCode — 设计令牌与主题
 //
-// 直接对应 ZCode-npm 的 DESIGN.md 与 packages/ui 的 CSS 变量。
-// 原则（来自 DESIGN.md）：
+// 令牌以 CSS 变量名与十六进制值固化在 Theme.cpp，字段与变量一一对应。
+// 设计原则：
 //   * 只用语义令牌，不用一次性硬编码颜色
 //   * 层次优先靠背景对比与边框，而不是重阴影
 //   * 界面字号走 text-ui-* 阶梯，默认 --ui-font-size = 14px
@@ -14,7 +14,7 @@
 #include <QObject>
 #include <QString>
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 /// 主题模式。`System` 跟随系统配色。
 enum class ThemeMode {
@@ -38,7 +38,7 @@ enum class FontRole {
     MonoSm,     ///< 紧凑等宽（工具输出内联）
 };
 
-/// 语义色令牌集合。字段名与 DESIGN.md 的 CSS 变量一一对应。
+/// 语义色令牌集合。字段名与 CSS 变量一一对应。
 struct Palette {
     // 结构表面
     QColor background;
@@ -101,7 +101,7 @@ struct Palette {
 
     // 语法高亮
     //
-    // ⚠ 这组**不是** npm 的设计令牌：npm 的 UI 变量里没有语法配色
+    // ⚠ 这组**不是** 本实现的设计令牌：本实现的 UI 变量里没有语法配色
     // （Diff 那组是唯一的例外，所以上面单独列了）。这里是编辑器风格的
     // 常用取值（One Light / One Dark 一族），挑选标准是与本主题的
     // 代码背景对比度足够、且彼此色相可区分。
@@ -191,4 +191,4 @@ QString monospaceFamily();
 /// 界面字体族名。
 QString sansFamily();
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

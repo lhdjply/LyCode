@@ -1,4 +1,4 @@
-// ZCode Qt — Glob 工具实现
+// LyCode — Glob 工具实现
 #include "tools/GlobTool.h"
 
 #include "core/Json.h"
@@ -15,10 +15,10 @@
 
 #include <algorithm>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.glob")
+Q_LOGGING_CATEGORY(log, "lycode.tool.glob")
 
 /// 结果上限。5000 个文件路径已经远超"给模型看"的信息量，
 /// 再多只会挤掉真正的上下文；命中上限时明确标 truncated。
@@ -291,4 +291,4 @@ void GlobTool::execute(const QJsonObject &input, const ToolContext &context, Too
     finish(ToolResult::success(output, resultMeta));
 }
 
-}  // namespace zcode
+}  // namespace lycode

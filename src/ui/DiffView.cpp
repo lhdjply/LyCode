@@ -8,10 +8,10 @@
 #include <QScrollBar>
 #include <QTextBlock>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.diff")
+Q_LOGGING_CATEGORY(log, "lycode.ui.diff")
 
 /// HTML 转义。行内容来自文件，必须转义——否则文件里的 `<` 会被当成标签，
 /// 轻则显示错乱，重则把一段源码整块吃掉。
@@ -182,4 +182,4 @@ void DiffView::rebuild() {
                  << "truncated=" << truncatedLines_ << "+" << additions_ << "-" << deletions_;
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

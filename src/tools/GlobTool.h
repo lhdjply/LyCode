@@ -1,11 +1,11 @@
-// ZCode Qt — Glob 工具
+// LyCode — Glob 工具
 //
 // 按 glob 模式查找文件。只读、可并发。
 #pragma once
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 按 glob 模式递归查找文件，返回工作区相对路径列表。
 class GlobTool : public Tool {
@@ -18,4 +18,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

@@ -1,4 +1,4 @@
-// ZCode Qt — Grep 工具实现
+// LyCode — Grep 工具实现
 //
 // 后端选择：
 //   * ripgrep（系统装了就用）：交给 QProcess 异步跑，避免阻塞 GUI 线程。
@@ -34,10 +34,10 @@
 #include <algorithm>
 #include <memory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.grep")
+Q_LOGGING_CATEGORY(log, "lycode.tool.grep")
 
 constexpr int kMaxOutputBytes = 1'000'000;
 constexpr int kDefaultHeadLimit = 250;
@@ -879,4 +879,4 @@ void GrepTool::execute(const QJsonObject &input, const ToolContext &context, Too
         }));
 }
 
-}  // namespace zcode
+}  // namespace lycode

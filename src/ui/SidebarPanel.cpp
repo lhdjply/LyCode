@@ -19,10 +19,10 @@
 #include <QResizeEvent>
 #include <QVBoxLayout>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.sidebar")
+Q_LOGGING_CATEGORY(log, "lycode.ui.sidebar")
 
 /// 会话列表摘要的最大字符数。列表项只有一行摘要，太长会挤掉标题的视觉权重。
 
@@ -587,4 +587,4 @@ void SidebarPanel::refreshEmptyState() {
     sessionTree_->setVisible(!isEmpty);
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

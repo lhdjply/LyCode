@@ -1,4 +1,4 @@
-// ZCode Qt — 子 Agent 宿主接口
+// LyCode — 子 Agent 宿主接口
 //
 // 依赖方向：`agent/` 依赖 `tools/`，反过来不行。所以 Agent 工具不直接持有
 // AgentRuntime，而是通过这个接口向宿主申请派生子代理。由 AgentRuntime 实现它。
@@ -15,7 +15,7 @@
 
 #include "core/Types.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 子代理 profile：决定子代理的工具面与职责说明。
 ///
@@ -38,7 +38,7 @@ const QList<SubagentProfile> &subagentProfiles();
 /// 按 id 查找；未知 id 返回 nullptr（调用方应据此拒绝该次调用）。
 const SubagentProfile *findSubagentProfile(const QString &id);
 
-/// 默认 profile id（与 npm 一致）。
+/// 默认 profile id（语义一致）。
 QString defaultSubagentProfileId();
 
 /// 子代理宿主。由 AgentRuntime 实现并注入 ToolContext。
@@ -85,10 +85,10 @@ public:
 
     /// 当前运行时是否允许再派生子代理。
     ///
-    /// 本实现返回 false 表示"当前已是子代理"：npm 也把子代理的
+    /// 本实现返回 false 表示"当前已是子代理"：本实现也把子代理的
     /// `subagents.enabled` 置为 false 来禁止递归派生，否则一个任务可能
     /// 无限自我复制下去。
     virtual bool subagentsEnabled() const = 0;
 };
 
-}  // namespace zcode
+}  // namespace lycode

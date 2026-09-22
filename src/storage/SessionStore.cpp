@@ -1,6 +1,6 @@
-// ZCode Qt — 会话持久化实现（Qt6::Sql / QSQLITE）
+// LyCode — 会话持久化实现（Qt6::Sql / QSQLITE）
 //
-// ── 必须保持的幂等语义（照搬 npm 版）────────────────────────────────────────
+// ── 必须保持的幂等语义（本实现的约定）────────────────────────────────────────
 //   * 写入一律是 `INSERT ... ON CONFLICT(id) DO UPDATE`，重复保存同一条
 //     session / message / part 是幂等的。
 //   * message / part 的 `sequence` 只在两种情况下才分配：
@@ -55,10 +55,10 @@
 #include <algorithm>
 #include <utility>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.storage.sessions")
+Q_LOGGING_CATEGORY(log, "lycode.storage.sessions")
 
 // ── 列清单 ──────────────────────────────────────────────────────────────────
 // 集中一处，保证 loadSession / listSessions / searchSessions 读到的列完全一致，
@@ -340,9 +340,9 @@ SessionStore::~SessionStore() {
 }
 
 QString SessionStore::defaultDatabasePath() {
-    // 数据根：环境变量优先，缺失时回落到 ~/.zcode（与 npm 版同口径）。
-    const QString base = qEnvironmentVariable("ZCODE_DATA_BASE_DIR").trimmed();
-    const QString root = base.isEmpty() ? QDir::homePath() + QStringLiteral("/.zcode") : base;
+    // 数据根：环境变量优先，缺失时回落到 ~/.lycode（与 本实现同口径）。
+    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR").trimmed();
+    const QString root = base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
     const QString path = QDir(root).filePath(QStringLiteral("qt/sessions.db"));
 
     // 目录不存在时先建好：SQLite 能创建文件，但不会创建父目录。
@@ -385,7 +385,7 @@ bool SessionStore::open(const QString &path) {
 
     // 连接名唯一化：并行任务/测试会在同一进程里开多个 store，
     // 复用连接名会让 addDatabase 静默替换掉别人的连接。
-    connectionName_ = QStringLiteral("zcode_session_store_%1")
+    connectionName_ = QStringLiteral("lycode_session_store_%1")
                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
 
     database_ = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName_);
@@ -1265,4 +1265,4 @@ QList<SessionSummary> SessionStore::searchSessions(const QString &query, int lim
     return result;
 }
 
-}  // namespace zcode
+}  // namespace lycode

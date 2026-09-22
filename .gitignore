@@ -13,7 +13,7 @@ compile_commands.json
 .probe/
 .smoke/
 
-# 运行期数据（若把 ZCODE_DATA_BASE_DIR 指向工程内）
+# 运行期数据（若把 LYCODE_DATA_BASE_DIR 指向工程内）
 *.db
 *.db-wal
 *.db-shm

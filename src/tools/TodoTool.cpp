@@ -1,4 +1,4 @@
-// ZCode Qt — Todo 工具实现
+// LyCode — Todo 工具实现
 #include "tools/TodoTool.h"
 
 #include "core/Json.h"
@@ -10,10 +10,10 @@
 #include <QLoggingCategory>
 #include <QStringList>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.todo")
+Q_LOGGING_CATEGORY(log, "lycode.tool.todo")
 
 const QString kStatuses[] = {
     QStringLiteral("pending"),
@@ -388,7 +388,7 @@ void TodoWriteTool::execute(const QJsonObject &input, const ToolContext &context
 
     const QList<TodoItem> oldItems = context.todoStore->todos(context.sessionId);
     // 整表替换：不做差异合并，也不强制"至多一个 in_progress"
-    //（npm 版已注释掉该校验：并行推进多个步骤是合理的）。
+    //（本实现已注释掉该校验：并行推进多个步骤是合理的）。
     context.todoStore->setTodos(context.sessionId, items);
 
     QJsonObject resultMeta;
@@ -410,4 +410,4 @@ void TodoWriteTool::execute(const QJsonObject &input, const ToolContext &context
     finish(ToolResult::success(output, resultMeta));
 }
 
-}  // namespace zcode
+}  // namespace lycode

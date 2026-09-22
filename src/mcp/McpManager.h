@@ -1,4 +1,4 @@
-// ZCode Qt — MCP 服务器管理
+// LyCode — MCP 服务器管理
 //
 // 负责按配置拉起全部服务器，并把它们报告的工具注册进 ToolRegistry，
 // 使模型看到的 MCP 工具与内置工具**没有任何区别**（同一套声明、权限链、
@@ -16,11 +16,11 @@
 
 #include "mcp/McpProtocol.h"
 
-namespace zcode {
+namespace lycode {
 class ToolRegistry;
 }
 
-namespace zcode::mcp {
+namespace lycode::mcp {
 
 class Client;
 
@@ -76,4 +76,4 @@ private:
     QHash<QString, bool> registered_;
 };
 
-}  // namespace zcode::mcp
+}  // namespace lycode::mcp

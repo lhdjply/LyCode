@@ -6,7 +6,7 @@
 #include <QStringList>
 #include <QUrl>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
 /// HTML 转义。所有进入输出的用户/模型文本都必须经过这里——
@@ -443,4 +443,4 @@ QString Markdown::toPlainPreview(const QString &markdown, int maxChars) {
     return text;
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

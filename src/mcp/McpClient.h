@@ -1,4 +1,4 @@
-// ZCode Qt — MCP stdio 客户端
+// LyCode — MCP stdio 客户端
 //
 // 一个实例管一个服务器子进程。职责：
 //   * 拉起进程、按行切分 JSON-RPC 消息
@@ -23,7 +23,7 @@
 
 class QProcess;
 
-namespace zcode::mcp {
+namespace lycode::mcp {
 
 class Client : public QObject {
     Q_OBJECT
@@ -94,4 +94,4 @@ private:
     bool handshakeDone_ = false;
 };
 
-}  // namespace zcode::mcp
+}  // namespace lycode::mcp

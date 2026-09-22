@@ -1,4 +1,4 @@
-# ZCode Qt 架构
+# LyCode 架构
 
 这份文档记录**为什么这样设计**，而不是重复代码里已有的信息。凡是"看起来可以更简单"的地方，这里都给出当时的取舍依据。
 
@@ -47,17 +47,17 @@
 
 ---
 
-## 2. 与 npm 版最大的结构差异：为什么不用 row/delta
+## 2. 与常见做法的结构差异：为什么不用 row/delta
 
-npm 版的 V4 协议把对话建模成**扁平行**（`turnHeader` / `userInput` / `assistantText` / `reasoning` / `toolCall` / ...），配合 `logEpoch` + `seq` + `snapshot`/`delta`，目的是支持**跨进程 wire 的断线重放**：客户端断线后带 `base: {logEpoch, seq}` 重新订阅，服务端从该水位续传增量，不必重传整个会话。
+本实现的 V4 协议把对话建模成**扁平行**（`turnHeader` / `userInput` / `assistantText` / `reasoning` / `toolCall` / ...），配合 `logEpoch` + `seq` + `snapshot`/`delta`，目的是支持**跨进程 wire 的断线重放**：客户端断线后带 `base: {logEpoch, seq}` 重新订阅，服务端从该水位续传增量，不必重传整个会话。
 
-这套机制的存在理由是进程边界与不稳定的网络。Qt 版把 Agent 运行时与 UI 放在**同一个进程、同一个线程**：
+这套机制的存在理由是进程边界与不稳定的网络。本实现把 Agent 运行时与 UI 放在**同一个进程、同一个线程**：
 
 - 没有 wire，就没有"断线"，也没有需要续传的水位。
 - 状态变化通过 Qt 信号同步投递，顺序天然确定。
 - 快照/增量两套代码路径与其一致性校验（`revision`、`coalesce`、`apply`）全部变成纯粹的负担。
 
-因此 Qt 版用更简单的 `Message` + `Part` 树。**但词表照抄**：会话模式、工具状态、权限决策、风险等级、失败原因码全部与 npm 版一致，所以术语、文案和行为语义没有分叉。
+因此 本实现用更简单的 `Message` + `Part` 树。**但词表照抄**：会话模式、工具状态、权限决策、风险等级、失败原因码全部按既定语义，所以术语、文案和行为语义没有分叉。
 
 ### 工具结果为什么是独立的 user 消息
 
@@ -76,7 +76,7 @@ npm 版的 V4 协议把对话建模成**扁平行**（`turnHeader` / `userInput`
 
 ### 相位
 
-取值与 npm 的 `turn-state.ts` 对齐：
+取值语义：
 
 ```
 idle → processing_input → awaiting_model_response → streaming
@@ -110,7 +110,7 @@ submitText()
 
 ### 终止条件
 
-npm 版**没有** `maxSteps` / `maxTurns` 硬停止（`apps/zcode-cli/AGENTS.md` 明确说明"不用工具调用次数做硬停止"），因为那会让复杂任务被无故截断。Qt 版保留这个判断，真实边界是：
+本实现**没有** `maxSteps` / `maxTurns` 硬停止（`apps/lycode-cli/AGENTS.md` 明确说明"不用工具调用次数做硬停止"），因为那会让复杂任务被无故截断。本实现保留这个判断，真实边界是：
 
 1. 模型返回无工具调用的最终文本 → `Success`
 2. 工具结果带 `stopTurnAfterResult` → `Success`
@@ -126,7 +126,7 @@ npm 版**没有** `maxSteps` / `maxTurns` 硬停止（`apps/zcode-cli/AGENTS.md`
 
 ## 4. 工具系统：metadata 驱动
 
-这是从 npm 版照搬的**最值得复用的设计**。一份 `ToolMetadata` 同时决定三件事：
+这是从 本实现照搬的**最值得复用的设计**。一份 `ToolMetadata` 同时决定三件事：
 
 | 决策 | 依赖的字段 |
 | --- | --- |
@@ -169,7 +169,7 @@ readOnly                → true
 
 **① allow 规则优先于 deny 规则。** 用户最自然的操作顺序是"先拒绝全部，再放行一条"。如果按列表顺序匹配，先出现的 deny 会永久遮蔽后面的 allow，让用户的操作看起来没生效。
 
-**② plan 模式拒绝而不是询问。** plan 的语义是"只读"，让用户"批准"一次写入就破坏了模式的承诺。这正是 npm 版 `checkPlanMode` 直接 `deny` 而不是 `ask` 的原因。
+**② plan 模式拒绝而不是询问。** plan 的语义是"只读"，让用户"批准"一次写入就破坏了模式的承诺。这正是 本实现 `checkPlanMode` 直接 `deny` 而不是 `ask` 的原因。
 
 **③ `AllowAlways` 只在提交裁决时生效。** 规则变更是裁决的一部分（`PermissionResponse::permissionUpdates`），不在 `request()` 里就改状态，否则取消弹窗也会留下规则。
 
@@ -178,7 +178,7 @@ readOnly                → true
 - `resolve()` 对未知 `requestId` 返回 `false` 而不报错——UI 可能因重绘重复提交同一个裁决，这必须是幂等的。
 - 同一个 `requestId` 第二次 `request()` 立即被拒绝（`duplicate_request`），避免弹两个窗、产生两条回调。
 - `cancelAll()` 分两阶段：**先发完所有 `resolved` 信号，再回调**。回调可能析构 `PermissionGate` 自身（会话被关闭），所以调用回调之后绝不能再访问成员。
-- 规则只存内存，切换会话即失效（与 npm 版 `PermissionService` 每实例一会话的语义一致）。
+- 规则只存内存，切换会话即失效（与 本实现 `PermissionService` 每实例一会话的语义一致）。
 
 ---
 
@@ -196,7 +196,7 @@ readOnly                → true
 
 ### 工具 schema 不进提示词
 
-npm 版 `CORE/context/builder.ts` 里 `setToolRegistry` 已退化为空操作，注释明确说明工具说明**只**经 provider 的 `tools` 字段下发。Qt 版照此：`toolingNormsSection()` 只写跨工具的行为准则（先读后改、独立调用并行发出、不臆测路径），**不列举任何工具名与参数**。
+工具说明**只**经 provider 的 `tools` 字段下发，不重复写进系统提示词——两处各写一份必然会漂移，而且工具名与参数会白白占掉上下文。因此 `toolingNormsSection()` 只写跨工具的行为准则（先读后改、独立调用并行发出、不臆测路径），**不列举任何工具名与参数**。
 
 复制一份 schema 进提示词会造成两处定义漂移，并白白占用上下文预算。
 
@@ -205,7 +205,7 @@ npm 版 `CORE/context/builder.ts` 里 `setToolRegistry` 已退化为空操作，
 - 用户级：`<数据根>/AGENTS.md`，最多一份
 - 工作区级：自 `cwd` 向上直到**项目根**（第一个含 `.git` 的目录），取找到的**第一个** `AGENTS.md`
 
-工作区级刻意只取第一个：多层 `AGENTS.md` 叠加会让模型收到互相矛盾的指令，而"最靠近 `cwd` 的那份"是最具体、最该生效的。单文件上限 100 KiB（与 npm 版一致）。
+工作区级刻意只取第一个：多层 `AGENTS.md` 叠加会让模型收到互相矛盾的指令，而"最靠近 `cwd` 的那份"是最具体、最该生效的。单文件上限 100 KiB（按既定语义）。
 
 ---
 
@@ -269,7 +269,7 @@ END
 
 ## 9. 主题与设计令牌
 
-Palette 的 51 个字段全部取自 npm 版**生效主题** `zai-light` / `zai-dark` 的 CSS 变量（`packages/ui/src/styles.css` 的 `.theme-zai-light` / `.theme-zai-dark` 段），没有一个值是凭空臆造的。默认的 `@theme` 与 `.dark` 只是 fallback，不是实际生效的主题。
+Palette 的 51 个字段全部取自两套生效配色 `zai-light` / `zai-dark` 的 CSS 变量，没有一个值是凭空臆造的。默认浅色 / 默认深色两套只作 fallback，不是实际生效的主题。
 
 字号走 `text-ui-*` 阶梯，基准 `--ui-font-size` 默认 14px：
 
@@ -300,5 +300,5 @@ Palette 的 51 个字段全部取自 npm 版**生效主题** `zai-light` / `zai-
 6. **无代码语法高亮 / Diff 视图** —— `Write`/`Edit` 已生成 unified diff 并写入 `ToolPart::metadata`，只差渲染控件。
 7. **无图片附件入口** —— 数据模型与 provider 层已支持（`FilePart` + `image/*` mime），缺输入框的附加入口。
 8. **国际化只做了持久化** —— 界面文案目前是中文硬编码。
-9. **无集成终端** —— npm 版有；Qt 版未实现。
+9. **无集成终端** —— 未实现。
 10. **远程工作区未实现** —— `Workspace` 已保留 `identity` 与 `remoteSessionId` 字段作为接口预留。

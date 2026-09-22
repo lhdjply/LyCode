@@ -1,36 +1,29 @@
-// ZCode Qt — 设计令牌与主题实现
+// LyCode — 设计令牌与主题实现
 //
-// 令牌来源（全部来自只读的原版仓库 /home/lhdjply/Desktop/ZCode/ZCode-npm）：
+// 令牌体系由四套变量集构成，全部以 CSS 变量名与十六进制值在本文件内固化：
 //
-//   [styles:default-light]  packages/ui/src/styles.css 的 `@theme { }` 块（第 137-306 行）。
-//                           这是原版的「默认浅色」变量集，DESIGN.md 明确说它只是 fallback 基础层。
-//   [styles:dark]           packages/ui/src/styles.css 的 `.dark { }` 块（第 308-459 行）。
-//   [styles:zai-light]      packages/ui/src/styles.css 的 `.theme-zai-light { }` 块（第 461-604 行）。
-//   [styles:zai-dark]       packages/ui/src/styles.css 的 `.theme-zai-dark { }` 块（第 606-750 行）。
-//   [scale:neutral-N]       node_modules/tailwindcss/theme.css 第 251-262 行的 Tailwind v4 中性色阶
-//                           （oklch -> sRGB 已换算，见下方各处的十六进制值）。
-//   [scale:<family>-N]      同一文件里的 red/green/sky/violet/... 色阶。
-//   [useTheme]              packages/ui/src/useTheme.ts 第 58-70 行。
-//   [DESIGN]                DESIGN.md（537 行，权威约束）。
+//   [default-light]  「默认浅色」变量集，只作 fallback 基础层，不作为生效值。
+//   [dark]           「默认深色」变量集，同样只作对照记录。
+//   [zai-light]      浅色主题的实际生效值。
+//   [zai-dark]       深色主题的实际生效值。
 //
-// 主题选择的关键结论（[useTheme] 第 58-70 行 + [DESIGN] 第 42-50 行）：
-//   原版对外只有 System / Light / Dark 三个选项，它们实际生效的 CSS 类分别是
-//   `theme-zai-dark` / `theme-zai-light` / `theme-zai-dark`：
-//       const resolved = resolveTheme(theme);                      // system -> 系统明暗
-//       const appliedTheme = theme === "system"
-//         ? (resolved === "dark" ? "zai-dark" : "zai-light")
-//         : normalizeThemePreference(theme);                       // light->zai-light, dark->zai-dark
-//   DESIGN.md 第 50 行也写明：「new UI should be validated against Zai Light and Zai Dark as the
-//   active light/dark experiences.」
-//   因此本实现的 Light palette == zai-light，Dark palette == zai-dark；System 解析后落到其中一套。
+// 中性色阶与红/绿/天空蓝/紫等色阶取 Tailwind v4 的取值（oklch 已换算为 sRGB，
+// 见下方各处十六进制值）。
+//
+// 主题选择的关键结论：
+//   对外只有 System / Light / Dark 三个选项；System 先解析成明暗，再落到 zai 主题，
+//   即 Light 始终映射到 zai-light、Dark 始终映射到 zai-dark：
+//       resolved = 系统明暗（system 时）或选项本身
+//       applied  = resolved == dark ? zai-dark : zai-light
+//   因此：Light palette == zai-light，Dark palette == zai-dark。
 //   默认浅色 / 默认深色两套变量只作对照记录，不作为生效值。
 //
 // `--color-*` 里大量使用 `color-mix(in oklab, <不透明色> P%, transparent)`。
 // 这类表达式在 oklab 的预乘空间里混合等价于「颜色不变、alpha = P%」（已用往返计算验证），
 // 所以本文件把它们直接落成「原色 + alpha」，并在注释里保留原始表达式以便核对。
 //
-// 原版未找到对应令牌的字段，统一标注「原版未找到」，取值依据写在字段旁；这些是本文件里
-// 唯一按 DESIGN.md 语义自定的值。
+// 没有对应令牌的字段统一标注「无对应令牌」，取值依据写在字段旁；这些是本文件里
+// 唯一按语义自定的值。
 
 #include "ui/Theme.h"
 
@@ -42,58 +35,58 @@
 
 #include <algorithm>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
 // ── 色阶常量 ────────────────────────────────────────────────────────────────
-// Tailwind v4 neutral 色阶（node_modules/tailwindcss/theme.css:251-262 的 oklch 值换算成 sRGB）。
-// 原版所有 --color-neutral-* 都指向这组值。这里只保留被 zai 主题直接引用的两档
+// Tailwind v4 neutral 色阶（oklch 值已换算成 sRGB）。
+// 所有 --color-neutral-* 都指向这组值。这里只保留被 zai 主题直接引用的两档
 // （zai-light 的 --color-foreground = neutral-800，zai-dark 的 = neutral-300），
 // 其余档位的换算结果记录在文件下方的「未使用色阶」注释里。
 constexpr const char *kNeutral300 = "#d4d4d4";
 constexpr const char *kNeutral800 = "#262626";
 
-// 原版 zai 主题里以字面量写死的品牌/语义色（不跟随 Tailwind 色阶）。
-constexpr const char *kZaiInk = "#0d0d0d";        // zai-light 的 brand / terminal-cursor（styles.css:467,502）
-constexpr const char *kZaiPaper = "#f8f8f8";      // zai-light 的 background（styles.css:464）
-constexpr const char *kZaiInk2 = "#000000";       // zai-light 的 primary（styles.css:545）
+// zai 主题里以字面量写死的品牌/语义色（不跟随 Tailwind 色阶）。
+constexpr const char *kZaiInk = "#0d0d0d";        // zai-light 的 brand / terminal-cursor
+constexpr const char *kZaiPaper = "#f8f8f8";      // zai-light 的 background
+constexpr const char *kZaiInk2 = "#000000";       // zai-light 的 primary
 constexpr const char *kZaiWhite = "#ffffff";      // zai-light 的 header/panel/card/menu/toast 底色
-constexpr const char *kZaiSidebarLight = "#f0f0f0";  // zai-light 的 sidebar/tab（styles.css:485,540）
-constexpr const char *kZaiBorderGray = "#e6e6e6";    // zai-light 的 secondary/tag（styles.css:547,583）
-constexpr const char *kZaiBlue = "#0b7fff";       // zai-light 的 icon-blue（styles.css:510）
-constexpr const char *kZaiGreen = "#1e8a3e";      // zai-light 的 success / diff-added（styles.css:557,566）
-constexpr const char *kZaiGreenDeep = "#166b32";  // zai-light 的 interaction-confirmation-foreground（styles.css:552）
-constexpr const char *kZaiGreenSoft = "#eaf7ee";  // zai-light 的 interaction-confirmation-surface（styles.css:551）
-constexpr const char *kZaiRed = "#e03131";        // zai-light 的 destructive / diff-removed（styles.css:561,568）
-constexpr const char *kZaiOrange = "#e07b00";     // zai-light 的 warning（styles.css:563）
-constexpr const char *kZaiViolet = "#9e77ed";     // zai-light 的 idle-task（styles.css:559）
-constexpr const char *kZaiVioletSurface = "#f5f3ff";  // zai-light 的 idle-task-surface（styles.css:560）
-constexpr const char *kZaiBlueSurface = "#ebf4ff";    // zai-light 的 accent / ask-surface（styles.css:476,548）
-constexpr const char *kZaiSkyDeep = "#001d3d";    // zai-dark 的 accent / ask-surface（styles.css:621,693）
-constexpr const char *kZaiDarkBg = "#161616";     // zai-dark 的 background（styles.css:609）
-constexpr const char *kZaiDarkHeader = "#202020"; // zai-dark 的 header/panel（styles.css:628,629）
-constexpr const char *kZaiDarkCard = "#2b2b2b";   // zai-dark 的 card/popover/menu/input（styles.css:633,636,688）
-constexpr const char *kZaiDarkHover = "#363636";  // zai-dark 的 menu-hover/secondary/tag（styles.css:689,692,729）
-constexpr const char *kZaiDarkFg = "#f8f8f8";     // zai-dark 的 tooltip-foreground / bright-white（styles.css:726）
-constexpr const char *kZaiDarkBlue = "#80beff";   // zai-dark 的 ask-foreground / bright-blue（styles.css:694,663）
-constexpr const char *kZaiDarkGreen = "#46bf72";  // zai-dark 的 success / diff-added（styles.css:702,712）
-constexpr const char *kZaiDarkGreenText = "#87d9a4";  // zai-dark 的 confirmation-foreground（styles.css:697）
-constexpr const char *kZaiDarkRed = "#ff5c5c";    // zai-dark 的 destructive / diff-removed（styles.css:706,714）
-constexpr const char *kZaiDarkOrange = "#ff8a30"; // zai-dark 的 warning（styles.css:709）
-constexpr const char *kZaiDarkViolet = "#7b5ce5";      // zai-dark 的 idle-task（styles.css:704）
-constexpr const char *kZaiDarkVioletSurface = "#160d38";  // zai-dark 的 idle-task-surface（styles.css:705）
+constexpr const char *kZaiSidebarLight = "#f0f0f0";  // zai-light 的 sidebar/tab
+constexpr const char *kZaiBorderGray = "#e6e6e6";    // zai-light 的 secondary/tag
+constexpr const char *kZaiBlue = "#0b7fff";       // zai-light 的 icon-blue
+constexpr const char *kZaiGreen = "#1e8a3e";      // zai-light 的 success / diff-added
+constexpr const char *kZaiGreenDeep = "#166b32";  // zai-light 的 interaction-confirmation-foreground
+constexpr const char *kZaiGreenSoft = "#eaf7ee";  // zai-light 的 interaction-confirmation-surface
+constexpr const char *kZaiRed = "#e03131";        // zai-light 的 destructive / diff-removed
+constexpr const char *kZaiOrange = "#e07b00";     // zai-light 的 warning
+constexpr const char *kZaiViolet = "#9e77ed";     // zai-light 的 idle-task
+constexpr const char *kZaiVioletSurface = "#f5f3ff";  // zai-light 的 idle-task-surface
+constexpr const char *kZaiBlueSurface = "#ebf4ff";    // zai-light 的 accent / ask-surface
+constexpr const char *kZaiSkyDeep = "#001d3d";    // zai-dark 的 accent / ask-surface
+constexpr const char *kZaiDarkBg = "#161616";     // zai-dark 的 background
+constexpr const char *kZaiDarkHeader = "#202020"; // zai-dark 的 header/panel
+constexpr const char *kZaiDarkCard = "#2b2b2b";   // zai-dark 的 card/popover/menu/input
+constexpr const char *kZaiDarkHover = "#363636";  // zai-dark 的 menu-hover/secondary/tag
+constexpr const char *kZaiDarkFg = "#f8f8f8";     // zai-dark 的 tooltip-foreground / bright-white
+constexpr const char *kZaiDarkBlue = "#80beff";   // zai-dark 的 ask-foreground / bright-blue
+constexpr const char *kZaiDarkGreen = "#46bf72";  // zai-dark 的 success / diff-added
+constexpr const char *kZaiDarkGreenText = "#87d9a4";  // zai-dark 的 confirmation-foreground
+constexpr const char *kZaiDarkRed = "#ff5c5c";    // zai-dark 的 destructive / diff-removed
+constexpr const char *kZaiDarkOrange = "#ff8a30"; // zai-dark 的 warning
+constexpr const char *kZaiDarkViolet = "#7b5ce5";      // zai-dark 的 idle-task
+constexpr const char *kZaiDarkVioletSurface = "#160d38";  // zai-dark 的 idle-task-surface
 
-// 下面这组色阶原版里被 --color-* 引用过，但当前 Palette 字段集没有对应语义位置，
+// 下面这组色阶被 --color-* 引用过，但当前 Palette 字段集没有对应语义位置，
 // 因此只在此记录换算结果，不定义常量（避免未使用变量告警）：
-//   neutral-50  #fafafa  = --color-background（默认浅色 styles.css:158）
-//   neutral-100 #f5f5f5  = --color-header/panel/sidebar（styles.css:180-182）
-//   neutral-200 #e5e5e5  = --color-foreground（.dark styles.css:408）
-//   neutral-500 #737373  = --color-terminal-white（styles.css:212）
-//   neutral-700 #404040  = --color-foreground（默认浅色 styles.css:255）
-//   neutral-950 #0a0a0a  = --color-primary（默认浅色 styles.css:247）
-//   #0066dd              = zai-light 的 --color-interaction-ask-foreground（styles.css:549），
+//   neutral-50  #fafafa  = --color-background（默认浅色）
+//   neutral-100 #f5f5f5  = --color-header/panel/sidebar
+//   neutral-200 #e5e5e5  = --color-foreground（.dark）
+//   neutral-500 #737373  = --color-terminal-white
+//   neutral-700 #404040  = --color-foreground（默认浅色）
+//   neutral-950 #0a0a0a  = --color-primary（默认浅色）
+//   #0066dd              = zai-light 的 --color-interaction-ask-foreground，
 //                          Palette 里没有 ask 专用字段，等待交互统一走 confirmation 绿色
-//                          （DESIGN.md 第 127-130 行明确要求等待徽标只用一套绿色）。
+//                          （等待徽标只用一套绿色）。
 
 QColor make(const char *hex, int alpha = 255) {
     QColor color{QString::fromLatin1(hex)};
@@ -142,8 +135,8 @@ QString monospaceFamily() {
             QStringLiteral("Cascadia Code"),
             QStringLiteral("Fira Code"),
             QStringLiteral("Source Code Pro"),
-            // 原版 --font-mono 在通用 monospace 之前显式插入了各平台 CJK 无衬线字体，
-            // 免得 Windows 的 Consolas 缺中文字形后落回宋体（styles.css:138-142）。
+            //  --font-mono 在通用 monospace 之前显式插入了各平台 CJK 无衬线字体，
+            // 免得 Windows 的 Consolas 缺中文字形后落回宋体。
             QStringLiteral("Noto Sans Mono CJK SC"),
             QStringLiteral("DejaVu Sans Mono"),
             QStringLiteral("monospace"),
@@ -188,12 +181,12 @@ ThemeMode themeModeFromToken(const QString &value) {
 
 namespace {
 
-/// Zai Light 调色板。（[useTheme] 把 light 归一化为 zai-light，见文件头说明。）
+/// Zai Light 调色板。（Light 归一化为 zai-light，见文件头说明。）
 Palette zaiLight() {
     Palette p;
 
     // 结构表面
-    p.background = make(kZaiPaper);                      // --color-background: #f8f8f8 [styles:zai-light 464]
+    p.background = make(kZaiPaper);                      // --color-background: #f8f8f8
     p.backgroundAlt = make(kZaiPaper, 179);              // --color-background-alt: color-mix(background 70%, transparent) [466]
     p.header = make(kZaiWhite);                          // --color-header: #ffffff [483]
     p.panel = make(kZaiWhite);                           // --color-panel: #ffffff [484]
@@ -252,7 +245,7 @@ Palette zaiLight() {
     p.diffRemoved = make(kZaiRed);                       // --color-diff-removed: #e03131 [568]
     p.diffRemovedForeground = make(kZaiWhite);           // --color-diff-removed-foreground: #ffffff [569]
 
-    // 语法高亮（浅色）。见 Theme.h 的说明：非 npm 令牌，是编辑器风格取值。
+    // 语法高亮（浅色）。见 Theme.h 的说明：非 本实现 令牌，是编辑器风格取值。
     p.syntaxKeyword = make("#a626a4");
     p.syntaxString = make("#50a14f");
     p.syntaxComment = make("#a0a1a7");
@@ -280,7 +273,7 @@ Palette zaiDark() {
     Palette p;
 
     // 结构表面
-    p.background = make(kZaiDarkBg);                     // --color-background: #161616 [styles:zai-dark 609]
+    p.background = make(kZaiDarkBg);                     // --color-background: #161616
     p.backgroundAlt = make(kZaiDarkCard, 153);           // color-mix(background-win-alt #2b2b2b 60%, transparent) [611]
     p.header = make(kZaiDarkHeader);                     // --color-header: #202020 [628]
     p.panel = make(kZaiDarkHeader);                      // --color-panel: #202020 [629]
@@ -328,8 +321,8 @@ Palette zaiDark() {
     p.warning = make(kZaiDarkOrange);                    // --color-warning: #ff8a30 [709]
     p.warningForeground = make(kZaiInk2);                // --color-warning-foreground: #000000 [711]
     p.destructive = make(kZaiDarkRed);                   // --color-destructive: #ff5c5c [706]
-    // 原版明确修过这里：zai-dark 的 destructive-foreground 固定为白字，不用 inverse 黑
-    // （styles.css:707 的注释「与红色危险按钮的固定白字设计冲突」）。
+    // 明确修过这里：zai-dark 的 destructive-foreground 固定为白字，不用 inverse 黑
+    // 。
     p.destructiveForeground = make(kZaiWhite);           // #ffffff [708]
     p.idleTask = make(kZaiDarkViolet);                   // --color-idle-task: #7b5ce5 [704]
     p.idleTaskSurface = make(kZaiDarkVioletSurface);     // #160d38 [705]
@@ -436,7 +429,7 @@ void Theme::setCodeFontSize(int pixels) {
 }
 
 int Theme::fontPixelSize(FontRole role) const {
-    // 阶梯公式严格照 DESIGN.md 第 190-200 行的表格（对应 styles.css:143-148）。
+    // 阶梯公式：由 base 字号按固定比例推出各级。
     switch (role) {
         case FontRole::UiXl:
             return uiFontSize_ + 4;
@@ -462,7 +455,7 @@ QFont Theme::font(FontRole role) const {
     const bool monospace = role == FontRole::Mono || role == FontRole::MonoSm;
     QFont f{monospace ? monospaceFamily() : sansFamily()};
     f.setPixelSize(fontPixelSize(role));
-    // 界面字号变化不应该改变字重层级；字重由控件自己按语义设（DESIGN.md 第 257 行）。
+    // 界面字号变化不应该改变字重层级；字重由控件自己按语义设。
     f.setStyleStrategy(QFont::PreferAntialias);
     return f;
 }
@@ -554,7 +547,7 @@ QString Theme::styleSheet() const {
     const QString interactionConfirmationSurface = css(p.interactionConfirmationSurface);
     const QString interactionConfirmationForeground = css(p.interactionConfirmationForeground);
 
-    // 分隔线把手：DESIGN.md 第 487 行要求 4px 透明命中区，hover 时显示
+    // 分隔线把手：4px 透明命中区，hover 时显示
     // 2px foreground-subtlest/50 的线。
     const QString splitterHover = css(p.foregroundSubtlest, 0.5);
 
@@ -567,7 +560,7 @@ QString Theme::styleSheet() const {
     const QString uiSm = QString::number(fontPixelSize(FontRole::UiSm));
     const QString uiXs = QString::number(fontPixelSize(FontRole::UiXs));
 
-    // 圆角层级照 DESIGN.md 第 287-334 行：一级容器 rounded-xl=12px，嵌套降级 lg=10 / md=8 / sm=6；
+    // 圆角层级：一级容器 rounded-xl=12px，嵌套降级 lg=10 / md=8 / sm=6；
     // 菜单与选项浮层 8px（rounded-lg 壳 + rounded-md 选项）；对话框语义用 16px。
     // 间距照 4px 基准：紧凑 8px、标准 12px / 16px。
     //
@@ -1330,4 +1323,4 @@ QSizeGrip {
     return sheet;
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

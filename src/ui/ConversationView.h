@@ -1,4 +1,4 @@
-// ZCode Qt — 对话流视图
+// LyCode — 对话流视图
 //
 // 由若干 MessageWidget 纵向排列组成，每个消息内部再按 Part 的真实顺序
 // 交错渲染「思考 → 正文 → 工具调用 → 正文」。
@@ -25,7 +25,7 @@ class QScrollArea;
 class QTextBrowser;
 class QVBoxLayout;
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class ToolCallWidget;
 
@@ -98,7 +98,7 @@ public:
 
 signals:
     /// 用户点击"重试"时发出（用于重新发起上一条输入）。
-    void retryRequested(const zcode::Id &messageId);
+    void retryRequested(const lycode::Id &messageId);
 
 private:
     void refreshEmptyState();
@@ -112,4 +112,4 @@ private:
     QStringList messageOrder_;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

@@ -1,4 +1,4 @@
-// ZCode Qt — 文件查看器测试
+// LyCode — 文件查看器测试
 //
 // 覆盖两件事：
 //   1. 查看器能不能正确显示文本 / 图片 / 缺失文件
@@ -23,8 +23,8 @@
 #include "ui/Theme.h"
 #include "ui/ToolCallWidget.h"
 
-using namespace zcode;
-using namespace zcode::ui;
+using namespace lycode;
+using namespace lycode::ui;
 
 namespace {
 

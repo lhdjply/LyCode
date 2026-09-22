@@ -1,16 +1,16 @@
-// ZCode Qt — 领域模型
+// LyCode — 领域模型
 //
-// 本文件是 C++ 重写的类型契约中心，对齐 npm 版 ZCode 的领域概念与**词表**
+// 本文件是 C++ 重写的类型契约中心，按既定语义 LyCode 的领域概念与**词表**
 // （session mode / tool state / permission decision / risk level 等取值与
-// ZCode 保持一致），但按 C++ 与 Qt 的惯例重新建模。
+// LyCode 保持一致），但按 C++ 与 Qt 的惯例重新建模。
 //
-// ── 与 npm 版的关键差异（有意为之）────────────────────────────────────────
-// npm 版有两条并存链路：legacy message/part，与 V4 row（扁平行 + 快照 + 增量）。
+// ── 与 本实现的关键差异（有意为之）────────────────────────────────────────
+// 本实现有两条并存链路：legacy message/part，与 V4 row（扁平行 + 快照 + 增量）。
 // V4 引入 row/delta/logEpoch/seq 的目的是**跨进程 wire 的断线重放**。
-// Qt 版把 Agent 运行时与 UI 放在同一进程内，不存在 wire，因此重放机制
+// 本实现把 Agent 运行时与 UI 放在同一进程内，不存在 wire，因此重放机制
 // 没有收益；这里采用更简单的 message/part 树，只用信号把变化推给 UI。
 //
-// 词表仍然照抄 ZCode，保证术语、状态语义、权限选项与 npm 版一致，
+// 词表仍然照抄 LyCode，保证术语、状态语义、权限选项按既定语义，
 // 这样行为与文案不会分叉。
 //
 // ── 建模取舍 ──────────────────────────────────────────────────────────────
@@ -20,7 +20,7 @@
 //   * 工具输入/输出保留为 QJsonObject 透传：内置工具签名稳定，但 MCP 与
 //     插件工具的形状由外部决定，强类型化会带来无收益的耦合。
 //   * 未知枚举值一律降级为明确的安全默认 + 告警，绝不丢弃整条记录。
-//     npm 版多次记录过「闭集枚举加值 → 旧客户端整帧被丢」的偏斜成本。
+//     本实现多次记录过「闭集枚举加值 → 旧客户端整帧被丢」的偏斜成本。
 #pragma once
 
 #include <QJsonArray>
@@ -30,7 +30,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace zcode {
+namespace lycode {
 
 using Id = QString;
 
@@ -60,7 +60,7 @@ struct Workspace {
     /// 远程链路标识（如 `remote:ssh:host:22:user:/path`）。本地为空。
     QString remoteSessionId;
 
-    /// 身份 key 的统一口径，与 npm 版一致：
+    /// 身份 key 的统一口径，按既定语义：
     /// `workspaceIdentity?.trim() || workspacePath`
     QString key() const;
     QString displayName() const;
@@ -77,7 +77,7 @@ struct Workspace {
 
 /// 消息角色。
 ///
-/// 注意：ZCode 的 wire 协议只有 `user` 与 `assistant` 两种角色（system 提示词
+/// 注意：LyCode 的 wire 协议只有 `user` 与 `assistant` 两种角色（system 提示词
 /// 走独立字段）。`System` 是本实现内部保留的角色，用于存放压缩摘要等本地记录，
 /// 不参与 provider 消息序列的角色映射。
 enum class MessageRole {
@@ -131,7 +131,7 @@ ToolState toolStateFromToken(const QString &value);
 /// 是否为终态。未终态的工具在会话结束时必须被显式关闭为 Cancelled，
 /// 否则 UI 会永远显示"运行中"。
 bool toolStateIsTerminal(ToolState state);
-/// 是否为"活跃"态（与 npm 的 conversationSharePublicProjection 判定一致）。
+/// 是否为"活跃"态（conversationSharePublicProjection 判定一致）。
 bool toolStateIsActive(ToolState state);
 
 struct TextPart {
@@ -148,7 +148,7 @@ struct ReasoningPart {
 };
 
 /// 附件/文件引用。图片不单独建类型，用 mimeType 区分
-/// （与 npm 版一致：没有独立的 image part）。
+/// （按既定语义：没有独立的 image part）。
 struct FilePart {
     QString path;
     QString mimeType;
@@ -239,7 +239,7 @@ struct ToolPart {
     /// 错误码（V4 toolCallRow.error.code）。
     QString errorCode;
 
-    /// 供 UI 直接展示的一行摘要，例如 `Bash: pnpm build`。
+    /// 供 UI 直接展示的一行摘要，例如 `Bash: make build`。
     QString title;
     /// 结构化补充信息：cwd、退出码、耗时、文件路径、diff 等。
     QJsonObject metadata;
@@ -286,7 +286,7 @@ struct Part {
     static Part fromJson(const QJsonObject &json);
 };
 
-/// token 用量。字段名与 npm 的 zcodeTokenUsageSchema 对齐。
+/// token 用量。字段名TokenUsage 结构 对齐。
 ///
 /// ── 字段口径（**必须**按这个含义填，两处 provider 已归一）────────────────
 /// 两种协议对"输入 token"的统计口径本来是不同的：
@@ -343,7 +343,7 @@ struct Message {
     /// 触发本轮的父消息（assistant 消息指向对应的 user 消息）。
     Id parentMessageId;
 
-    /// 仅发给模型、不进入用户可见对话流。对应 npm 的 visibility: "model-only"。
+    /// 仅发给模型、不进入用户可见对话流。对应 visibility: "model-only"。
     /// 合成的工具结果轮就属于这一类：工具输出已经渲染在工具卡片里，
     /// 再作为一条"用户消息"出现会让用户以为自己说过那句话。
     bool modelOnly = false;
@@ -380,7 +380,7 @@ enum class SessionStatus {
     Error,                 ///< 以错误结束
 };
 
-/// 会话模式。取值来自 npm 的 zcodeSessionModeSchema。
+/// 会话模式。取值来自 SessionMode 取值。
 enum class SessionMode {
     Plan,   ///< 只读规划
     Build,  ///< 默认：可读写、可执行
@@ -399,7 +399,7 @@ bool sessionModeAllowsWrites(SessionMode mode);
 /// 该模式对应的默认权限模式。
 PermissionMode defaultPermissionModeFor(SessionMode mode);
 
-/// 会话种类。取值来自 npm 的 zcodeSessionKindSchema。
+/// 会话种类。取值来自 SessionKind 取值。
 enum class SessionKind {
     Interactive,
     Fork,
@@ -472,7 +472,7 @@ enum class PermissionKind {
 QString toToken(PermissionKind kind);
 PermissionKind permissionKindFromToken(const QString &value);
 
-/// 风险等级。取值来自 npm 的 zcodePendingPermissionSchema.riskLevel。
+/// 风险等级。取值来自权限请求的风险评估。
 enum class RiskLevel {
     Low,
     Medium,
@@ -495,7 +495,7 @@ QString toToken(PermissionMode mode);
 PermissionMode permissionModeFromToken(const QString &value);
 bool permissionModeRequiresPrompt(PermissionMode mode, PermissionKind kind);
 
-/// 权限规则行为。取值来自 npm 的 zcodePermissionRuleBehaviorSchema。
+/// 权限规则行为。决定命中规则后是放行、拒绝还是转人工。
 enum class PermissionRuleBehavior {
     Allow,
     Deny,
@@ -516,7 +516,7 @@ struct PermissionRule {
     QString key() const;
 };
 
-/// 用户裁决。取值来自 npm 的 zcodePermissionDecisionSchema。
+/// 用户裁决。由用户或规则给出的最终结论。
 enum class PermissionDecision {
     Allow,
     Deny,
@@ -527,7 +527,7 @@ enum class PermissionDecision {
 QString toToken(PermissionDecision decision);
 PermissionDecision permissionDecisionFromToken(const QString &value);
 
-/// 权限应答。与 npm 的 zcodePermissionResponseSchema 对齐。
+/// 权限应答。承载最终结论与可选的自定义输入。
 struct PermissionResponse {
     PermissionDecision decision = PermissionDecision::Deny;
     QString reason;
@@ -600,7 +600,7 @@ enum class ProviderKind {
 QString toToken(ProviderKind kind);
 ProviderKind providerKindFromToken(const QString &value);
 
-/// 账号可用性。取值来自 npm 的 account-provider-state。
+/// 账号可用性。取值来自 account-provider-state。
 enum class AccountAvailability {
     Available,
     Pending,
@@ -685,36 +685,36 @@ struct ModelOptionOverride {
 /// 但**不含**思考档位——档位是会话级选择，不是模型能力配置。
 QString modelOptionKey(const QString &providerId, const QString &modelId);
 
-/// 会话使用的模型选择。对应 npm 的 ModelSelection。
+/// 会话使用的模型选择。对应 ModelSelection。
 struct ModelSelection {
     QString providerId;
     QString modelId;
-    /// 思考档位（npm 的 options.reasoningLevel）。
+    /// 思考档位（本实现的 options.reasoningLevel）。
     QString reasoningLevel;
 
     bool isValid() const { return !providerId.isEmpty() && !modelId.isEmpty(); }
 
-    /// 展示串，格式与 npm 的 formatModelPickerValue 一致：
+    /// 展示串，格式formatModelPickerValue 一致：
     /// `providerId/modelId[$reasoningLevel]`
     QString displayValue() const;
     static ModelSelection parseDisplayValue(const QString &value);
 };
 
-}  // namespace zcode
+}  // namespace lycode
 
 // 域类型需要参与 Qt 的信号槽与 QSignalSpy，因此声明为元类型。
 // 放在文件末尾：Q_DECLARE_METATYPE 要求类型完整，且必须位于命名空间之外。
 // 只做编译期声明，不调用 qRegisterMetaType——本应用所有连接都是同线程直连，
 // 不需要运行时注册；QSignalSpy 也只需要编译期声明就能把实参存进 QVariant。
-Q_DECLARE_METATYPE(zcode::Workspace)
-Q_DECLARE_METATYPE(zcode::Usage)
-Q_DECLARE_METATYPE(zcode::Part)
-Q_DECLARE_METATYPE(zcode::Message)
-Q_DECLARE_METATYPE(zcode::Session)
-Q_DECLARE_METATYPE(zcode::PermissionRule)
-Q_DECLARE_METATYPE(zcode::PermissionOption)
-Q_DECLARE_METATYPE(zcode::PermissionRequest)
-Q_DECLARE_METATYPE(zcode::PermissionResponse)
-Q_DECLARE_METATYPE(zcode::ProviderConfig)
-Q_DECLARE_METATYPE(zcode::ModelInfo)
-Q_DECLARE_METATYPE(zcode::ModelSelection)
+Q_DECLARE_METATYPE(lycode::Workspace)
+Q_DECLARE_METATYPE(lycode::Usage)
+Q_DECLARE_METATYPE(lycode::Part)
+Q_DECLARE_METATYPE(lycode::Message)
+Q_DECLARE_METATYPE(lycode::Session)
+Q_DECLARE_METATYPE(lycode::PermissionRule)
+Q_DECLARE_METATYPE(lycode::PermissionOption)
+Q_DECLARE_METATYPE(lycode::PermissionRequest)
+Q_DECLARE_METATYPE(lycode::PermissionResponse)
+Q_DECLARE_METATYPE(lycode::ProviderConfig)
+Q_DECLARE_METATYPE(lycode::ModelInfo)
+Q_DECLARE_METATYPE(lycode::ModelSelection)

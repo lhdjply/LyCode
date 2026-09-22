@@ -1,4 +1,4 @@
-// ZCode Qt — 权限门单元测试
+// LyCode — 权限门单元测试
 //
 // 权限是唯一的安全边界，因此这里覆盖得比较密：每个模式 × 每种类别的默认行为、
 // 规则匹配（含前缀与通配）、自动裁决与用户裁决的分界、以及取消/重复请求这类
@@ -8,7 +8,7 @@
 #include "agent/PermissionGate.h"
 #include "core/Ids.h"
 
-using namespace zcode;
+using namespace lycode;
 
 namespace {
 
@@ -197,14 +197,14 @@ void TestPermissionGate::allowAlwaysRuleAppliesToLaterCalls() {
 
     PermissionRequest first = makeRequest(PermissionKind::Execute, QStringLiteral("Bash"));
     bool firstCalled = false;
-    gate.request(first, QStringLiteral("bash"), QStringLiteral("npm test"),
+    gate.request(first, QStringLiteral("bash"), QStringLiteral("make test"),
                  [&](PermissionOutcome) { firstCalled = true; });
     QVERIFY(!firstCalled);
 
     PermissionResponse response;
     response.decision = PermissionDecision::Allow;
     response.permissionUpdates.append(
-        makeRule(QStringLiteral("bash"), QStringLiteral("npm test"), PermissionRuleBehavior::Allow));
+        makeRule(QStringLiteral("bash"), QStringLiteral("make test"), PermissionRuleBehavior::Allow));
     QVERIFY(gate.resolve(first.id, response));
     QVERIFY(firstCalled);
     QCOMPARE(gate.grantedRules().size(), 1);
@@ -213,7 +213,7 @@ void TestPermissionGate::allowAlwaysRuleAppliesToLaterCalls() {
     QSignalSpy requestedSpy(&gate, &PermissionGate::requested);
     PermissionOutcome second;
     gate.request(makeRequest(PermissionKind::Execute, QStringLiteral("Bash")),
-                 QStringLiteral("bash"), QStringLiteral("npm test -- --watch"),
+                 QStringLiteral("bash"), QStringLiteral("make test -- --watch"),
                  [&](PermissionOutcome outcome) { second = outcome; });
 
     QVERIFY(second.allowed());
@@ -273,23 +273,27 @@ void TestPermissionGate::ruleWithoutContentMatchesWholeCapability() {
 
     // `prefix:*` 写法的尾部通配要被剥掉当作前缀。
     QList<PermissionRule> starPrefix;
-    starPrefix.append(makeRule(QStringLiteral("bash"), QStringLiteral("npm:*"),
+    starPrefix.append(makeRule(QStringLiteral("bash"), QStringLiteral("make:*"),
                                PermissionRuleBehavior::Allow));
     QVERIFY(PermissionGate::matchRule(starPrefix, QStringLiteral("bash"),
-                                      QStringLiteral("npm install")) != nullptr);
+                                      QStringLiteral("make install")) != nullptr);
+    // ⚠ 关键是"前缀匹配要求命令**以此前缀开头**"：`make:*` 不该命中 `mymake install`。
+    // （这条断言原本用另一个包管理器名来验——它不以该前缀开头，所以不匹配。
+    //   换例子时必须保持"不以该前缀开头"这个性质；我先前换成 `maker install`，
+    //   它恰好以 `make` 开头，于是断言反过来失败——测试当场抓住了这个错误。）
     QVERIFY(PermissionGate::matchRule(starPrefix, QStringLiteral("bash"),
-                                      QStringLiteral("pnpm install")) == nullptr);
+                                      QStringLiteral("mymake install")) == nullptr);
 }
 
 void TestPermissionGate::allowRuleWinsOverDenyRule() {
     QList<PermissionRule> rules;
     // 先 deny 全部，再 allow 一条：这是用户最自然的操作顺序，必须按预期生效。
     rules.append(makeRule(QStringLiteral("bash"), QString(), PermissionRuleBehavior::Deny));
-    rules.append(makeRule(QStringLiteral("bash"), QStringLiteral("npm test"),
+    rules.append(makeRule(QStringLiteral("bash"), QStringLiteral("make test"),
                           PermissionRuleBehavior::Allow));
 
     const PermissionRule *matched =
-        PermissionGate::matchRule(rules, QStringLiteral("bash"), QStringLiteral("npm test -- x"));
+        PermissionGate::matchRule(rules, QStringLiteral("bash"), QStringLiteral("make test -- x"));
     QVERIFY(matched != nullptr);
     QCOMPARE(matched->behavior, PermissionRuleBehavior::Allow);
 

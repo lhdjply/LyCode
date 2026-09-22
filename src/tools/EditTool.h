@@ -1,4 +1,4 @@
-// ZCode Qt — Edit 工具
+// LyCode — Edit 工具
 //
 // 精确字符串替换。比 Write 安全：模型不需要重述整个文件，
 // 且"找不到/找到多次"能立刻暴露模型的错误假设。
@@ -6,7 +6,7 @@
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 在文件内容中精确替换 `old_string`。生成统一 diff。
 class EditTool : public Tool {
@@ -20,4 +20,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

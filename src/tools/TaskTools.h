@@ -1,10 +1,10 @@
-// ZCode Qt — 后台任务查询与终止工具
+// LyCode — 后台任务查询与终止工具
 //
 // 与 Bash(run_in_background: true) 配套：
 //   TaskOutput —— 读一个后台任务的当前状态与输出（可选阻塞等待）
 //   TaskStop   —— 终止一个后台任务
 //
-// 别名与 npm 对齐：TaskOutput 也叫 BashOutput，TaskStop 也叫 KillBash，
+// 别名按既定语义：TaskOutput 也叫 BashOutput，TaskStop 也叫 KillBash，
 // 这样模型按 Claude Code 的习惯调用也能命中。
 #pragma once
 
@@ -12,7 +12,7 @@
 
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 读取后台任务的输出。
 ///
@@ -37,4 +37,4 @@ public:
                  ToolCallback done) override;
 };
 
-}  // namespace zcode
+}  // namespace lycode

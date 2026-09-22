@@ -1,4 +1,4 @@
-// ZCode Qt — 权限确认对话框
+// LyCode — 权限确认对话框
 //
 // 职责边界（与 PermissionGate 的分工，见 src/agent/PermissionGate.h）：
 //   * 本对话框只做「呈现 + 收集裁决」：把工具给出的 PermissionRequest 原样渲染，
@@ -25,7 +25,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QVBoxLayout;
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class PermissionDialog : public QDialog {
     Q_OBJECT
@@ -55,7 +55,7 @@ private:
     void addInputSection(QVBoxLayout *root);
     void addOptionButtons(QVBoxLayout *root);
 
-    /// 对话框外壳：一级容器圆角 16px + popoverBorder 描边（DESIGN.md）。
+    /// 对话框外壳：一级容器圆角 16px + popoverBorder 描边。
     void applyShellStyle();
     /// 主题令牌变化（含字号）后整棵树重刷。本地样式表保存的是构造时的颜色与字号，
     /// 不重刷就会残留旧主题；由 Theme::changed 触发。
@@ -78,4 +78,4 @@ private:
     QPushButton *defaultButton_ = nullptr;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

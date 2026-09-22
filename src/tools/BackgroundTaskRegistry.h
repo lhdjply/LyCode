@@ -1,4 +1,4 @@
-// ZCode Qt — 后台任务注册表
+// LyCode — 后台任务注册表
 //
 // `Bash(run_in_background: true)` 让进程在工具返回之后继续跑（典型用例：
 // 起一个 dev server、跑一遍耗时测试）。这带来四个必须解决的问题：
@@ -35,7 +35,7 @@
 class QProcess;
 class QTimer;
 
-namespace zcode {
+namespace lycode {
 
 /// 一个后台任务的可读快照。
 struct BackgroundTask {
@@ -168,10 +168,10 @@ public:
     static QString ledgerPath();
 
 signals:
-    void taskAdded(const zcode::Id &taskId);
-    void taskUpdated(const zcode::Id &taskId);
+    void taskAdded(const lycode::Id &taskId);
+    void taskUpdated(const lycode::Id &taskId);
     /// 任务结束。`ok` 为真表示退出码为 0。
-    void taskFinished(const zcode::Id &taskId, bool ok, int exitCode);
+    void taskFinished(const lycode::Id &taskId, bool ok, int exitCode);
 
 private:
     struct Entry {
@@ -214,4 +214,4 @@ bool processAlive(int pid, qint64 startTicks);
 /// 读取进程的启动时间指纹；取不到返回 0。
 qint64 processStartTicks(int pid);
 
-}  // namespace zcode
+}  // namespace lycode

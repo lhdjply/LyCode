@@ -20,10 +20,10 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.fileviewer")
+Q_LOGGING_CATEGORY(log, "lycode.ui.fileviewer")
 
 /// 纯文本查看的上限。超过这个大小的文件用本对话框看没有意义
 /// （几十万行的日志），明确告知并引导用系统程序打开。
@@ -404,4 +404,4 @@ bool FileViewerDialog::eventFilter(QObject *watched, QEvent *event) {
     return QDialog::eventFilter(watched, event);
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

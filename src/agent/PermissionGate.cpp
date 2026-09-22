@@ -4,10 +4,10 @@
 
 #include <QLoggingCategory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.permission")
+Q_LOGGING_CATEGORY(log, "lycode.permission")
 
 /// 规则主体的归一：去掉首尾空白。
 /// 不做路径归一或大小写折叠——规则匹配必须是可预测的字面前缀比较，
@@ -18,9 +18,9 @@ QString normalizeSubject(const QString &subject) {
 
 /// 剥掉规则内容里的"任意后缀"通配，得到真正用于前缀比较的部分。
 ///
-/// 支持两种写法（与 npm 版的规则语法一致）：
-///   `npm run test:*` —— `:*` 表示"后面可以跟任意参数"，前缀是 `npm run test`
-///   `npm*`           —— 裸 `*` 同样作为通配后缀
+/// 支持两种写法（与 本实现的规则语法一致）：
+///   `make test:*` —— `:*` 表示"后面可以跟任意参数"，前缀是 `make test`
+///   `本实现*`           —— 裸 `*` 同样作为通配后缀
 /// 只剥一层：不能把 `test` 也吃掉，否则规则会匹配过宽。
 QString stripTrailingWildcard(const QString &ruleContent) {
     if (ruleContent.endsWith(QStringLiteral(":*"))) {
@@ -265,4 +265,4 @@ void PermissionGate::cancelAll(const QString &reason) {
     }
 }
 
-}  // namespace zcode
+}  // namespace lycode

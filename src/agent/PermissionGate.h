@@ -1,4 +1,4 @@
-// ZCode Qt — 权限门
+// LyCode — 权限门
 //
 // 职责边界（重要）：
 //   * PermissionGate 只负责「决策」：判断某次工具调用是否需要用户确认，
@@ -27,7 +27,7 @@
 
 #include "core/Types.h"
 
-namespace zcode {
+namespace lycode {
 
 /// 一次裁决的结果。
 struct PermissionOutcome {
@@ -98,9 +98,9 @@ public:
 
 signals:
     /// 需要用户裁决时发出；UI 连接它来弹窗。
-    void requested(const zcode::PermissionRequest &request);
+    void requested(const lycode::PermissionRequest &request);
     /// 裁决完成后发出，供 UI 收起弹窗（无论自动还是用户点击）。
-    void resolved(const zcode::Id &requestId, const zcode::PermissionOutcome &outcome);
+    void resolved(const lycode::Id &requestId, const lycode::PermissionOutcome &outcome);
 
 private:
     struct Pending {
@@ -113,6 +113,6 @@ private:
     QHash<Id, Pending> pending_;
 };
 
-}  // namespace zcode
+}  // namespace lycode
 
-Q_DECLARE_METATYPE(zcode::PermissionOutcome)
+Q_DECLARE_METATYPE(lycode::PermissionOutcome)

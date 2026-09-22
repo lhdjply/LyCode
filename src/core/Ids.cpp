@@ -2,7 +2,7 @@
 
 #include <QRandomGenerator>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
 /// RFC 4648 base32 小写字母表，去掉易混淆的填充符，共 32 个字符 = 5 bit/字符。
@@ -24,4 +24,4 @@ QString newId(const QString &prefix) {
     return prefix + QLatin1Char('_') + suffix;
 }
 
-}  // namespace zcode
+}  // namespace lycode

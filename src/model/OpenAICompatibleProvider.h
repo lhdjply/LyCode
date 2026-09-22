@@ -1,7 +1,7 @@
-// ZCode Qt — OpenAI Chat Completions 兼容流式 Provider
+// LyCode — OpenAI Chat Completions 兼容流式 Provider
 //
 // 面向 OpenAI 官方与一切兼容网关（自建代理、vLLM、DashScope 兼容模式等）。
-// 协议要点（对齐 npm 版）：
+// 协议要点（按既定语义）：
 //   POST {baseUrl}/chat/completions
 //   Authorization: Bearer <key>
 //   stream + stream_options.include_usage（否则拿不到流式 usage）
@@ -11,7 +11,7 @@
 
 class QNetworkAccessManager;
 
-namespace zcode {
+namespace lycode {
 
 class OpenAICompatibleProvider : public ModelProvider {
     Q_OBJECT
@@ -37,4 +37,4 @@ private:
     QNetworkAccessManager *network_ = nullptr;
 };
 
-}  // namespace zcode
+}  // namespace lycode

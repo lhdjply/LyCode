@@ -6,10 +6,10 @@
 
 #include <cmath>
 
-namespace zcode::json {
+namespace lycode::json {
 namespace {
 
-Q_LOGGING_CATEGORY(jsonLog, "zcode.json")
+Q_LOGGING_CATEGORY(jsonLog, "lycode.json")
 
 /// 统一记录类型不符，便于定位外部数据漂移。
 void reportTypeMismatch(const QString &key, const char *expected) {
@@ -165,4 +165,4 @@ QString truncate(const QString &value, int maxChars, const QString &marker) {
     return value.left(keep) + marker;
 }
 
-}  // namespace zcode::json
+}  // namespace lycode::json

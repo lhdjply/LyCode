@@ -1,12 +1,12 @@
-// ZCode Qt — 会话 todo 存储实现
+// LyCode — 会话 todo 存储实现
 #include "tools/TodoStore.h"
 
 #include <QLoggingCategory>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.tool.todo.store")
+Q_LOGGING_CATEGORY(log, "lycode.tool.todo.store")
 
 }  // namespace
 
@@ -40,4 +40,4 @@ void TodoStore::clear(const Id &sessionId) {
     store_.remove(sessionId);
 }
 
-}  // namespace zcode
+}  // namespace lycode

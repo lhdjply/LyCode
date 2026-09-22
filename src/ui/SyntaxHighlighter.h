@@ -1,4 +1,4 @@
-// ZCode Qt — 代码语法高亮
+// LyCode — 代码语法高亮
 //
 // 把一段代码转成带 `<span class="tok-*">` 的 HTML，供 Markdown 代码块与
 // 只读代码视图使用。
@@ -24,7 +24,7 @@
 #include <QString>
 #include <QStringList>
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 /// 语法高亮分词器。
 /// 着色用的颜色。由调用方（Markdown / 代码视图）从主题取，
@@ -95,4 +95,4 @@ public:
     static QStringList knownLanguages();
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

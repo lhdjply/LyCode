@@ -16,10 +16,10 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.toolcall")
+Q_LOGGING_CATEGORY(log, "lycode.ui.toolcall")
 
 /// 卡片内文本域的展示上限。超出部分靠滚动查看，不截断数据本身
 /// （数据仍在 ToolPart 里，只是不一次性塞进控件，避免卡顿）。
@@ -499,4 +499,4 @@ void ToolCallWidget::applyPart(const Part &part) {
     }
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

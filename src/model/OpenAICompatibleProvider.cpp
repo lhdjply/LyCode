@@ -1,4 +1,4 @@
-// ZCode Qt — OpenAI Chat Completions 兼容流式客户端实现
+// LyCode — OpenAI Chat Completions 兼容流式客户端实现
 //
 // 兼容范围：OpenAI 官方 /chat/completions，以及一切同形状网关
 // （自建代理、vLLM、DashScope 兼容模式等）。
@@ -25,10 +25,10 @@
 
 #include <algorithm>
 
-namespace zcode {
+namespace lycode {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.model.openai")
+Q_LOGGING_CATEGORY(log, "lycode.model.openai")
 
 constexpr int kTransferTimeoutMs = 600000;
 constexpr int kIdleTimeoutMs = 60000;
@@ -860,4 +860,4 @@ ModelInfo OpenAICompatibleProvider::modelInfo(const QString &modelId) const {
     return info;
 }
 
-}  // namespace zcode
+}  // namespace lycode

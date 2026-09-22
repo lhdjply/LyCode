@@ -1,8 +1,8 @@
-// ZCode Qt — Agent 运行时
+// LyCode — Agent 运行时
 //
-// 这是把 npm 版 turn 循环用 C++ 重写的核心。与 npm 版的结构对应关系：
+// 这是把 本实现 turn 循环用 C++ 重写的核心。与 本实现的结构对应关系：
 //
-//   npm                                        Qt
+//   本实现                                        Qt
 //   ─────────────────────────────────────────  ──────────────────────────────
 //   TurnMachine（相位机）                       内部 TurnPhase + advanceTo()
 //   runRegularTurnLoop                        runModelStep() ↔ runToolQueue()
@@ -17,8 +17,8 @@
 // 单线程。所有会话状态只属于本对象，只在 GUI 线程访问，因此不需要锁。
 // 网络流（ModelStream）与子进程（QProcess）都是异步的，用信号回到本线程。
 //
-// ── 终止条件（与 npm 版一致）──────────────────────────────────────────────
-// 主循环**没有 maxSteps / maxTurns 硬停止**（这是 npm 版的既定设计：
+// ── 终止条件（按既定语义）──────────────────────────────────────────────
+// 主循环**没有 maxSteps / maxTurns 硬停止**（这是 本实现的既定设计：
 // 用工具调用次数做硬停止会让复杂任务被无故截断）。真实边界是：
 //   1. 模型返回无工具调用的最终文本  → 正常完成
 //   2. 工具结果要求终止本轮（stopTurnAfterResult）
@@ -40,12 +40,12 @@
 #include "tools/SubagentHost.h"
 #include "tools/Tool.h"
 
-namespace zcode {
+namespace lycode {
 
 class ProviderRegistry;
 class ModelStream;
 
-/// turn 相位。取值与 npm 的 turn-state.ts 对齐。
+/// turn 相位。取值turn-state.ts 对齐。
 enum class TurnPhase {
     Idle,
     ProcessingInput,
@@ -197,40 +197,40 @@ public:
     /// 设为很大是为了不成为常规任务的瓶颈，只用于防御失控循环。
     static constexpr int kMaxModelStepsPerTurn = 200;
 
-    /// 同一组内并行执行的上限。与 npm 的 ToolScheduler 默认 maxConcurrency 一致。
+    /// 同一组内并行执行的上限。ToolScheduler 默认 maxConcurrency 一致。
     static constexpr int kMaxToolConcurrency = 10;
 
     /// 子代理的模型步上限。
     ///
-    /// npm 的子代理 `maxTurns` 默认 4；它按"turn"计数（一次模型响应 + 其工具批），
+    /// 本实现的子代理 `maxTurns` 默认 4；它按"turn"计数（一次模型响应 + 其工具批），
     /// 本实现按"模型步"计数（一步 = 一次模型响应）。一次工具往返需要两步
     /// （请求工具 + 消化结果），所以 4 轮工具往返约等于 12 步，取 12 作为等价上限。
     /// 目的是给子代理一个明确的边界，避免它无限自我消耗。
     static constexpr int kDefaultSubagentMaxModelSteps = 12;
 
 signals:
-    void sessionChanged(const zcode::Session &session);
+    void sessionChanged(const lycode::Session &session);
     /// 子代理的会话状态变化。与 sessionChanged 刻意分开：
     /// 接收方对 sessionChanged 的反应是"切换到该会话"，
     /// 而子会话只应出现在列表里，绝不能抢走当前会话。
-    void subagentSessionChanged(const zcode::Session &session);
+    void subagentSessionChanged(const lycode::Session &session);
     /// 子代理结束（用于 UI 更新列表里的状态）。
-    void subagentFinished(const zcode::Id &childSessionId, bool ok);
+    void subagentFinished(const lycode::Id &childSessionId, bool ok);
     /// 后台任务集合发生变化（新增/结束/停止）。UI 据此刷新计数。
     void backgroundTasksChanged(int runningCount);
     /// 模型生成的标题已应用（成功时才发）。
-    void titleGenerated(const zcode::Id &sessionId, const QString &title);
-    void messageAdded(const zcode::Message &message);
-    void partAppended(const zcode::Id &messageId, const zcode::Part &part);
-    void partUpdated(const zcode::Id &messageId, const zcode::Part &part);
+    void titleGenerated(const lycode::Id &sessionId, const QString &title);
+    void messageAdded(const lycode::Message &message);
+    void partAppended(const lycode::Id &messageId, const lycode::Part &part);
+    void partUpdated(const lycode::Id &messageId, const lycode::Part &part);
     /// 流式文本增量。`reasoning` 为 true 表示这是思考内容。
-    void deltaAppended(const zcode::Id &messageId, const zcode::Id &partId,
+    void deltaAppended(const lycode::Id &messageId, const lycode::Id &partId,
                        const QString &delta, bool reasoning);
-    void messageFinished(const zcode::Message &message);
-    void permissionRequested(const zcode::PermissionRequest &request);
-    void permissionResolved(const zcode::Id &requestId);
-    void runStateChanged(zcode::RunState state);
-    void turnFinished(zcode::TurnResult result);
+    void messageFinished(const lycode::Message &message);
+    void permissionRequested(const lycode::PermissionRequest &request);
+    void permissionResolved(const lycode::Id &requestId);
+    void runStateChanged(lycode::RunState state);
+    void turnFinished(lycode::TurnResult result);
     /// 面向用户的失败提示（已本地化）。
     void failed(const QString &message);
 
@@ -261,7 +261,7 @@ private:
 
     /// 把待投递的后台任务完成通知注入上下文。
     /// 在每次模型步开始前调用：这样任务结束时如果正在跑 turn，模型能在下一步
-    /// 就看到结果；如果当时空闲，则在下一次输入的首次模型步看到（与 npm 一致）。
+    /// 就看到结果；如果当时空闲，则在下一次输入的首次模型步看到（语义一致）。
     void drainBackgroundNotifications();
 
     /// 把尚未终结的调用标记为取消（中断或提前终止时）。
@@ -335,7 +335,7 @@ private:
     QList<ToolBatch> batches_;
     int batchCursor_ = 0;
     /// 当前组内尚未终结的调用数。归零才推进下一组——这保证
-    /// stopTurnAfterResult 不会打断同组的兄弟调用（npm 的 batch-runner 同语义）。
+    /// stopTurnAfterResult 不会打断同组的兄弟调用（本实现的 batch-runner 同语义）。
     int batchPending_ = 0;
     int modelStepCount_ = 0;
     int toolCallCount_ = 0;
@@ -379,8 +379,8 @@ private:
     std::shared_ptr<std::atomic_bool> cancelFlag_;
 };
 
-}  // namespace zcode
+}  // namespace lycode
 
-Q_DECLARE_METATYPE(zcode::TurnPhase)
-Q_DECLARE_METATYPE(zcode::RunState)
-Q_DECLARE_METATYPE(zcode::TurnResult)
+Q_DECLARE_METATYPE(lycode::TurnPhase)
+Q_DECLARE_METATYPE(lycode::RunState)
+Q_DECLARE_METATYPE(lycode::TurnResult)

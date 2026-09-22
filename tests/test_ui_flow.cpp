@@ -1,4 +1,4 @@
-// ZCode Qt — 界面级端到端测试
+// LyCode — 界面级端到端测试
 //
 // 这是最接近"用户真实操作"的一层验证：构造真正的 MainWindow，通过公开的
 // Qt 控件 API 输入文本、点击发送、等待权限弹窗、点击"允许一次"，
@@ -62,14 +62,14 @@
 #include "ui/SidebarPanel.h"
 #include "ui/ToolCallWidget.h"
 
-using namespace zcode;
-using namespace zcode::ui;
-using zcode::test::FakeGateway;
-using zcode::test::jsonEscape;
-using zcode::test::multiToolCallResponse;
-using zcode::test::textResponse;
-using zcode::test::textResponseWithCache;
-using zcode::test::toolCallResponse;
+using namespace lycode;
+using namespace lycode::ui;
+using lycode::test::FakeGateway;
+using lycode::test::jsonEscape;
+using lycode::test::multiToolCallResponse;
+using lycode::test::textResponse;
+using lycode::test::textResponseWithCache;
+using lycode::test::toolCallResponse;
 
 namespace {
 
@@ -183,14 +183,14 @@ void TestUiFlow::initTestCase() {
     file.close();
 
     // MainWindow 在构造时读这个环境变量决定数据根，所以必须在构造之前设置。
-    qputenv("ZCODE_DATA_BASE_DIR", dataDir_->path().toUtf8());
+    qputenv("LYCODE_DATA_BASE_DIR", dataDir_->path().toUtf8());
 }
 
 /// 按账本清掉仍然存活的后台任务进程。
 /// 后台任务的析构语义是"放它活过宿主"，所以测试必须自己收尾，
 /// 否则每跑一次测试就漏一个 sleep 进程。
 static void killLedgerTasks() {
-    QFile ledger(zcode::BackgroundTaskRegistry::ledgerPath());
+    QFile ledger(lycode::BackgroundTaskRegistry::ledgerPath());
     if (!ledger.open(QIODevice::ReadOnly)) {
         return;
     }
@@ -212,7 +212,7 @@ static void killLedgerTasks() {
 
 void TestUiFlow::cleanupTestCase() {
     killLedgerTasks();
-    qunsetenv("ZCODE_DATA_BASE_DIR");
+    qunsetenv("LYCODE_DATA_BASE_DIR");
     dataDir_.reset();
     gateway_.reset();
 }
@@ -221,12 +221,12 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     // ── 第 1 轮：模型要求执行 Bash；第 2 轮：模型给出最终回复 ──────────────
     // 传**原始 JSON**：toolCallResponse 负责转义（转义只做一次）。
     gateway_->enqueue(toolCallResponse(QStringLiteral("Bash"),
-                                       R"({"command":"echo hello-from-zcode")", "}"));
+                                       R"({"command":"echo hello-from-lycode")", "}"));
     // 第二轮故意带缓存用量：prompt 1000 里有 750 命中缓存。
     // 用于端到端验证"SSE → provider 口径归一 → 用量累加 → 状态栏文案"整条链路。
     gateway_->enqueue(textResponseWithCache(
-        "命令已执行，输出是 hello-from-zcode。\\n\\n### 结论\\n\\n- 工具调用成功\\n- "
-        "权限确认生效\\n\\n```bash\\necho hello-from-zcode\\n```",
+        "命令已执行，输出是 hello-from-lycode。\\n\\n### 结论\\n\\n- 工具调用成功\\n- "
+        "权限确认生效\\n\\n```bash\\necho hello-from-lycode\\n```",
         1000, 750, 40));
 
     MainWindow window;

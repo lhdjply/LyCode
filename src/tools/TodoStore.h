@@ -1,4 +1,4 @@
-// ZCode Qt — 会话 todo 存储
+// LyCode — 会话 todo 存储
 //
 // todo 的唯一所有者是「会话」而不是工具实例：TodoWrite 工具可能被重新创建
 // （换注册表、别名覆盖），若把状态放在工具里，会话一换就会丢。
@@ -15,9 +15,9 @@
 
 #include "core/Types.h"
 
-namespace zcode {
+namespace lycode {
 
-/// 一条 todo。字段与 npm 版 todo 条目对齐：
+/// 一条 todo。字段与 本实现 todo 条目对齐：
 /// `{content, status, priority}`，status/priority 用字面量而不是枚举，
 /// 因为工具入参、UI 过滤、持久化三处都要用到同一套字符串，避免来回转换。
 struct TodoItem {
@@ -49,4 +49,4 @@ private:
     QHash<Id, QList<TodoItem>> store_;
 };
 
-}  // namespace zcode
+}  // namespace lycode

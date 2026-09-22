@@ -36,10 +36,10 @@
 #include <algorithm>
 #include <utility>
 
-namespace zcode::ui {
+namespace lycode::ui {
 namespace {
 
-Q_LOGGING_CATEGORY(log, "zcode.ui.dialogs")
+Q_LOGGING_CATEGORY(log, "lycode.ui.dialogs")
 
 /// Provider 列表固定宽度：右栏表单需要剩余全部横向空间，左栏只做选择。
 constexpr int kProviderListWidth = 196;
@@ -1255,7 +1255,7 @@ namespace {
 ///
 /// 做成一个独立的小对话框而不是就地编辑：服务器有 5 个字段（含多行的
 /// args/env），塞进表格单元格里编辑会非常难受。
-bool editServerDialog(QWidget *parent, zcode::mcp::ServerConfig *server, bool isNew) {
+bool editServerDialog(QWidget *parent, lycode::mcp::ServerConfig *server, bool isNew) {
     QDialog dialog(parent);
     dialog.setWindowTitle(isNew ? QStringLiteral("添加 MCP 服务器")
                                 : QStringLiteral("编辑 MCP 服务器"));
@@ -1410,7 +1410,7 @@ QWidget *SettingsDialog::buildIntegrationsPage() {
 
     auto *skillsHint = new QLabel(QStringLiteral(
         "在这些目录下发现 <名称>/SKILL.md 或 <名称>.md。留空表示使用默认目录："
-        "用户级 <数据根>/qt/skills，以及当前工作区的 .zcode/skills。"));
+        "用户级 <数据根>/qt/skills，以及当前工作区的 .lycode/skills。"));
     skillsHint->setWordWrap(true);
     skillsHint->setFont(Theme::instance().font(FontRole::UiXs));
     layout->addWidget(skillsHint);
@@ -1808,4 +1808,4 @@ void SettingsDialog::refreshTokenStyles() {
     }
 }
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui

@@ -1,6 +1,6 @@
-# ZCode Qt
+# LyCode
 
-ZCode 的 **Qt6 / C++ 原生桌面实现**。基于同目录下的 [ZCode-npm](../ZCode-npm)（TypeScript + Electron 版）的设计规范与 Agent 语义重写。
+**LyCode** —— 一个 Qt6 / C++ 原生桌面编码代理：工作区与会话管理、流式对话、工具调用与权限确认、子 Agent、后台任务、MCP、Skills、语法高亮。
 
 - **UI**：Qt Widgets（不是 QML —— 本机只安装了 `qt6-base-dev`，且 Widgets 对自绘对话流／工具卡片更可控）
 - **构建**：CMake + Ninja，C++20
@@ -8,9 +8,7 @@ ZCode 的 **Qt6 / C++ 原生桌面实现**。基于同目录下的 [ZCode-npm](.
 
 ---
 
-## 与 npm 版的关系
-
-npm 版是一个约 90 万行的 TypeScript monorepo。Qt 版**不是**它的包装层，而是用 C++ 重新实现了同一套产品语义。
+## 与 本实现的关系
 
 重写时严格保留的东西：
 
@@ -19,15 +17,14 @@ npm 版是一个约 90 万行的 TypeScript monorepo。Qt 版**不是**它的包
 | **词表** | 会话模式 `plan/build/edit/yolo/auto`、工具状态六态、权限决策 `allow/deny/escalate/modify`、风险四档、失败原因码等全部照抄，保证术语与文案不分叉 |
 | **工具策略** | 完全由声明式 `ToolMetadata` 驱动（`readOnly`/`destructive`/`concurrentSafe`/`sideEffectScope`/`riskLevel`/`needsApproval`/`alwaysAsk`/`stopTurnOnSuccess`）。调度器与权限服务**从不按工具名猜测行为** |
 | **权限判定** | 保留固定判定链：显式规则 → bypass → plan 只读 → 只读直通 → 模式策略 → 询问用户 |
-| **设计令牌** | 直接取原版生效主题 `zai-light`/`zai-dark` 的 CSS 变量值（`packages/ui/src/styles.css`），字号走 `text-ui-*` 阶梯 |
+| **设计令牌** | 四套变量集（default-light / dark / zai-light / zai-dark）以 CSS 变量名与十六进制值固化在 `Theme.cpp`，字号走 `text-ui-*` 阶梯 |
 | **系统提示词** | 分段顺序固定（身份 → 环境 → 工具规范 → 模式约束 → 项目说明），且**工具 schema 只走 provider 的 `tools` 字段，不镜像进提示词** |
 
 有意偏离的东西：
 
-| 维度 | npm 版 | Qt 版 | 原因 |
+| 维度 | 本实现 | 本实现 | 原因 |
 | --- | --- | --- | --- |
-| 对话数据模型 | V4 `row` + `snapshot` + `delta`（扁平行 + 日志 + 窗口） | `Message` + `Part` 树 | V4 的 row/delta 机制是为**跨进程 wire 的断线重放**服务的。Qt 版把运行时与 UI 放在同一进程，没有 wire，重放机制没有收益，只会引入无谓复杂度 |
-| 进程边界 | Electron main ↔ Host ↔ CLI 三层 | 单进程 | 同上 |
+| 对话数据模型 | V4 `row` + `snapshot` + `delta`（扁平行 + 日志 + 窗口） | `Message` + `Part` 树 | V4 的 row/delta 机制是为**跨进程 wire 的断线重放**服务的。本实现把运行时与 UI 放在同一进程，没有 wire，重放机制没有收益，只会引入无谓复杂度 |
 | 增量投递 | logEpoch + seq + 快照/增量重放 | Qt 信号 | 同进程内直接用信号，无需序列号与重放 |
 | 输入排队 | `CommandInbox` 串行 admission | UI 层职责 | 运行时只保证"一次只有一个 turn"，排队交给 UI（当前 UI 直接拒绝运行中的提交） |
 
@@ -54,18 +51,18 @@ sudo apt install qt6-base-dev qt6-base-dev-tools qt6-tools-dev cmake ninja-build
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
-./build/zcode-qt
+./build/lycode
 ```
 
-**构建产物只有 `build/zcode-qt` 一个可执行文件**，没有中间静态库：业务逻辑放在一个 `OBJECT` 库（`zcode_lib`）里，它的 `.o` 直接参与链接。之所以还保留这个独立目标，是为了让测试与可执行文件**共享同一份编译结果**——若把源码直接塞进可执行目标，每个测试都要把几十个翻译单元重编一遍，构建时间会明显变长；而 `OBJECT` 库不产生归档文件，所以两者兼得。
+**构建产物只有 `build/lycode` 一个可执行文件**，没有中间静态库：业务逻辑放在一个 `OBJECT` 库（`lycode_lib`）里，它的 `.o` 直接参与链接。之所以还保留这个独立目标，是为了让测试与可执行文件**共享同一份编译结果**——若把源码直接塞进可执行目标，每个测试都要把几十个翻译单元重编一遍，构建时间会明显变长；而 `OBJECT` 库不产生归档文件，所以两者兼得。
 
 
-`--verbose` 打开 debug 级日志。日志与数据都在 `~/.zcode/qt/`（可用 `ZCODE_DATA_BASE_DIR` 覆盖根目录）：
+`--verbose` 打开 debug 级日志。日志与数据都在 `~/.lycode/qt/`（可用 `LYCODE_DATA_BASE_DIR` 覆盖根目录）：
 
 ```
-~/.zcode/qt/settings.json   应用配置（Provider、主题、字号、最近工作区）
-~/.zcode/qt/sessions.db     会话与消息（SQLite，WAL 模式）
-~/.zcode/qt/logs/zcode-qt.log
+~/.lycode/qt/settings.json   应用配置（Provider、主题、字号、最近工作区）
+~/.lycode/qt/sessions.db     会话与消息（SQLite，WAL 模式）
+~/.lycode/qt/logs/lycode.log
 ```
 
 ### 测试
@@ -97,11 +94,11 @@ ctest --test-dir build --output-on-failure
 2. **主窗口从未注册内置工具**。`ToolRegistry` 默认构造是空的，漏掉 `createWithBuiltins()` 的表现是模型收到零个工具、所有工具调用报 `tool_not_found`，没有任何启动期报错。
 3. **正文完全不可见**。`QTextBrowser` 的高度是手动算一次再 `setFixedHeight` 的，但构造期文档还没按最终宽度排版，`document()->size()` 返回 0，控件被永久锁成 4px。改为由 `documentSizeChanged` 驱动高度。
 4. **用户中断被当成故障**。用户点"停止"时 provider 以"请求已取消"收尾，原先被映射为 `TurnResult::Failed`（UI 报错、会话进入 Error）。现在识别 `abortRequested_` 并归为 `Interrupted`。
-5. **合成的工具结果轮被显示成用户消息**。工具输出已经渲染在工具卡片里，重复展示会多出一条用户从未说过的"你"的消息。新增 `Message::modelOnly`（对应 npm 的 `visibility: "model-only"`）并在对话流中跳过。
+5. **合成的工具结果轮被显示成用户消息**。工具输出已经渲染在工具卡片里，重复展示会多出一条用户从未说过的"你"的消息。新增 `Message::modelOnly`（对应 `visibility: "model-only"`）并在对话流中跳过。
 6. **新建会话无法落盘**（`NOT NULL constraint failed: session.title`）。默认构造的 `QString` 是 *null* 而不只是空，`QSQLITE` 会把它绑成 SQL NULL。为 NOT NULL 文本列加了统一的归一绑定。
-7. **日志过滤规则被 Qt 静默忽略**。`zcode.*=info` 不是合法语法（type 只能是 debug/info/warning/critical），整条规则被判为 malformed，结果是非 verbose 模式也输出 debug 日志。
+7. **日志过滤规则被 Qt 静默忽略**。`lycode.*=info` 不是合法语法（type 只能是 debug/info/warning/critical），整条规则被判为 malformed，结果是非 verbose 模式也输出 debug 日志。
 8. **工具 schema 一度被复制进系统提示词**。这违反"schema 只走 provider 的 `tools` 字段"的既定约束，会造成两处定义漂移。已改为只写跨工具的行为准则。
-9. **`prefix:*` 规则匹配过窄**。`stripTrailingWildcard` 原来只剥裸 `*`，导致 `npm:*` 变成 `npm:`，匹配不到 `npm install`。现在同时识别 `:*` 写法。
+9. **`prefix:*` 规则匹配过窄**。`stripTrailingWildcard` 原来只剥裸 `*`，导致 `make:*` 变成 `make:`，匹配不到 `make install`。现在同时识别 `:*` 写法。
 10. **侧边栏工作区行被裁切**（用户报告："左上角新建会话上面显示不全"）。原因是我把 `QVBoxLayout` 塞进了 `QPushButton` 来承载「名称 + 路径」两行，而 `QPushButton` 的 `sizeHint` 只按自身文本计算，子控件被裁掉。改为：按钮只承担名称与键盘可达性，路径另用一个可点标签承载，并按标签宽度做中间省略。
 11. **会话列表项被撑成十几行高**。消息正文是 Markdown 源，直接当摘要塞进列表项会带出 `###`、列表符号和换行。改为统一经 `Markdown::toPlainPreview` 折叠成单行纯文本。
 
@@ -149,16 +146,16 @@ ctest --test-dir build --output-on-failure
 | **输出去哪** | 边读边落盘到 `<数据根>/qt/tasks/<task_id>.log`，内存只保留 **8 KiB 尾部预览**。后台任务可能产出几十 MB，全留在内存里会撑爆 |
 | **完成通知** | 任务在 turn 之外异步结束，模型不会自己知道。注册表在结束时生成一条 `<task-notification>`，由运行时注入下一轮上下文 |
 
-配套的两个工具（别名与 npm 对齐）：
+配套的两个工具（别名按既定语义）：
 
 | 工具 | 别名 | 作用 |
 | --- | --- | --- |
 | `TaskOutput` | `BashOutput` / `AgentOutput` | 读任务状态与输出；`block=true`（默认）会等到任务结束，`timeout` 上限 600s |
 | `TaskStop` | `KillBash` / `KillShell` | 终止任务，或查询一个已结束任务的状态 |
 
-通知的投递时机与 npm 一致：**每次模型步开始前**投递。任务结束时如果正在跑 turn，模型在下一步就看到；如果当时空闲，则在下一次输入的首次模型步看到。通知是一条 `modelOnly` 消息，UI 不会把它显示成用户说过的话。
+通知的投递时机语义一致：**每次模型步开始前**投递。任务结束时如果正在跑 turn，模型在下一步就看到；如果当时空闲，则在下一次输入的首次模型步看到。通知是一条 `modelOnly` 消息，UI 不会把它显示成用户说过的话。
 
-通知的形状与 npm 的 `<task-notification>` 同形，便于模型稳定解析：
+通知的形状`<task-notification>` 同形，便于模型稳定解析：
 
 ```xml
 <task-notification>
@@ -166,7 +163,7 @@ ctest --test-dir build --output-on-failure
 <task-type>bash</task-type>
 <status>completed</status>
 <exit-code>0</exit-code>
-<output-path>/home/u/.zcode/qt/tasks/task_xxx.log</output-path>
+<output-path>/home/u/.lycode/qt/tasks/task_xxx.log</output-path>
 <bytes>1234</bytes>
 <duration-ms>2013</duration-ms>
 <output-tail>…输出尾部…</output-tail>
@@ -177,7 +174,7 @@ ctest --test-dir build --output-on-failure
 
 #### 超时自动后台化
 
-前台命令超时**不再一律杀掉**：有后台任务支持时，它会被自动转入后台，把控制权还给模型，让它去做别的事、稍后再用 `TaskOutput` 读结果（对应 npm 的 `assistantAutoBackgrounded`）。结果里会带 `assistantAutoBackgrounded: true`，与模型/用户显式要求后台化的情形区分开。
+前台命令超时**不再一律杀掉**：有后台任务支持时，它会被自动转入后台，把控制权还给模型，让它去做别的事、稍后再用 `TaskOutput` 读结果（对应 `assistantAutoBackgrounded`）。结果里会带 `assistantAutoBackgrounded: true`，与模型/用户显式要求后台化的情形区分开。
 
 转交时要处理三件事，缺一不可：停掉前台定时器（否则中断轮询会杀掉一个已经归后台所有的进程）、断开前台挂在该进程上的全部处理器（否则前台读取器继续抢输出，`finished` 处理器还会 `deleteLater` 掉一个已经不属于它的进程）、把前台已读到的输出带进后台记录（历史不丢）。
 
@@ -213,7 +210,7 @@ ctest --test-dir build --output-on-failure
 
 ### 子 Agent
 
-`Agent` 工具（别名 `Task`，与 npm 的 Claude Code 兼容别名一致）把一个自包含的子任务交给
+`Agent` 工具（别名 `Task`，Claude Code 兼容别名一致）把一个自包含的子任务交给
 **独立的子会话**去做。全部价值在上下文隔离：子代理跑十几轮工具调用的中间过程不会污染父代理的
 上下文，父代理只拿到一段结论加一行用量摘要。
 
@@ -239,7 +236,7 @@ ctest --test-dir build --output-on-failure
 `Explore` 是**两道独立闸门**：白名单让模型从一开始就看不到写工具，同时子会话跑在 `Plan` 模式下，
 即使模型凭历史记忆直接调用写操作也会被运行时拒绝（返回 `tool_not_allowed`）。
 
-关于步数上限：npm 的子代理 `maxTurns` 默认 4，按"turn"计数（一次模型响应 + 它的工具批）；
+关于步数上限：本实现的子代理 `maxTurns` 默认 4，按"turn"计数（一次模型响应 + 它的工具批）；
 本实现按"模型步"计数（一步 = 一次模型响应），一次工具往返需要两步，所以 4 轮工具往返约等于
 12 步，取 12 作为等价上限。触及上限时会在回传内容里带上 `<warning>`，让父代理知道结论可能不完整。
 
@@ -327,7 +324,7 @@ Skill 是一份**可复用的指令包**：一个目录里放 `SKILL.md`，带 n
 
 ```
 <数据根>/qt/skills/pdf/SKILL.md     ← 用户级
-<工作区>/.zcode/skills/pdf/SKILL.md ← 项目级（同名时覆盖用户级）
+<工作区>/.lycode/skills/pdf/SKILL.md ← 项目级（同名时覆盖用户级）
 ```
 
 ```markdown
@@ -398,7 +395,7 @@ Markdown 代码块里的代码会着色：注释、字符串、关键字、类�
 
 **颜色走内联 `style` 而不是 CSS 类**——这一点是实测出来的：Qt 富文本的 CSS（`QTextDocument::setDefaultStyleSheet`）对选择器支持很窄，`span.tok-keyword { color: … }` 和 `.tok-keyword { … }` **都不生效**，而同文件里 `pre.code`、`div.code-block` 这类元素+类选择器是生效的。与其继续试探选择器形状，不如把颜色写进 span 的内联样式。`class` 仍然保留，供识别与测试使用。
 
-另外，语法配色**不是** npm 的设计令牌——npm 的 UI 变量里没有语法配色（Diff 那组是唯一例外）。这里用的是编辑器风格的常用取值（One Light / One Dark 一族），挑选标准是与本主题代码背景的对比度、以及彼此色相可区分。
+另外，语法配色**不是** 本实现的设计令牌——本实现的 UI 变量里没有语法配色（Diff 那组是唯一例外）。这里用的是编辑器风格的常用取值（One Light / One Dark 一族），挑选标准是与本主题代码背景的对比度、以及彼此色相可区分。
 
 ### 点击查看文件与图片
 
@@ -467,7 +464,7 @@ Markdown 代码块里的代码会着色：注释、字符串、关键字、类�
 左侧是两层树：顶层是工作区，子节点是它的会话。
 
 ```
-▾ ZCode-qt                    ← 工作区（可折叠）
+▾ LyCode-qt                    ← 工作区（可折叠）
     run echo test
     核对日志
       子代理 · 子代理结论：没有异常。
@@ -510,7 +507,7 @@ Markdown 代码块里的代码会着色：注释、字符串、关键字、类�
 侧边栏顶部的工作区按钮点开后，**每个工作区一个子菜单**（不是平铺的一串条目——一个菜单项只能有一个触发动作，而每个工作区有三件事要做）：
 
 ```
-当前：ZCode-qt  —  /home/u/ZCode-qt ▸  ├ 从最近列表移除
+当前：LyCode-qt  —  /home/u/LyCode-qt ▸  ├ 从最近列表移除
                                        └ 删除该工作区的全部会话…
 ─────────────
 other-project  —  /home/u/other   ▸  ├ 打开
@@ -545,7 +542,7 @@ other-project  —  /home/u/other   ▸  ├ 打开
 
 ### 工具并行调度
 
-同一次模型响应里可能要求多个工具调用。调度规则照搬 npm 的 `ToolScheduler` + `batch-runner`：
+同一次模型响应里可能要求多个工具调用。调度规则本实现的 `ToolScheduler` + `batch-runner`：
 
 ```
 调用序列（模型给出的顺序）:  Read   Grep   Write   Read   Edit
@@ -557,16 +554,16 @@ other-project  —  /home/u/other   ▸  ├ 打开
 | 规则 | 说明 |
 | --- | --- |
 | 组内并行、组间串行 | 同一组内同时执行，上一组全部结束才开下一组 |
-| 组内上限 | `kMaxToolConcurrency = 10`（与 npm 的默认 `maxConcurrency` 一致） |
+| 组内上限 | `kMaxToolConcurrency = 10`（与 本实现的默认 `maxConcurrency` 一致） |
 | 独占组 | `canRunInParallel() == false` 的工具单独成组，与前后调用形成串行屏障 |
 | 终止语义 | 某调用要求终止本轮时，**等同组兄弟全部结束**再中断后续组 |
 | 失败不截断 | 一个工具失败只影响它自己的结果，后续组照常执行 |
 
-**并发策略是三态**（`ToolMetadata::Concurrency`）：`Safe` / `Serial` / `Unspecified`。这一点很关键——npm 里 `concurrentSafe` 是 `boolean | undefined`，用 C++ 的 `bool` 会把"显式声明必须串行"和"未声明"混为一谈，于是显式声明串行的**只读**工具会被"只读且无副作用 ⇒ 可并发"的豁免分支错误放行。这个缺陷是在写并行测试时被真实暴露出来的。
+**并发策略是三态**（`ToolMetadata::Concurrency`）：`Safe` / `Serial` / `Unspecified`。这一点很关键——本实现里 `concurrentSafe` 是 `boolean | undefined`，用 C++ 的 `bool` 会把"显式声明必须串行"和"未声明"混为一谈，于是显式声明串行的**只读**工具会被"只读且无副作用 ⇒ 可并发"的豁免分支错误放行。这个缺陷是在写并行测试时被真实暴露出来的。
 
 内置工具的分类：`Read` / `Glob` / `Grep` / `TodoRead` 可并发；`Bash` / `Write` / `Edit` / `TodoWrite` 串行（`Bash` 破坏性，`TodoWrite` 虽然 `readOnly` 但会写会话状态）。
 
-与 npm 的差异：npm 的调度器还做依赖图的拓扑排序，因为工具可以声明 `dependencies`。本实现的工具不声明依赖，顺序约束只来自模型给出的调用次序，所以"顺序扫描 + 独占组"就是完整语义，不需要拓扑排序。
+与 本实现的差异：本实现的调度器还做依赖图的拓扑排序，因为工具可以声明 `dependencies`。本实现的工具不声明依赖，顺序约束只来自模型给出的调用次序，所以"顺序扫描 + 独占组"就是完整语义，不需要拓扑排序。
 
 **结果顺序与完成顺序无关**：回灌给模型的工具结果始终按模型给出的调用次序排列，所以并行不会让对话历史变得不确定。
 
@@ -703,7 +700,7 @@ tests/          11 个套件（领域模型、权限链、Markdown、调度、Di
 - 用量明细：缓存命中率 / 未缓存 / 缓存读 / 输出（两种协议的 token 口径已归一）
 - 会话持久化（SQLite，含 `sequence` 幂等语义）
 - 系统提示词组装（含 `AGENTS.md` 逐级向上查找、项目上下文探测）
-- 主题令牌（原版 `zai-light`/`zai-dark` 真实取色）+ 完整 QSS
+- 主题令牌（`zai-light` / `zai-dark` 两套生效配色）+ 完整 QSS
 - 界面：工作区/会话列表、流式对话流、Markdown（标题/代码块/表格/引用/任务列表）、工具调用卡片、权限确认弹窗、设置页、菜单与快捷键
 - 单元测试
 
@@ -735,4 +732,4 @@ tests/          11 个套件（领域模型、权限链、Markdown、调度、Di
 
 ## 许可
 
-与原项目一致，见 [LICENSE](../ZCode-npm/LICENSE)。
+见仓库根目录的 LICENSE。

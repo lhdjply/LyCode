@@ -1,4 +1,4 @@
-// ZCode Qt — 主窗口
+// LyCode — 主窗口
 //
 // 主窗口同时是**组装点**：它持有会话存储、工具注册表、Provider 注册表、
 // todo 存储与 AgentRuntime，并把 UI 与运行时用信号连起来。
@@ -41,7 +41,7 @@ class QPushButton;
 class QSplitter;
 class QTimer;
 
-namespace zcode::ui {
+namespace lycode::ui {
 
 class ConversationView;
 class SidebarPanel;
@@ -89,8 +89,8 @@ private slots:
     void onTurnFinished(TurnResult result);
     void onFailed(const QString &message);
     /// 子代理的会话状态变化：只更新列表，**不切换**当前会话。
-    void onSubagentSessionChanged(const zcode::Session &session);
-    void onSubagentFinished(const zcode::Id &childSessionId, bool ok);
+    void onSubagentSessionChanged(const lycode::Session &session);
+    void onSubagentFinished(const lycode::Id &childSessionId, bool ok);
     /// 后台任务数量变化：状态栏给出可见提示，否则用户不知道有进程还在跑。
     void onBackgroundTasksChanged(int runningCount);
     /// MCP 服务器就绪/失败时刷新状态提示。
@@ -180,9 +180,9 @@ private:
     QLabel *backgroundLabel_ = nullptr;
     QLabel *mcpLabel_ = nullptr;
     /// MCP 服务器集合。启动时按配置拉起，工具直接注册进 tools_。
-    std::unique_ptr<zcode::mcp::Manager> mcp_;
+    std::unique_ptr<lycode::mcp::Manager> mcp_;
     /// Skills 库。扫描一次，注入运行时；换工作区时重扫。
-    zcode::skills::Library skills_;
+    lycode::skills::Library skills_;
     /// 为 MCP 握手等待用户输入的计时与状态。
     QElapsedTimer mcpWaitElapsed_;
     bool mcpWaitPending_ = false;
@@ -192,4 +192,4 @@ private:
     QElapsedTimer turnTimer_;
 };
 
-}  // namespace zcode::ui
+}  // namespace lycode::ui
