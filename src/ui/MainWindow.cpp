@@ -65,24 +65,58 @@ QString runStateText(RunState state) {
     return QStringLiteral("就绪");
 }
 
+/// 状态栏用的紧凑 token 数：用 k/M 缩写，原始数字在 tooltip 里给全。
+/// 超过 100 万时用 M：1000000 写成 "1000.0k" 既长又难读，写成 "1.0M" 一眼就懂。
+QString compactTokens(int value) {
+    if (value >= 1000000) {
+        return QStringLiteral("%1M").arg(value / 1000000.0, 0, 'f', 1);
+    }
+    if (value >= 1000) {
+        return QStringLiteral("%1k").arg(value / 1000.0, 0, 'f', 1);
+    }
+    return QString::number(value);
+}
+
 QString contextUsageText(const QJsonObject &usage) {
     const int used = json::integer(usage, QStringLiteral("usedTokens"));
     const int max = json::integer(usage, QStringLiteral("maxTokens"));
     if (max <= 0) {
         return {};
     }
-    // 用 k/M 缩写而不是原始数字，状态栏空间有限。
-    // 超过 100 万时用 M：1000000 写成 "1000.0k" 既长又难读，写成 "1.0M" 一眼就懂。
-    const auto compact = [](int value) {
-        if (value >= 1000000) {
-            return QStringLiteral("%1M").arg(value / 1000000.0, 0, 'f', 1);
-        }
-        if (value >= 1000) {
-            return QStringLiteral("%1k").arg(value / 1000.0, 0, 'f', 1);
-        }
-        return QString::number(value);
+    return QStringLiteral("上下文 %1 / %2").arg(compactTokens(used), compactTokens(max));
+}
+
+/// 用量明细文案。字段口径见 Usage 的注释：
+///   未缓存 = 真正要模型从头处理的输入；缓存读 = 命中缓存的部分；
+///   输出 = 生成的 token；命中率分母不含"写入缓存"（那部分本来没机会命中）。
+QString usageBreakdownText(const Usage &usage) {
+    return QStringLiteral("缓存 %1% · 未缓存 %2 · 缓存读 %3 · 输出 %4")
+        .arg(qRound(usage.cacheHitRate() * 100.0))
+        .arg(compactTokens(usage.inputTokens), compactTokens(usage.cacheReadTokens),
+             compactTokens(usage.outputTokens));
+}
+
+/// 用量明细的悬浮说明：给出精确数字与口径，避免缩写带来的歧义。
+QString usageTooltipText(const Usage &cumulative, const Usage &lastTurn) {
+    const auto block = [](const QString &title, const Usage &usage) {
+        return QStringLiteral("%1\n"
+                              "  未缓存输入  %2\n"
+                              "  缓存读取    %3\n"
+                              "  缓存写入    %4\n"
+                              "  输出        %5\n"
+                              "  缓存命中率  %6%")
+            .arg(title)
+            .arg(usage.inputTokens)
+            .arg(usage.cacheReadTokens)
+            .arg(usage.cacheWriteTokens)
+            .arg(usage.outputTokens)
+            .arg(qRound(usage.cacheHitRate() * 100.0));
     };
-    return QStringLiteral("上下文 %1 / %2").arg(compact(used), compact(max));
+
+    return QStringLiteral("缓存命中率 = 缓存读取 /（缓存读取 + 未缓存输入）。\n"
+                          "分母不含缓存写入：首次写入的部分本来就没有机会命中。\n\n%1\n\n%2")
+        .arg(block(QStringLiteral("本次会话累计"), cumulative),
+             block(QStringLiteral("最近一轮"), lastTurn));
 }
 
 }  // namespace
@@ -288,7 +322,14 @@ void MainWindow::buildUi() {
     statusBar()->addPermanentWidget(contextBar_);
 
     usageLabel_ = new QLabel;
+    usageLabel_->setObjectName(QStringLiteral("usageLabel"));
     usageLabel_->setFont(Theme::instance().font(FontRole::UiXs));
+    // 预留最宽文案宽度，否则四个数字涨上去后末尾会被裁（QLabel 可被压缩到
+    // sizeHint 以下）。用字体度量而不是写死像素，界面字号变化也仍然够用。
+    usageLabel_->setMinimumWidth(
+        QFontMetrics(usageLabel_->font())
+                .horizontalAdvance(QStringLiteral("缓存 100% · 未缓存 000.0M · 缓存读 000.0M · 输出 000.0M")) +
+        12);
     statusBar()->addPermanentWidget(usageLabel_);
 }
 
@@ -585,12 +626,12 @@ void MainWindow::refreshContextUsage() {
                        "QProgressBar::chunk { background-color: %2; border-radius: 3px; }")
             .arg(Theme::css(palette.surface), Theme::css(chunk)));
 
+    // 用量明细：始终显示四个字段（哪怕是 0），这样用户能确认这些指标存在、
+    // 也能一眼看出某次请求是否命中了缓存。
     const Usage cumulative = runtime_.session().cumulativeUsage;
-    if (cumulative.effectiveTotal() > 0) {
-        usageLabel_->setText(QStringLiteral("累计 %1 tokens").arg(cumulative.effectiveTotal()));
-    } else {
-        usageLabel_->clear();
-    }
+    const Usage lastTurn = runtime_.lastTurnUsage();
+    usageLabel_->setText(usageBreakdownText(cumulative));
+    usageLabel_->setToolTip(usageTooltipText(cumulative, lastTurn));
 }
 
 void MainWindow::refreshRunState() {

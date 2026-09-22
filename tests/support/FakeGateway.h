@@ -119,6 +119,26 @@ inline QByteArray textResponse(const QByteArray &text) {
     return body;
 }
 
+/// 纯文本流式响应，并带上缓存用量明细。
+///
+/// 用于验证"prompt_tokens 含缓存、Usage::inputTokens 约定为不含缓存"这条归一：
+/// OpenAI 的 prompt_tokens 必须减掉 cached_tokens 才等于未缓存输入。
+inline QByteArray textResponseWithCache(const QByteArray &text, int promptTokens,
+                                        int cachedTokens, int completionTokens) {
+    QByteArray body;
+    body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
+    body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + text + "\"}}]}\n\n";
+    body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+    body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":" +
+            QByteArray::number(promptTokens) + ",\"completion_tokens\":" +
+            QByteArray::number(completionTokens) + ",\"total_tokens\":" +
+            QByteArray::number(promptTokens + completionTokens) +
+            ",\"prompt_tokens_details\":{\"cached_tokens\":" +
+            QByteArray::number(cachedTokens) + "}}}\n\n";
+    body += "data: [DONE]\n\n";
+    return body;
+}
+
 /// 带工具调用的流式响应。参数故意分两片下发，以验证增量组装。
 inline QByteArray toolCallResponse(const QString &toolName,
                                    const QByteArray &argumentsFirstHalf,

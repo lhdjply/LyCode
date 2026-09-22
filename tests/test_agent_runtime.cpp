@@ -31,6 +31,7 @@ using namespace zcode;
 using zcode::test::FakeGateway;
 using zcode::test::jsonEscape;
 using zcode::test::textResponse;
+using zcode::test::textResponseWithCache;
 using zcode::test::toolCallResponse;
 
 namespace {
@@ -56,6 +57,7 @@ private slots:
     void contextWindowOverrideDrivesUsage();
     void setModelRefreshesContextWindow();
     void reloadRestoresPersistedConversation();
+    void openAiUsageIsNormalizedToUncached();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -597,6 +599,37 @@ void TestAgentRuntime::reloadRestoresPersistedConversation() {
     Session reloadedSession;
     QVERIFY(store.loadSession(sessionId, &reloadedSession));
     QCOMPARE(reloadedSession.title, QStringLiteral("read the sample"));
+}
+
+void TestAgentRuntime::openAiUsageIsNormalizedToUncached() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // OpenAI 的 prompt_tokens 是"含缓存"的口径：1000 里有 600 来自缓存。
+    gateway_->enqueue(textResponseWithCache("cached answer", 1000, 600, 50));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("hi"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(6000));
+
+    const Usage usage = runtime_->messages().last().usage;
+    // 必须归一到"未命中缓存"，否则同一个 inputTokens 在 Anthropic 与 OpenAI
+    // 两条路径上含义不同，缓存命中率会算错。
+    QCOMPARE(usage.inputTokens, 400);   // 1000 - 600
+    QCOMPARE(usage.cacheReadTokens, 600);
+    QCOMPARE(usage.outputTokens, 50);
+    QCOMPARE(usage.promptTokens(), 1000);
+    QVERIFY(qAbs(usage.cacheHitRate() - 0.6) < 0.0001);
+
+    // 脏数据防护：cached > prompt 时不能算出负的未缓存输入。
+    gateway_->enqueue(textResponseWithCache("dirty", 100, 500, 10));
+    QSignalSpy secondSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QVERIFY2(runtime_->submitText(QStringLiteral("again"), &error), qPrintable(error));
+    QVERIFY(secondSpy.wait(6000));
+
+    const Usage dirty = runtime_->lastTurnUsage();
+    QVERIFY2(dirty.inputTokens >= 0, "未缓存输入不得为负");
+    QCOMPARE(dirty.inputTokens, 0);
 }
 
 QTEST_MAIN(TestAgentRuntime)

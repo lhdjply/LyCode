@@ -707,6 +707,18 @@ int Usage::effectiveTotal() const {
     return fromParts > 0 ? fromParts : totalTokens;
 }
 
+int Usage::promptTokens() const {
+    return inputTokens + cacheReadTokens + cacheWriteTokens;
+}
+
+double Usage::cacheHitRate() const {
+    const int cacheable = inputTokens + cacheReadTokens;
+    if (cacheable <= 0) {
+        return 0.0;
+    }
+    return static_cast<double>(cacheReadTokens) / static_cast<double>(cacheable);
+}
+
 QJsonObject Usage::toJson() const {
     QJsonObject cache;
     cache.insert(QStringLiteral("read"), cacheReadTokens);

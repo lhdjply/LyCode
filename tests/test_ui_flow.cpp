@@ -53,6 +53,7 @@ using namespace zcode::ui;
 using zcode::test::FakeGateway;
 using zcode::test::jsonEscape;
 using zcode::test::textResponse;
+using zcode::test::textResponseWithCache;
 using zcode::test::toolCallResponse;
 
 namespace {
@@ -163,9 +164,12 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     // ── 第 1 轮：模型要求执行 Bash；第 2 轮：模型给出最终回复 ──────────────
     gateway_->enqueue(toolCallResponse(QStringLiteral("Bash"),
                                        "{\\\"command\\\":\\\"echo hello-from-zcode\\\"", "}"));
-    gateway_->enqueue(textResponse(
+    // 第二轮故意带缓存用量：prompt 1000 里有 750 命中缓存。
+    // 用于端到端验证"SSE → provider 口径归一 → 用量累加 → 状态栏文案"整条链路。
+    gateway_->enqueue(textResponseWithCache(
         "命令已执行，输出是 hello-from-zcode。\\n\\n### 结论\\n\\n- 工具调用成功\\n- "
-        "权限确认生效\\n\\n```bash\\necho hello-from-zcode\\n```"));
+        "权限确认生效\\n\\n```bash\\necho hello-from-zcode\\n```",
+        1000, 750, 40));
 
     MainWindow window;
     window.resize(1280, 820);
@@ -316,6 +320,21 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
 
     // 两个模型请求：一轮带工具调用，一轮收尾。
     QCOMPARE(gateway_->requestCount(), 2);
+
+    // ── 状态栏的用量明细 ───────────────────────────────────────────────────
+    // 第一轮：prompt 50 / completion 10，无缓存
+    // 第二轮：prompt 1000 里 750 命中缓存 → 未缓存 250、缓存读 750、输出 40
+    // 累计：未缓存 300、缓存读 750、输出 50 → 命中率 750/(300+750) = 71%
+    auto *usageLabel = window.findChild<QLabel *>(QStringLiteral("usageLabel"));
+    QVERIFY2(usageLabel != nullptr, "状态栏应当有用量明细标签");
+    QCOMPARE(usageLabel->text(),
+             QStringLiteral("缓存 71% · 未缓存 300 · 缓存读 750 · 输出 50"));
+
+    // 悬浮说明要给出精确数字与口径，避免缩写的歧义。
+    QVERIFY(usageLabel->toolTip().contains(QStringLiteral("缓存命中率")));
+    QVERIFY2(usageLabel->toolTip().contains(QStringLiteral("分母不含缓存写入")),
+             "tooltip 应当解释命中率的分母口径");
+    QVERIFY(usageLabel->toolTip().contains(QStringLiteral("最近一轮")));
 
     const QPixmap windowShot = window.grab();
     const QString chatShot = screenshotDir() + QStringLiteral("/03-conversation.png");

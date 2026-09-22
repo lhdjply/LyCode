@@ -283,6 +283,20 @@ struct Part {
 };
 
 /// token 用量。字段名与 npm 的 zcodeTokenUsageSchema 对齐。
+///
+/// ── 字段口径（**必须**按这个含义填，两处 provider 已归一）────────────────
+/// 两种协议对"输入 token"的统计口径本来是不同的：
+///   * Anthropic：`input_tokens` **不含**缓存部分（读/写分别单列）
+///   * OpenAI：`prompt_tokens` **含**缓存部分（`prompt_tokens_details.cached_tokens`）
+/// 如果照原样落进同一个字段，同一个 `inputTokens` 就有了两种含义，
+/// 缓存命中率必然算错。因此这里统一定义为：
+///
+///   inputTokens      = **未命中缓存**的输入 token（真正要模型从头处理的）
+///   cacheReadTokens  = 命中缓存、直接从缓存读取的输入 token
+///   cacheWriteTokens = 本次写入缓存（供后续复用）的输入 token
+///   outputTokens     = 生成的 token
+///
+/// 因此一次请求的完整提示长度 = inputTokens + cacheReadTokens + cacheWriteTokens。
 struct Usage {
     int inputTokens = 0;
     int outputTokens = 0;
@@ -293,6 +307,14 @@ struct Usage {
     int cacheWriteTokens = 0;
 
     int effectiveTotal() const;
+    /// 一次请求的完整提示 token 数（未缓存 + 缓存读 + 缓存写）。
+    int promptTokens() const;
+    /// 缓存命中率，取值 0.0-1.0。
+    ///
+    /// 分母刻意**不含 cacheWriteTokens**：那是首次写入缓存的部分，
+    /// 本来就没有机会命中；把它算进分母会系统性低估命中率。
+    /// 分母为 0 时返回 0。
+    double cacheHitRate() const;
     QJsonObject toJson() const;
     static Usage fromJson(const QJsonObject &json);
     Usage &operator+=(const Usage &other);

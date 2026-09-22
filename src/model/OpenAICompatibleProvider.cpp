@@ -667,8 +667,20 @@ private:
     }
 
     void applyUsage(const QJsonObject &usage) {
-        usage_.inputTokens =
-            json::integer(usage, QStringLiteral("prompt_tokens"), usage_.inputTokens);
+        // ⚠ 口径归一：OpenAI 的 prompt_tokens **包含**缓存命中的部分
+        // （prompt_tokens_details.cached_tokens），而 Usage::inputTokens 的约定是
+        // "未命中缓存的输入"。这里必须减掉缓存部分，否则同一个 inputTokens
+        // 在 Anthropic 与 OpenAI 两条路径上含义不同，缓存命中率会算错。
+        const QJsonObject promptDetails =
+            json::object(usage, QStringLiteral("prompt_tokens_details"));
+        const int cached = json::integer(promptDetails, QStringLiteral("cached_tokens"), 0);
+
+        const int promptTotal = json::integer(usage, QStringLiteral("prompt_tokens"), -1);
+        if (promptTotal >= 0) {
+            // clamp 到 0：个别网关会给出 cached > prompt 的脏数据。
+            usage_.inputTokens = qMax(0, promptTotal - cached);
+        }
+        usage_.cacheReadTokens = cached;
         usage_.outputTokens =
             json::integer(usage, QStringLiteral("completion_tokens"), usage_.outputTokens);
         usage_.totalTokens =
@@ -677,10 +689,6 @@ private:
             json::object(usage, QStringLiteral("completion_tokens_details"));
         usage_.reasoningTokens = json::integer(completionDetails, QStringLiteral("reasoning_tokens"),
                                                usage_.reasoningTokens);
-        const QJsonObject promptDetails =
-            json::object(usage, QStringLiteral("prompt_tokens_details"));
-        usage_.cacheReadTokens =
-            json::integer(promptDetails, QStringLiteral("cached_tokens"), usage_.cacheReadTokens);
     }
 
     void fail(const QString &message) {

@@ -1263,6 +1263,19 @@ int AgentRuntime::estimatedInputTokens() const {
     return static_cast<int>(static_cast<double>(chars) / kCharsPerToken);
 }
 
+Usage AgentRuntime::lastTurnUsage() const {
+    // 从后往前找第一条带用量的 assistant 消息（工具结果轮的用量是 0，会跳过）。
+    for (auto iterator = messages_.crbegin(); iterator != messages_.crend(); ++iterator) {
+        if (iterator->role != MessageRole::Assistant) {
+            continue;
+        }
+        if (iterator->usage.effectiveTotal() > 0 || iterator->usage.cacheReadTokens > 0) {
+            return iterator->usage;
+        }
+    }
+    return {};
+}
+
 RunState AgentRuntime::runState() const {
     switch (phase_) {
         case TurnPhase::Idle:

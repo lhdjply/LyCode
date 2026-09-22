@@ -30,6 +30,7 @@ private slots:
     void toolStateClassification();
     void sessionModePolicy();
     void usageAccumulates();
+    void usageDerivedMetrics();
     void modelSelectionDisplayRoundTrip();
     void permissionDefaultOption();
     void workspaceIdentityKey();
@@ -637,6 +638,38 @@ void TestTypes::modelOptionOverrideAppliesToModelInfo() {
     QCOMPARE(info.reasoningLevels.size(), 2);
     // 覆盖了档位列表就必须同步"是否支持思考"，否则 UI 会拿旧标志做判断。
     QVERIFY(info.supportsReasoning);
+}
+
+void TestTypes::usageDerivedMetrics() {
+    Usage usage;
+    usage.inputTokens = 400;       // 未命中缓存
+    usage.cacheReadTokens = 600;   // 命中缓存
+    usage.cacheWriteTokens = 200;  // 写入缓存
+
+    // 完整提示长度 = 未缓存 + 缓存读 + 缓存写。
+    QCOMPARE(usage.promptTokens(), 1200);
+
+    // 命中率的分母刻意不含"写入缓存"：那部分本来没机会命中，
+    // 算进去会系统性低估命中率。
+    QCOMPARE(usage.cacheHitRate(), 0.6);   // 600 / (400 + 600)
+
+    // 分母为 0 时不得除零。
+    Usage empty;
+    QCOMPARE(empty.cacheHitRate(), 0.0);
+    QCOMPARE(empty.promptTokens(), 0);
+
+    // 只有写入、没有读取时命中率为 0（而不是 NaN 或负数）。
+    Usage writeOnly;
+    writeOnly.cacheWriteTokens = 500;
+    QCOMPARE(writeOnly.cacheHitRate(), 0.0);
+    QCOMPARE(writeOnly.promptTokens(), 500);
+
+    // 累加后派生指标仍然自洽。
+    Usage total;
+    total += usage;
+    total += usage;
+    QCOMPARE(total.promptTokens(), 2400);
+    QCOMPARE(total.cacheHitRate(), 0.6);
 }
 
 QTEST_MAIN(TestTypes)

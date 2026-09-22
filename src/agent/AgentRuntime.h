@@ -140,6 +140,10 @@ public:
     /// 估算的上下文 token 用量。
     int estimatedInputTokens() const;
 
+    /// 最近一次模型调用的用量（找最后一条带用量的 assistant 消息）。
+    /// 没有则返回全 0。用于状态栏展示"本轮"的缓存命中情况。
+    Usage lastTurnUsage() const;
+
     /// 安全上限：单个 turn 内允许的模型步数。
     /// 设为很大是为了不成为常规任务的瓶颈，只用于防御失控循环。
     static constexpr int kMaxModelStepsPerTurn = 200;

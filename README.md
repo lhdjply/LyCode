@@ -71,14 +71,14 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-6 个套件、157 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
+6 个套件、159 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
 
 | 套件 | 断言 | 覆盖 |
 | --- | ---: | --- |
 | `test_types` | 97 | 领域模型、全部枚举词表的双向转换、JSON 往返、未知枚举降级、路径/权限策略函数 |
 | `test_permission_gate` | 16 | 权限判定链、规则匹配（前缀 / `*` / `prefix:*` / allow 优先）、异步裁决、取消收尾、重复请求幂等 |
 | `test_markdown` | 19 | 标题、围栏代码块、行内代码与强调规则顺序、表格、任务列表、HTML 转义、不安全链接 scheme 拦截 |
-| `test_agent_runtime` | 14 | **真实 HTTP + SSE**（本地假网关）驱动完整 Agent 循环：纯文本轮、只读工具免确认、Bash 权限放行/拒绝、plan 模式拦截、中断、未知工具、HTTP 401 |
+| `test_agent_runtime` | 16 | **真实 HTTP + SSE**（本地假网关）驱动完整 Agent 循环：纯文本轮、只读工具免确认、Bash 权限放行/拒绝、plan 模式拦截、中断、未知工具、HTTP 401 |
 | `test_ui_flow` | 3 | **界面级端到端**：构造真实 MainWindow → 输入 → 点击发送 → 等待权限弹窗 → 点击"允许一次" → 断言对话流、工具卡片与会话落盘；另断言思考等级下拉可见且默认档位正确、上下文分母用的是覆盖值 |
 | `test_app_config` | 6 | 配置持久化：全字段 JSON 往返、模型能力覆盖的写入/删除、思考档位（含 `off` 这个合法空串）、真实落盘往返与首次启动的默认值 |
 
@@ -135,6 +135,28 @@ ctest --test-dir build --output-on-failure
 | `build` | 默认。读写文件与执行命令都需要确认 |
 | `edit` | 文件写入自动放行，执行命令仍需确认 |
 | `yolo` | 全部放行。请自行判断风险 |
+
+### 用量明细
+
+状态栏右侧显示四个缓存相关指标（会话累计）：
+
+```
+就绪            上下文 44 / 1.0M ▬▬▬   缓存 71% · 未缓存 300 · 缓存读 750 · 输出 50
+```
+
+| 指标 | 含义 |
+| --- | --- |
+| **缓存命中率** | `缓存读取 /（缓存读取 + 未缓存输入）` |
+| **未缓存** | 真正要模型从头处理的输入 token |
+| **缓存读** | 命中缓存、直接从缓存读取的输入 token |
+| **输出** | 生成的 token |
+
+悬浮提示里给出四个字段的精确数字、会话累计与**最近一轮**的对比，以及命中率的分母口径。
+
+两点值得说明：
+
+- **分母不含"缓存写入"**。那是首次写入缓存的部分，本来就没有机会命中；算进分母会系统性低估命中率。
+- **两种协议的口径已经归一**。Anthropic 的 `input_tokens` **不含**缓存部分（读/写单列），OpenAI 的 `prompt_tokens` **含**缓存部分（`prompt_tokens_details.cached_tokens`）。如果照原样落进同一个字段，同一个 `inputTokens` 就有了两种含义、命中率必然算错。现在统一为「`inputTokens` = 未命中缓存的输入」，OpenAI 路径会减掉缓存部分（并对 `cached > prompt` 的脏数据做 clamp）。
 
 ### 输入区布局
 
@@ -227,6 +249,7 @@ tests/          单元测试（领域模型、权限链、Markdown 渲染）
 - Agent 主循环：模型步 ↔ 工具队列循环、turn 相位、中断、安全上限
 - **思考等级**：输入区选择器 + 两种协议的字段映射（Anthropic `thinking.budget_tokens` / OpenAI `reasoning_effort`），按模型记住上次档位
 - **模型能力覆盖**：每个模型的上下文窗口 / 最大输出 / 思考档位都可在设置页覆盖，经 `ProviderRegistry` 单点应用到所有读取路径
+- 用量明细：缓存命中率 / 未缓存 / 缓存读 / 输出（两种协议的 token 口径已归一）
 - 会话持久化（SQLite，含 `sequence` 幂等语义）
 - 系统提示词组装（含 `AGENTS.md` 逐级向上查找、项目上下文探测）
 - 主题令牌（原版 `zai-light`/`zai-dark` 真实取色）+ 完整 QSS

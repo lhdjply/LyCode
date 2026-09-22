@@ -501,6 +501,9 @@ private:
             qCInfo(log) << "模型已确认; model=" << model;
         }
         const QJsonObject usage = json::object(message, QStringLiteral("usage"));
+        // Anthropic 的 input_tokens 本身就是"未命中缓存"的口径（缓存读/写分别由
+        // cache_read_input_tokens / cache_creation_input_tokens 单列），
+        // 与 Usage 的约定一致，不需要像 OpenAI 那样再减一次。
         usage_.inputTokens = json::integer(usage, QStringLiteral("input_tokens"));
         usage_.cacheReadTokens = json::integer(usage, QStringLiteral("cache_read_input_tokens"));
         usage_.cacheWriteTokens =
