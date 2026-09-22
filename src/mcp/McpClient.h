@@ -13,6 +13,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QHash>
 #include <QObject>
 #include <QString>
@@ -43,6 +44,15 @@ public:
     QList<ToolInfo> tools() const { return tools_; }
     QString serverName() const { return serverName_; }
     QString serverVersion() const { return serverVersion_; }
+
+    /// 失败排查用的只读诊断快照：子进程状态/错误/退出码、stderr 尾部、
+    /// 以及从 stdout 收到了多少字节、跳过多少非 JSON 行。
+    ///
+    /// 这些数字的作用是把"连不上"拆成可判定的小问题：
+    ///   * 一个字节都没收到 → 子进程根本没说话（缺依赖、被拦、stdin/stdout 不通）；
+    ///   * 收到了字节但都是非 JSON → 服务器在说话但分帧/编码不对。
+    /// 只用于日志与测试，不参与任何逻辑判断。
+    QString diagnosticReport() const;
 
     /// 拉起进程并开始握手。结果通过 ready / failed 通知。
     void start();
@@ -75,6 +85,8 @@ private:
     void writeMessage(const QJsonObject &message);
     void setFailed(const QString &reason);
     void timeoutHandshake();
+    /// 追加一段子进程 stderr（保留尾部，避免长日志把内存吃光）。
+    void appendStderr(const QString &text);
 
     ServerConfig config_;
     ServerState state_ = ServerState::Disabled;
@@ -92,6 +104,21 @@ private:
     /// 每个请求的超时定时器，挂在 process_ 下，键为 id。
     QHash<int, QObject *> timeouts_;
     bool handshakeDone_ = false;
+
+    // ── 诊断用（只读快照，见 diagnosticReport()）───────────────────────────
+    /// 子进程 stderr 的尾部。很多服务器把真正的失败原因写在这里。
+    QString stderrTail_;
+    /// QProcess::errorString() 的记录。不直接查 process_->errorString()：
+    /// 没有错误时 Qt 会返回 "Unknown error"，反而误导。
+    QString processError_;
+    int exitCode_ = 0;
+    bool exited_ = false;
+    /// 从 stdout 累计收到的字节数。
+    qsizetype stdoutBytes_ = 0;
+    /// stdout 里被跳过的非 JSON 行数。
+    int nonJsonStdoutLines_ = 0;
+    /// 握手各阶段耗时用；start() 时归零。
+    QElapsedTimer handshakeTimer_;
 };
 
 }  // namespace lycode::mcp

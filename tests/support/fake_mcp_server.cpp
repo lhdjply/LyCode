@@ -15,6 +15,8 @@
 #include <QTextStream>
 
 #include <cstdio>
+#include <iostream>
+#include <string>
 
 namespace {
 
@@ -75,9 +77,13 @@ int main(int argc, char *argv[]) {
 
     bool initialized = false;
 
-    QTextStream input(stdin);
-    while (!input.atEnd()) {
-        const QString line = input.readLine().trimmed();
+    // ⚠ 用阻塞式的 std::getline，而不是 `QTextStream::atEnd()` 循环。
+    // atEnd() 在管道上只是"当前没有数据"，不保证等到对端关闭——Windows 上
+    // 它可能在客户端还没写入时就返回 true，于是服务器刚起来就退出，表现为
+    // 客户端握手超时。getline 会阻塞到读到一行或 EOF，正是行式服务器要的语义。
+    std::string rawLine;
+    while (std::getline(std::cin, rawLine)) {
+        const QString line = QString::fromUtf8(rawLine.c_str()).trimmed();
         if (line.isEmpty()) {
             continue;
         }

@@ -11,8 +11,11 @@
 //     但只读提示可以放宽到免确认）
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QProcess>
 #include <QSignalSpy>
 #include <QTest>
 
@@ -34,6 +37,187 @@ QString fakeServerPath() {
     name += QStringLiteral(".exe");
 #endif
     return QDir(QCoreApplication::applicationDirPath()).filePath(name);
+}
+
+/// 退出码的可读形式。Windows 的异常退出码是 NTSTATUS（负的十进制），
+/// 只有十六进制才对得上微软文档，所以两个都给。
+QString exitCodeText(int exitCode) {
+    if (exitCode < 0) {
+        return QStringLiteral("%1 (0x%2)")
+            .arg(exitCode)
+            .arg(static_cast<quint32>(exitCode), 8, 16, QLatin1Char('0'));
+    }
+    return QString::number(exitCode);
+}
+
+/// 把 Windows 上"进程起来了又立刻没了"的经典退出码翻译成人话。
+///
+/// 这类失败在 Windows 上占比很高（构建目录里的 exe 找不到 Qt DLL、
+/// 被杀软拦下），但只看一个十进制数字根本看不出该修什么。
+QString explainExitCode(int exitCode) {
+    switch (static_cast<quint32>(exitCode)) {
+        case 0xC0000135u:
+            return QStringLiteral("STATUS_DLL_NOT_FOUND：子进程缺依赖 DLL。"
+                                  "Windows 上跑构建目录里的 exe 需要 Qt 的 bin 目录在 PATH 里"
+                                  "（或对产物执行 windeployqt）。");
+        case 0xC0000142u:
+            return QStringLiteral("STATUS_DLL_INIT_FAILED：依赖 DLL 初始化失败。");
+        case 0xC0000005u:
+            return QStringLiteral("STATUS_ACCESS_VIOLATION：子进程崩溃。");
+        case 0xC00000FDu:
+            return QStringLiteral("STATUS_STACK_OVERFLOW：子进程栈溢出。");
+        case 0xC0000409u:
+            return QStringLiteral("STATUS_STACK_BUFFER_OVERRUN：子进程被系统安全机制终止。");
+        default:
+            return {};
+    }
+}
+
+/// 把一段字节输出压成一行，便于塞进诊断报告。
+QString oneLine(const QByteArray &bytes, int maxChars = 400) {
+    const QString text = QString::fromUtf8(bytes).simplified();
+    if (text.isEmpty()) {
+        return QStringLiteral("(空)");
+    }
+    return text.size() > maxChars ? text.left(maxChars) + QStringLiteral("…") : text;
+}
+
+/// 主动探测：绕开 Manager/Client，直接拉起假服务器走一步 initialize。
+///
+/// 这一步把两类失败彻底分开，这是整个诊断的关键：
+///   * 探测就失败 → 环境问题（文件不在、缺 DLL、被杀软拦、stdin/stdout 不通）；
+///   * 探测成功但 Manager 握手失败 → 问题在客户端逻辑。
+/// 没有它，Windows 上只能看到一句"握手超时"，无法判断该修哪边。
+QString probeFakeServer(int timeoutMs = 5000) {
+    QStringList lines;
+    lines << QStringLiteral("主动探测: 直接运行 %1").arg(fakeServerPath());
+
+    QProcess process;
+    process.setProgram(fakeServerPath());
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    process.start();
+    if (!process.waitForStarted(timeoutMs)) {
+        lines << QStringLiteral("  ✗ 无法启动");
+        lines << QStringLiteral("    启动错误: %1").arg(process.errorString());
+        lines << QStringLiteral("    进程状态: %1")
+                     .arg(process.state() == QProcess::NotRunning
+                              ? QStringLiteral("NotRunning")
+                              : QStringLiteral("Starting/Running"));
+        lines << QStringLiteral("  结论: 假服务器连启动都失败 → 先修环境，不是客户端逻辑问题");
+        return lines.join(QLatin1Char('\n'));
+    }
+    lines << QStringLiteral("  ✓ 已启动");
+
+    // initialize 是握手第一步，假服务器收到就回，不需要 initialized 通知。
+    process.write("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n");
+    process.waitForBytesWritten(1000);
+
+    QByteArray out;
+    QByteArray err;
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < timeoutMs) {
+        if (process.waitForReadyRead(200)) {
+            out += process.readAllStandardOutput();
+            err += process.readAllStandardError();
+            if (out.contains("serverInfo")) {
+                break;
+            }
+        }
+        if (process.state() == QProcess::NotRunning) {
+            break;
+        }
+    }
+    out += process.readAllStandardOutput();
+    err += process.readAllStandardError();
+
+    const bool answered = out.contains("serverInfo");
+    lines << QStringLiteral("  收到 initialize 响应: %1")
+                 .arg(answered ? QStringLiteral("是") : QStringLiteral("否"));
+    lines << QStringLiteral("  stdout: %1").arg(oneLine(out));
+    lines << QStringLiteral("  stderr: %1").arg(oneLine(err));
+
+    process.closeWriteChannel();  // EOF：getline 结束，服务器自行退出
+    if (!process.waitForFinished(2000)) {
+        process.kill();
+        process.waitForFinished(1000);
+    }
+    const int code = process.exitCode();
+    const QString hint = explainExitCode(code);
+    lines << QStringLiteral("  退出码: %1%2")
+                 .arg(exitCodeText(code),
+                      hint.isEmpty() ? QString() : QStringLiteral(" —— ") + hint);
+    lines << QStringLiteral("  退出状态: %1")
+                 .arg(process.exitStatus() == QProcess::NormalExit
+                          ? QStringLiteral("NormalExit")
+                          : QStringLiteral("CrashExit"));
+    lines << (answered
+                  ? QStringLiteral("  结论: 假服务器本身正常 → 问题在客户端/Manager 侧，"
+                                   "看下面的进程诊断")
+                  : QStringLiteral("  结论: 连主动探测都拿不到响应 → 先修环境（见上），"
+                                   "不是客户端逻辑问题"));
+    return lines.join(QLatin1Char('\n'));
+}
+
+/// 把 Manager 侧与子进程侧的诊断拼成一份可读报告。
+QString mcpDiagnostics(Manager &manager, const QString &serverId) {
+    const QString path = fakeServerPath();
+    const QFileInfo info(path);
+    QStringList lines;
+    lines << QStringLiteral("──────── MCP 失败诊断 ────────");
+    lines << QStringLiteral("假服务器路径: %1").arg(path);
+    lines << QStringLiteral("  存在: %1；可执行: %2；大小: %3 字节；最后修改: %4")
+                 .arg(info.exists() ? QStringLiteral("是") : QStringLiteral("否"),
+                      info.isExecutable() ? QStringLiteral("是") : QStringLiteral("否"))
+                 .arg(info.size())
+                 .arg(info.lastModified().toString(Qt::ISODate));
+    lines << QStringLiteral("Manager 侧状态: %1（ready=%2 pending=%3）")
+                 .arg(serverStateToken(manager.state(serverId)))
+                 .arg(manager.readyCount())
+                 .arg(manager.pendingCount());
+    lines << QStringLiteral("Manager 记录的失败原因: %1")
+                 .arg(manager.lastError(serverId).isEmpty()
+                          ? QStringLiteral("(无)")
+                          : manager.lastError(serverId));
+    lines << QStringLiteral("--- 客户端进程诊断 ---");
+    lines << manager.diagnostics(serverId);
+    lines << QStringLiteral("--- 主动探测（绕开客户端）---");
+    lines << probeFakeServer();
+    lines << QStringLiteral("──────────────────────────────");
+    return lines.join(QLatin1Char('\n'));
+}
+
+/// 等 ready / failed 先到者，返回是否就绪。
+///
+/// 不能只 `QSignalSpy::wait(ready)`：failed 不会唤醒它，于是"命令不存在"
+/// 这种立刻就能判定的事也要干等满 15 秒，报告里还只写"握手超时"。
+bool waitForReadyOrFailed(QSignalSpy &readySpy, QSignalSpy &failedSpy,
+                          int timeoutMs = 15000) {
+    QElapsedTimer clock;
+    clock.start();
+    while (clock.elapsed() < timeoutMs) {
+        if (readySpy.count() > 0) {
+            return true;
+        }
+        if (failedSpy.count() > 0) {
+            return false;
+        }
+        QTest::qWait(20);
+    }
+    return readySpy.count() > 0;
+}
+
+/// 只在失败时生成报告：把完整诊断无条件写进测试日志（QWARN），
+/// 返回给 QVERIFY2 的只是一句指路，避免同一份十几行报告在日志里出现两次。
+///
+/// 为什么坚持写日志而不是只靠 QVERIFY2 的消息：部分 ctest 配置会把断言消息
+/// 截断，而失败诊断是这条测试唯一的价值所在，不能丢。
+QString failureReportIf(bool ok, Manager &manager, const QString &serverId) {
+    if (ok) {
+        return {};
+    }
+    qWarning().noquote() << mcpDiagnostics(manager, serverId);
+    return QStringLiteral("（详细诊断见上方「MCP 失败诊断」这段日志）");
 }
 
 ServerConfig fakeConfig(const QString &id = QStringLiteral("fake")) {
@@ -63,7 +247,10 @@ void TestMcp::handshakesAndDiscoversTools() {
     QSignalSpy failedSpy(&manager, &Manager::serverFailed);
 
     manager.startAll({fakeConfig()});
-    QVERIFY2(readySpy.wait(15000), "MCP 服务器应当完成握手");
+    const bool ready = waitForReadyOrFailed(readySpy, failedSpy);
+    QVERIFY2(ready, qPrintable(QStringLiteral("MCP 服务器应当完成握手\n%1")
+                                   .arg(failureReportIf(ready, manager,
+                                                        QStringLiteral("fake")))));
     QCOMPARE(failedSpy.count(), 0);
 
     QCOMPARE(manager.readyCount(), 1);
@@ -78,8 +265,12 @@ void TestMcp::handshakesAndDiscoversTools() {
 void TestMcp::registersRemoteToolsWithConservativePermissions() {
     Manager manager;
     QSignalSpy readySpy(&manager, &Manager::serverReady);
+    QSignalSpy failedSpy(&manager, &Manager::serverFailed);
     manager.startAll({fakeConfig()});
-    QVERIFY(readySpy.wait(15000));
+    const bool ready = waitForReadyOrFailed(readySpy, failedSpy);
+    QVERIFY2(ready, qPrintable(QStringLiteral("MCP 服务器应当完成握手\n%1")
+                                   .arg(failureReportIf(ready, manager,
+                                                        QStringLiteral("fake")))));
 
     ToolRegistry registry;
     const int added = manager.registerToolsInto(registry);
@@ -114,8 +305,12 @@ void TestMcp::registersRemoteToolsWithConservativePermissions() {
 void TestMcp::callsToolAndSeparatesToolErrorFromProtocolError() {
     Manager manager;
     QSignalSpy readySpy(&manager, &Manager::serverReady);
+    QSignalSpy failedSpy(&manager, &Manager::serverFailed);
     manager.startAll({fakeConfig()});
-    QVERIFY(readySpy.wait(15000));
+    const bool ready = waitForReadyOrFailed(readySpy, failedSpy);
+    QVERIFY2(ready, qPrintable(QStringLiteral("MCP 服务器应当完成握手\n%1")
+                                   .arg(failureReportIf(ready, manager,
+                                                        QStringLiteral("fake")))));
 
     ToolRegistry registry;
     manager.registerToolsInto(registry);
@@ -173,7 +368,12 @@ void TestMcp::reportsBadCommandInsteadOfHanging() {
     broken.command = QStringLiteral("/nonexistent/definitely-not-a-real-mcp-server");
 
     manager.startAll({broken});
-    QVERIFY2(failedSpy.wait(15000), "启动失败必须被报告，而不是一直等");
+    // 坏命令正常是"立刻失败"，所以这里等 failed 而不是死等 15 秒。
+    const bool ready = waitForReadyOrFailed(readySpy, failedSpy);
+    QVERIFY2(!ready && failedSpy.count() > 0,
+             qPrintable(QStringLiteral("启动失败必须被报告，而不是一直等\n%1")
+                            .arg(failureReportIf(!ready && failedSpy.count() > 0, manager,
+                                                 QStringLiteral("broken")))));
     QCOMPARE(readySpy.count(), 0);
     QCOMPARE(manager.readyCount(), 0);
 
@@ -207,8 +407,12 @@ void TestMcp::toolNamesAreNamespacedAndSanitized() {
     // 服务器返回的名字可能带空格或斜杠，直接进声明会被不少 provider 拒绝。
     Manager manager;
     QSignalSpy readySpy(&manager, &Manager::serverReady);
+    QSignalSpy failedSpy(&manager, &Manager::serverFailed);
     manager.startAll({fakeConfig()});
-    QVERIFY(readySpy.wait(15000));
+    const bool ready = waitForReadyOrFailed(readySpy, failedSpy);
+    QVERIFY2(ready, qPrintable(QStringLiteral("MCP 服务器应当完成握手\n%1")
+                                   .arg(failureReportIf(ready, manager,
+                                                        QStringLiteral("fake")))));
     ToolRegistry registry;
     manager.registerToolsInto(registry);
 

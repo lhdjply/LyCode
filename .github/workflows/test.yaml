@@ -48,7 +48,33 @@ jobs:
         run: cmake --build build --parallel
 
       - name: 运行测试
-        run: ctest --test-dir build --output-on-failure
+        shell: bash
+        run: |
+          set +e
+          ctest --test-dir build --output-on-failure 2>&1 | tee build/ctest-run.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo
+            echo "########## 测试失败：下面是失败测试的完整日志 ##########"
+            # ctest 的 --output-on-failure 在部分平台抓不到 QtTest 的输出（只剩下
+            # 一句 Failed）。每个测试另外写了一份 build/tests/<name>.log，这里把
+            # 失败的那几个直接打到 CI 日志里，不需要再去下载 artifact。
+            names=$(grep -E '\*\*\*(Failed|Timeout|Exception)' build/ctest-run.log \
+                    | sed -E 's/.*Test +#[0-9]+: *([^ .]+).*/\1/' | sort -u)
+            if [ -z "$names" ]; then
+              names=$(ls build/tests/*.log 2>/dev/null | xargs -r -n1 basename \
+                      | sed 's/\.log$//')
+            fi
+            for name in $names; do
+              echo
+              echo "==================== $name ===================="
+              cat "build/tests/$name.log" 2>/dev/null \
+                || echo "(没有找到 build/tests/$name.log)"
+            done
+            echo "#######################################################"
+            exit "$status"
+          fi
 
       - name: 上传测试截图
         if: failure()
@@ -87,9 +113,34 @@ jobs:
         run: cmake --build build --config RelWithDebInfo --parallel
 
       - name: 运行可跨平台的测试
-        run: >
-          ctest --test-dir build -C RelWithDebInfo --output-on-failure
-          -E "test_agent_runtime|test_ui_flow"
+        shell: bash
+        run: |
+          set +e
+          ctest --test-dir build -C RelWithDebInfo --output-on-failure \
+            -E "test_agent_runtime|test_ui_flow" 2>&1 | tee build/ctest-run.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo
+            echo "########## 测试失败：下面是失败测试的完整日志 ##########"
+            # Windows 上 ctest 的 --output-on-failure 曾经完全抓不到 QtTest 的输出，
+            # 只剩一句 Failed。每个测试另外写了一份 build/tests/<name>.log，
+            # 这里把失败的那几个直接打到 CI 日志里，不需要再去下载 artifact。
+            names=$(grep -E '\*\*\*(Failed|Timeout|Exception)' build/ctest-run.log \
+                    | sed -E 's/.*Test +#[0-9]+: *([^ .]+).*/\1/' | sort -u)
+            if [ -z "$names" ]; then
+              names=$(ls build/tests/*.log 2>/dev/null | xargs -r -n1 basename \
+                      | sed 's/\.log$//')
+            fi
+            for name in $names; do
+              echo
+              echo "==================== $name ===================="
+              cat "build/tests/$name.log" 2>/dev/null \
+                || echo "(没有找到 build/tests/$name.log)"
+            done
+            echo "#######################################################"
+            exit "$status"
+          fi
 
       - name: 上传测试截图
         if: failure()

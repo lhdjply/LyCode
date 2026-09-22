@@ -56,6 +56,9 @@ public:
 
     ServerState state(const QString &serverId) const;
     QString lastError(const QString &serverId) const;
+    /// 多行的失败诊断（状态、子进程、stderr、stdout 计数）。
+    /// 只用于日志/测试；查不到该 id 时返回一句说明而不是空串。
+    QString diagnostics(const QString &serverId) const;
     int readyCount() const;
     /// 单个服务器的工具数量（未就绪为 0）。
     int toolCount(const QString &serverId) const;

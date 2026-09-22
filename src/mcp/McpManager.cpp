@@ -257,6 +257,18 @@ QString Manager::lastError(const QString &serverId) const {
     return {};
 }
 
+QString Manager::diagnostics(const QString &serverId) const {
+    if (Client *instance = client(serverId)) {
+        return instance->diagnosticReport();
+    }
+    QStringList known;
+    for (Client *candidate : clients_) {
+        known << candidate->config().id;
+    }
+    return QStringLiteral("(没有 id 为 \"%1\" 的服务器实例；已有: %2)")
+        .arg(serverId, known.isEmpty() ? QStringLiteral("(无)") : known.join(QLatin1Char(',')));
+}
+
 int Manager::readyCount() const {
     int count = 0;
     for (const Client *instance : clients_) {
