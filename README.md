@@ -71,7 +71,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-5 个套件、145 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
+6 个套件、155 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
 
 | 套件 | 断言 | 覆盖 |
 | --- | ---: | --- |
@@ -79,7 +79,8 @@ ctest --test-dir build --output-on-failure
 | `test_permission_gate` | 16 | 权限判定链、规则匹配（前缀 / `*` / `prefix:*` / allow 优先）、异步裁决、取消收尾、重复请求幂等 |
 | `test_markdown` | 19 | 标题、围栏代码块、行内代码与强调规则顺序、表格、任务列表、HTML 转义、不安全链接 scheme 拦截 |
 | `test_agent_runtime` | 10 | **真实 HTTP + SSE**（本地假网关）驱动完整 Agent 循环：纯文本轮、只读工具免确认、Bash 权限放行/拒绝、plan 模式拦截、中断、未知工具、HTTP 401 |
-| `test_ui_flow` | 3 | **界面级端到端**：构造真实 MainWindow → 输入 → 点击发送 → 等待权限弹窗 → 点击"允许一次" → 断言对话流、工具卡片与会话落盘 |
+| `test_ui_flow` | 3 | **界面级端到端**：构造真实 MainWindow → 输入 → 点击发送 → 等待权限弹窗 → 点击"允许一次" → 断言对话流、工具卡片与会话落盘；另断言思考等级下拉可见且默认档位正确、上下文分母用的是覆盖值 |
+| `test_app_config` | 6 | 配置持久化：全字段 JSON 往返、模型能力覆盖的写入/删除、思考档位（含 `off` 这个合法空串）、真实落盘往返与首次启动的默认值 |
 
 `test_ui_flow` 会用 `QWidget::grab()` 把界面截图写到 `build/tests/ui-screenshots/`（权限弹窗、对话流、展开的工具卡片），作为渲染效果的证据。这些截图每次跑测试都会重新生成。
 
@@ -100,6 +101,9 @@ ctest --test-dir build --output-on-failure
 9. **`prefix:*` 规则匹配过窄**。`stripTrailingWildcard` 原来只剥裸 `*`，导致 `npm:*` 变成 `npm:`，匹配不到 `npm install`。现在同时识别 `:*` 写法。
 10. **侧边栏工作区行被裁切**（用户报告："左上角新建会话上面显示不全"）。原因是我把 `QVBoxLayout` 塞进了 `QPushButton` 来承载「名称 + 路径」两行，而 `QPushButton` 的 `sizeHint` 只按自身文本计算，子控件被裁掉。改为：按钮只承担名称与键盘可达性，路径另用一个可点标签承载，并按标签宽度做中间省略。
 11. **会话列表项被撑成十几行高**。消息正文是 Markdown 源，直接当摘要塞进列表项会带出 `###`、列表符号和换行。改为统一经 `Markdown::toPlainPreview` 折叠成单行纯文本。
+
+12. **模型能力表格的表头退化成列号**。`QTableWidget::clear()` 会连**表头文字一起清空**，只在构造函数里设一次 `setHorizontalHeaderLabels()`，第一次 reload 之后表头就变成 1/2/3。改为把表头设置抽成函数，构造与每次 reload 都调用。
+13. **模型能力表格一打开就横向滚动**。五列固定宽度之和超过了设置页右栏可用宽度，"默认档位"那列根本看不到。同时收窄了 Provider 列表、加宽对话框、并把 ` tokens` 后缀从输入框移到分组提示里（单位由提示承载，宽度还给"模型"列）。
 
 ### 一个测试上的坑
 
@@ -125,6 +129,37 @@ ctest --test-dir build --output-on-failure
 | `build` | 默认。读写文件与执行命令都需要确认 |
 | `edit` | 文件写入自动放行，执行命令仍需确认 |
 | `yolo` | 全部放行。请自行判断风险 |
+
+### 思考等级
+
+工具条上模型选择器右侧的**思考等级**下拉控制模型的推理强度。档位是**稳定 id**（`off` / `low` / `medium` / `high` / `max`），因为它要持久化到配置文件里，一旦发布就不能改名：
+
+| 档位 | Anthropic（`thinking.budget_tokens`） | OpenAI 兼容（`reasoning_effort`） |
+| --- | ---: | --- |
+| `off` | 不传 thinking 字段 | 不传 `reasoning_effort` |
+| `low` | 2048 | `low` |
+| `medium` | 8192 | `medium` |
+| `high` | 24576 | `high` |
+| `max` | 49152 | `high` |
+
+要点：
+
+- 同一件事在两种协议里表达不同（Anthropic 用 token 预算，OpenAI 用枚举），Agent 循环按档位**同时填好两个字段**，provider 各取所需。`off` 的实现是**完全不传字段**，而不是传空值——部分兼容网关见到未知字段会直接 400。
+- Anthropic 要求 `budget_tokens >= 1024` 且 `< max_tokens`，`clampReasoningBudget()` 会做一次收敛，保证发出的请求一定合法（`maxOutputTokens` 太小时会自动关闭思考而不是发出一个会被拒的请求）。
+- **不支持思考的模型不显示这个下拉**，用户不会看到一个永远禁用的空控件。
+- 每个模型上次用的档位会被记住（按 `providerId/modelId` 存），切换模型时自动恢复，不会静默重置。
+
+### 模型上下文大小
+
+Provider 自报的上下文窗口经常不准（第三方兼容服务尤其如此），而**窗口值错了会直接导致压缩阈值判断失误**。所以设置页里可以对每个模型覆盖：
+
+- **上下文窗口**（`0` = 沿用内置默认，通常 128000，Claude 系列 200000）
+- **最大输出**（`0` = 沿用默认）
+- **思考档位**（该模型可用的档位列表，留空 = 用标准集合）与**默认档位**
+
+覆盖的生效路径是**单点**的：`ProviderRegistry::setModelOverrides()` 会把覆盖应用到 `resolve()` 与 `allModels()` 返回的每一份 `ModelInfo` 上，因此工具条的上下文用量分母、模型选择器、以及 Agent 循环里的压缩判断全都自动拿到有效值，不需要各处分别查询设置。
+
+上下文用量在**会话一建立就显示**（此时已用为 0，但分母已知），改完设置立刻能看到反馈。
 
 权限弹窗里的「始终允许」会固化一条规则（按工具 + 路径/命令前缀匹配），后续同类调用不再打扰。规则只存在内存里，切换会话即失效。
 
@@ -169,6 +204,8 @@ tests/          单元测试（领域模型、权限链、Markdown 渲染）
 - 8 个内置工具：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoRead`、`TodoWrite`
 - 权限门：5 步判定链 + 规则匹配（前缀 / `*` / `prefix:*`）+ 异步裁决 + 取消收尾
 - Agent 主循环：模型步 ↔ 工具队列循环、turn 相位、中断、安全上限
+- **思考等级**：工具条选择器 + 两种协议的字段映射（Anthropic `thinking.budget_tokens` / OpenAI `reasoning_effort`），按模型记住上次档位
+- **模型能力覆盖**：每个模型的上下文窗口 / 最大输出 / 思考档位都可在设置页覆盖，经 `ProviderRegistry` 单点应用到所有读取路径
 - 会话持久化（SQLite，含 `sequence` 幂等语义）
 - 系统提示词组装（含 `AGENTS.md` 逐级向上查找、项目上下文探测）
 - 主题令牌（原版 `zai-light`/`zai-dark` 真实取色）+ 完整 QSS

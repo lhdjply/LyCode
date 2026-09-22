@@ -5,6 +5,7 @@
 #include "core/Json.h"
 #include "core/Logging.h"
 #include "model/ProviderRegistry.h"
+#include "model/ReasoningLevels.h"
 
 #include <QLoggingCategory>
 #include <QTimer>
@@ -157,6 +158,11 @@ bool AgentRuntime::startSession(const Workspace &workspace, SessionMode mode,
 
     qCInfo(log) << "新建会话; id=" << session_.id << "workspace=" << workspace.path
                 << "mode=" << toToken(mode) << "model=" << model.displayValue();
+
+    // 立刻算一次上下文用量：此时 used 还是 0，但 max 已经确定。
+    // 不这样做的话状态栏在第一个 turn 结束前是空白的，用户改完"上下文窗口"
+    // 看不到任何反馈，会以为设置没生效。
+    refreshContextUsage();
 
     persistSession();
     emit sessionChanged(session_);
@@ -434,8 +440,29 @@ void AgentRuntime::runModelStep() {
 ModelRequest AgentRuntime::buildModelRequest() const {
     ModelRequest request;
     request.modelId = model_.modelId;
-    request.maxOutputTokens = 8192;
-    // 温度保持 provider 默认，不主动覆盖——覆盖会改变模型既有行为。
+
+    // 最大输出与上下文窗口都取自"有效模型元信息"（已应用用户在设置里的覆盖）。
+    // 不写死 8192：那会让用户设置的 maxOutputTokens 失效，也会让思考预算算错。
+    ModelInfo info;
+    if (providers_ != nullptr && providers_->resolve(model_, &info) != nullptr) {
+        request.maxOutputTokens = info.maxOutputTokens > 0 ? info.maxOutputTokens : 8192;
+    } else {
+        request.maxOutputTokens = 8192;
+    }
+
+    // 思考等级 → 两种协议各自的字段。档位不被模型支持时 normalize 会回退，
+    // 返回空则完全不带思考参数（例如模型根本不支持思考）。
+    const QString levelId =
+        normalizeReasoningLevel(model_.reasoningLevel, info.reasoningLevels);
+    if (const ReasoningLevel *level = findReasoningLevel(levelId)) {
+        const int budget = clampReasoningBudget(level->budgetTokens, request.maxOutputTokens);
+        request.enableReasoning = budget > 0;
+        request.reasoningBudgetTokens = budget;
+        request.reasoningEffort = level->openAiEffort;
+    }
+
+    // 温度保持 provider 默认，不主动覆盖——覆盖会改变模型既有行为；
+    // 且 Anthropic 在开启 thinking 时不允许同时指定 temperature。
 
     SystemPromptInput promptInput;
     promptInput.workspace = session_.workspace;
@@ -1193,11 +1220,12 @@ void AgentRuntime::persistSession() {
 
 void AgentRuntime::refreshContextUsage() {
     const int used = estimatedInputTokens();
-    // 上下文窗口取自模型元信息；未知时保守取 128k。
+    // 上下文窗口取自**有效**模型元信息（含用户覆盖）；未知时保守取 128k。
+    // resolve 已经把覆盖应用好了，所以这里不需要再查一次设置。
     int window = 128000;
     if (providers_ != nullptr && model_.isValid()) {
         ModelInfo info;
-        if (providers_->resolve(model_, &info) != nullptr) {
+        if (providers_->resolve(model_, &info) != nullptr && info.contextWindow > 0) {
             window = info.contextWindow;
         }
     }

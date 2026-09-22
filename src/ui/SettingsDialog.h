@@ -21,12 +21,14 @@
 
 class QCheckBox;
 class QComboBox;
+class QGroupBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QSpinBox;
+class QTableWidget;
 class QTabWidget;
 class QVBoxLayout;
 class QWidget;
@@ -72,6 +74,34 @@ private:
     void addProvider();
     void removeProvider();
     void moveProvider(int delta);
+
+    // ── Provider 页：模型能力覆盖 ───────────────────────────────────────────
+    /// 按「模型列表」输入框的内容重建表格行；行集合不变时不重建（保留编辑态）。
+    /// 每行的值从 settings_.modelOverrides 回填，因此增删行不会丢已有编辑值。
+    /// 写表格的表头文字。构造与每次 reload 都要调用——QTableWidget::clear()
+    /// 会连表头一起清空。
+    void applyCapabilityHeaderLabels();
+    void reloadModelCapabilityTable();
+    /// 创建一个模型行（模型 / 上下文窗口 / 最大输出 / 思考档位 / 默认档位）。
+    void addCapabilityRow(int row, const QString &modelId, const ModelOptionOverride &override);
+    /// 读该行控件 → 写回 settings_.modelOverrides → 刷新非法态与确定按钮。
+    void applyCapabilityRow(int row);
+    /// 「思考档位」文本变化：重建该行「默认档位」下拉（保留仍合法的选择）后写回。
+    void onCapabilityReasoningTextChanged(int row);
+    /// 用该行「思考档位」里解析出的合法 id 重建下拉；preferredDefault 仍合法则保留。
+    void rebuildDefaultReasoningCombo(int row, const QString &preferredDefault);
+    /// 解析该行「思考档位」文本：返回合法 id（去重保序），非法 id 追加到 unknownOut。
+    QStringList validReasoningIdsForRow(int row, QStringList *unknownOut) const;
+    /// 汇总所有行的非法档位提示（destructive 文案），无错误时隐藏。
+    void refreshCapabilityValidation();
+    /// 是否存在非法档位 id；用于禁用「确定」。
+    bool hasCapabilityErrors() const;
+    /// 取该行对应的模型 id（存在第 0 列的 UserRole 里）。
+    QString capabilityModelIdAt(int row) const;
+    /// 表格行高与整体高度：随行数与字号令牌变化，超出上限由表格自身滚动。
+    void applyCapabilityTableHeight();
+    /// accept() 前清理「模型列表里已不存在」的模型的覆盖键（只动可枚举的 Provider）。
+    void pruneStaleModelOverrides();
 
     // ── 会话页 ──────────────────────────────────────────────────────────────
     void reloadRecentWorkspaces();
@@ -120,6 +150,15 @@ private:
     QPushButton *removeProviderButton_ = nullptr;
     QPushButton *moveUpButton_ = nullptr;
     QPushButton *moveDownButton_ = nullptr;
+
+    // Provider · 模型能力
+    QGroupBox *modelCapabilityGroup_ = nullptr;
+    QTableWidget *modelCapabilityTable_ = nullptr;
+    QLabel *modelCapabilityEmptyHint_ = nullptr;
+    QLabel *modelCapabilityErrorLabel_ = nullptr;
+    /// 表格当前展示的模型 id 顺序（含所属 Provider id）：模型列表变化时用它判断是否重建。
+    QStringList capabilityModelIds_;
+    QString capabilityProviderId_;
 
     // 会话
     QComboBox *sessionModeCombo_ = nullptr;

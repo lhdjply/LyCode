@@ -82,6 +82,7 @@ private slots:
     void onStopRequested();
     void onModelChanged(int index);
     void onModeChanged(int index);
+    void onReasoningLevelChanged(int index);
     void onSettingsRequested();
 
 private:
@@ -92,6 +93,8 @@ private:
     void applySettingsToUi();
     void loadWorkspaceSessions();
     void refreshModelCombo();
+    /// 按当前模型重建思考档位下拉。不支持思考的模型会隐藏该控件。
+    void refreshReasoningCombo();
     void refreshContextUsage();
     void refreshRunState();
     void showNextPermissionDialog();
@@ -127,6 +130,7 @@ private:
     ConversationView *conversation_ = nullptr;
 
     QComboBox *modelCombo_ = nullptr;
+    QComboBox *reasoningCombo_ = nullptr;
     QComboBox *modeCombo_ = nullptr;
     QLabel *contextLabel_ = nullptr;
     QProgressBar *contextBar_ = nullptr;

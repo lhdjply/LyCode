@@ -37,6 +37,11 @@ struct AppSettings {
 
     /// 模型能力覆盖，键为 modelOptionKey(providerId, modelId)。
     QHash<QString, ModelOptionOverride> modelOverrides;
+    /// 每个模型上次使用的思考档位，键为 modelOptionKey。
+    ///
+    /// 单独一张表而不是塞进 ModelSelection：档位是"用户对这个模型的偏好"，
+    /// 换工作区、换会话都应延续；而 ModelSelection 是会话级的一次性选择。
+    QHash<QString, QString> modelReasoningLevel;
 
     // 工作区
     QStringList recentWorkspaces;
@@ -55,6 +60,12 @@ struct AppSettings {
     /// 写入模型覆盖；空覆盖会删除记录，避免配置文件堆积无用条目。
     void setModelOverride(const QString &providerId, const QString &modelId,
                           const ModelOptionOverride &override);
+
+    /// 取指定模型上次使用的思考档位；无记录返回空（由调用方按模型默认值决定）。
+    QString reasoningLevelFor(const QString &providerId, const QString &modelId) const;
+    /// 记住某模型使用的思考档位。传空串表示"关闭"，会被持久化。
+    void rememberReasoningLevel(const QString &providerId, const QString &modelId,
+                                const QString &levelId);
 
     /// 取指定工作区的最近模型；无记录时返回 lastModel。
     ModelSelection modelForWorkspace(const QString &workspaceKey) const;

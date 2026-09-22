@@ -13,6 +13,8 @@
 //              → 权限门 → 权限弹窗 → 真实 Bash 执行 → 回填 → 最终回复
 #include <QtTest>
 
+#include <QComboBox>
+#include <QGroupBox>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -21,6 +23,13 @@
 #include <QFontMetrics>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QProgressBar>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSpinBox>
+#include <QHeaderView>
+#include <QTabWidget>
+#include <QTableWidget>
 #include <QPushButton>
 #include <QTemporaryDir>
 
@@ -28,6 +37,8 @@
 #include "ui/ConversationView.h"
 #include "ui/MainWindow.h"
 #include "ui/PermissionDialog.h"
+#include "ui/AppConfig.h"
+#include "ui/SettingsDialog.h"
 #include "ui/SidebarPanel.h"
 #include "ui/ToolCallWidget.h"
 
@@ -108,6 +119,21 @@ void TestUiFlow::initTestCase() {
     settings.insert(QStringLiteral("language"), QStringLiteral("zh-CN"));
     settings.insert(QStringLiteral("providers"), QJsonArray{provider});
     settings.insert(QStringLiteral("lastModel"), QStringLiteral("smoke/smoke-model"));
+
+    // 声明该模型的能力覆盖：上下文窗口与思考档位。用于验证
+    // ① 工具条上的思考等级选择器出现并选中默认档位
+    // ② 上下文用量的分母用的是覆盖值而不是内置默认值
+    QJsonObject reasoningLevels;
+    reasoningLevels.insert(QStringLiteral("contextWindow"), 64000);
+    reasoningLevels.insert(QStringLiteral("reasoningLevels"),
+                           QJsonArray::fromStringList({QStringLiteral("off"),
+                                                       QStringLiteral("low"),
+                                                       QStringLiteral("high")}));
+    reasoningLevels.insert(QStringLiteral("defaultReasoningLevel"), QStringLiteral("high"));
+
+    QJsonObject overrides;
+    overrides.insert(QStringLiteral("smoke/smoke-model"), reasoningLevels);
+    settings.insert(QStringLiteral("modelOverrides"), overrides);
     settings.insert(QStringLiteral("recentWorkspaces"), QJsonArray());
     settings.insert(QStringLiteral("defaultSessionMode"), QStringLiteral("build"));
     settings.insert(QStringLiteral("persistSessions"), true);
@@ -179,8 +205,24 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     // 完整路径必须在 tooltip 里，即使显示被省略。
     QVERIFY(pathLabel->toolTip().startsWith(QLatin1Char('/')));
 
+    // ── 思考等级选择器 ─────────────────────────────────────────────────────
+    auto *reasoningCombo = window.findChild<QComboBox *>(QStringLiteral("reasoningCombo"));
+    QVERIFY2(reasoningCombo != nullptr, "工具条上应当有思考等级选择器");
+    QVERIFY2(reasoningCombo->isVisible(),
+             "模型声明了思考档位时，选择器必须可见（否则用户无法设置思考等级）");
+    QCOMPARE(reasoningCombo->count(), 3);
+    QCOMPARE(reasoningCombo->currentData().toString(), QStringLiteral("high"));
+
     // 启动时会自动建一个会话（或恢复最近会话），等它稳定下来。
     QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }));
+
+    // ── 上下文用量的分母必须来自覆盖值 ─────────────────────────────────────
+    // 会话一建立就应显示窗口大小：否则用户改完"上下文窗口"看不到任何反馈。
+    auto *contextLabel = window.findChild<QLabel *>(QStringLiteral("contextLabel"));
+    QVERIFY(contextLabel != nullptr);
+    QVERIFY2(contextLabel->text().contains(QStringLiteral("64.0k")),
+             qPrintable(QStringLiteral("上下文分母应为覆盖后的 64000，实际文案：") +
+                        contextLabel->text()));
 
     // ── 输入并发送 ─────────────────────────────────────────────────────────
     composer->setPlainText(QStringLiteral("run echo test"));
@@ -251,6 +293,73 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     QTest::qWait(200);
     const QString toolShot = screenshotDir() + QStringLiteral("/04-tool-card-expanded.png");
     QVERIFY2(cards.first()->grab().save(toolShot), qPrintable(toolShot));
+
+    // ── 设置页的「模型能力」编辑入口 ───────────────────────────────────────
+    // 只验证了后端与工具条还不够：用户能不能在设置里改"上下文窗口/思考档位"，
+    // 必须走一遍真实的对话框才作数。
+    AppSettings loadedSettings;
+    QString configError;
+    QVERIFY2(AppConfig::load(&loadedSettings, &configError), qPrintable(configError));
+
+    SettingsDialog settingsDialog(loadedSettings, &window);
+    settingsDialog.resize(940, 640);
+    settingsDialog.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&settingsDialog));
+
+    auto *tabs = settingsDialog.findChild<QTabWidget *>();
+    QVERIFY(tabs != nullptr);
+    // 切到 Provider 页（模型能力分组在那里）。
+    tabs->setCurrentIndex(1);
+    QTest::qWait(200);
+
+    auto *capabilityGroup =
+        settingsDialog.findChild<QGroupBox *>(QStringLiteral("modelCapabilityGroup"));
+    QVERIFY2(capabilityGroup != nullptr, "设置页应当有「模型能力」分组");
+    QVERIFY(capabilityGroup->isVisible());
+
+    // 把设置页滚到底：「模型能力」分组在表单下方，不滚动的话截图里看不到它
+    // （也就看不到用户实际要用的编辑入口）。
+    if (auto *scrollArea = settingsDialog.findChild<QScrollArea *>()) {
+        scrollArea->verticalScrollBar()->setValue(scrollArea->verticalScrollBar()->maximum());
+        QTest::qWait(100);
+    }
+
+    auto *capabilityTable =
+        settingsDialog.findChild<QTableWidget *>(QStringLiteral("modelCapabilityTable"));
+    QVERIFY2(capabilityTable != nullptr, "模型能力分组里应当有编辑表格");
+    // 测试配置里只有一个模型 smoke-model。
+    QCOMPARE(capabilityTable->rowCount(), 1);
+    QCOMPARE(capabilityTable->item(0, 0)->text(), QStringLiteral("smoke-model"));
+
+    // 表头必须是中文列名而不是列号 1/2/3：QTableWidget::clear() 会把表头一起
+    // 清空，只在构造里设一次的话 reload 之后就会退化成列号（实测踩到）。
+    QCOMPARE(capabilityTable->horizontalHeaderItem(0)->text(), QStringLiteral("模型"));
+    QCOMPARE(capabilityTable->horizontalHeaderItem(1)->text(), QStringLiteral("上下文窗口"));
+    QCOMPARE(capabilityTable->horizontalHeaderItem(3)->text(), QStringLiteral("思考档位"));
+    QCOMPARE(capabilityTable->columnCount(), 5);
+
+    // 五列必须能塞进可视宽度，否则用户一打开就看不到最右边的"默认档位"。
+    int tableWidth = 0;
+    for (int column = 0; column < capabilityTable->columnCount(); ++column) {
+        tableWidth += capabilityTable->columnWidth(column);
+    }
+    QVERIFY2(tableWidth <= capabilityTable->viewport()->width() + 4,
+             qPrintable(QStringLiteral("表格总列宽 %1 超过可视宽度 %2，会出现横向滚动")
+                            .arg(tableWidth)
+                            .arg(capabilityTable->viewport()->width())));
+
+    // 上下文窗口那一列必须回显出设置文件里的覆盖值（64000），
+    // 而不是显示成"默认"——那意味着设置没被读进来。
+    auto *contextSpin =
+        capabilityTable->findChild<QSpinBox *>(QStringLiteral("modelContextSpin_0"));
+    QVERIFY2(contextSpin != nullptr, "每行应当有上下文窗口输入框");
+    QCOMPARE(contextSpin->value(), 64000);
+
+    const QString settingsShot =
+        screenshotDir() + QStringLiteral("/05-settings-model-capabilities.png");
+    QVERIFY2(settingsDialog.grab().save(settingsShot), qPrintable(settingsShot));
+
+    settingsDialog.close();
 
     // 会话应当已落盘（标题取自首条用户输入）。
     QVERIFY(QFile::exists(dataDir_->path() + QStringLiteral("/qt/sessions.db")));

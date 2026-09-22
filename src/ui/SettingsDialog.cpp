@@ -1,6 +1,7 @@
 #include "ui/SettingsDialog.h"
 
 #include "core/Ids.h"
+#include "model/ReasoningLevels.h"
 #include "ui/Theme.h"
 
 #include <QCheckBox>
@@ -9,15 +10,20 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QFrame>
+#include <QGroupBox>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLoggingCategory>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
+#include <QSet>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QVariant>
@@ -31,11 +37,30 @@ namespace {
 Q_LOGGING_CATEGORY(log, "zcode.ui.dialogs")
 
 /// Provider 列表固定宽度：右栏表单需要剩余全部横向空间，左栏只做选择。
-constexpr int kProviderListWidth = 224;
+constexpr int kProviderListWidth = 196;
 /// 列表项文本省略预算（列表宽度 - 内边距 - 滚动条），避免长 URL 撑出横向滚动。
 constexpr int kProviderItemTextWidth = 196;
 /// 模型列表输入框高度（约 4-5 行）。
 constexpr int kModelsEditHeight = 96;
+
+// ── 模型能力覆盖 ────────────────────────────────────────────────────────────
+/// 上下文窗口上限：足够覆盖当前最大的公开模型（Claude 200k、Gemini 1M-2M）。
+constexpr int kMaxContextWindow = 2000000;
+/// 单次最大输出上限。
+constexpr int kMaxOutputTokens = 200000;
+/// 表格整体高度上限：超过这个高度就由表格自身滚动，不再把页面撑长。
+constexpr int kCapabilityTableMaxHeight = 320;
+/// 表格整体高度下限：空/单行时也留出表头 + 一行的空间。
+constexpr int kCapabilityTableMinHeight = 132;
+
+/// 模型能力表格的列序。
+enum CapabilityColumn {
+    CapabilityModelColumn = 0,
+    CapabilityContextColumn = 1,
+    CapabilityOutputColumn = 2,
+    CapabilityReasoningColumn = 3,
+    CapabilityDefaultColumn = 4,
+};
 
 // ── 令牌化排版 ──────────────────────────────────────────────────────────────
 // 全局样式表里有 `QWidget { font-family / font-size }` 通配规则，会盖掉 setFont()。
@@ -170,6 +195,73 @@ QStringList parseModelIds(const QString &text) {
     return models;
 }
 
+/// 「思考档位」文本的解析结果：合法 id（去重保序）+ 非法 id（去重保序）。
+struct ParsedReasoningIds {
+    QStringList valid;
+    QStringList unknown;
+};
+
+/// 分隔符同时接受半角/全角逗号、顿号与任意空白：用户从文档里复制时经常混用，
+/// 只认半角逗号会让"看起来对"的输入被判非法，体验很差。
+ParsedReasoningIds parseReasoningIds(const QString &text) {
+    ParsedReasoningIds result;
+    QString normalized = text;
+    normalized.replace(QChar(0xFF0C), QLatin1Char(','));  // 全角逗号
+    normalized.replace(QChar(0x3001), QLatin1Char(','));  // 顿号
+    const QStringList tokens =
+        normalized.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+    for (const QString &token : tokens) {
+        const QString id = token.trimmed();
+        if (id.isEmpty()) {
+            continue;
+        }
+        if (findReasoningLevel(id) == nullptr) {
+            if (!result.unknown.contains(id)) {
+                result.unknown.append(id);
+            }
+        } else if (!result.valid.contains(id)) {
+            result.valid.append(id);
+        }
+    }
+    return result;
+}
+
+/// 合法档位清单（供 tooltip 展示）。文案形如「off=关闭, low=低, ...」。
+QString reasoningLevelsTooltip() {
+    QStringList parts;
+    const QList<ReasoningLevel> &levels = standardReasoningLevels();
+    parts.reserve(levels.size());
+    for (const ReasoningLevel &level : levels) {
+        parts.append(level.id + QLatin1Char('=') + level.label);
+    }
+    return QStringLiteral("逗号分隔的档位 id，例如 %1。\n合法取值：%2\n留空 = 沿用默认（由模型自报的档位决定）。")
+        .arg(defaultReasoningLevelIds().join(QLatin1Char(',')), parts.join(QStringLiteral(", ")));
+}
+
+/// 「思考档位」输入框：固定等宽字体（技术值），非法时加一条 destructive 边框。
+/// 只写字体/边框，底色与其它状态仍由全局令牌样式负责。
+void applyReasoningEditStyle(QLineEdit *edit) {
+    if (edit == nullptr) {
+        return;
+    }
+    const Theme &theme = Theme::instance();
+    QString style =
+        QStringLiteral("QLineEdit#%1 { font-family: \"%2\"; font-size: %3px;")
+            .arg(edit->objectName(), monospaceFamily(),
+                 QString::number(theme.fontPixelSize(FontRole::MonoSm)));
+    if (edit->property("capabilityInvalid").toBool()) {
+        style += QStringLiteral(" border: 1px solid %1;")
+                     .arg(Theme::css(theme.palette().destructive));
+    }
+    style += QLatin1Char('}');
+    edit->setStyleSheet(style);
+}
+
+/// 表格行高：必须容得下内嵌的 QSpinBox / QLineEdit，随界面字号令牌变化。
+int capabilityRowHeight() {
+    return std::max(36, Theme::instance().fontPixelSize(FontRole::UiBase) + 22);
+}
+
 /// 表单字段：字段名（弱化 UiSm）+ 控件 + 校验提示（destructive，默认隐藏）。
 /// 返回错误提示标签，调用方保存指针以便实时更新文案。
 QLabel *addFormField(QVBoxLayout *layout, const QString &title, QWidget *field, QWidget *parent) {
@@ -245,8 +337,11 @@ SettingsDialog::SettingsDialog(const AppSettings &settings, QWidget *parent)
     : QDialog(parent), settings_(settings) {
     setObjectName(QStringLiteral("SettingsDialog"));
     setWindowTitle(QStringLiteral("设置"));
-    resize(720, 560);
-    setMinimumSize(640, 480);
+    // 比原先宽得多：Provider 页新增了五列的「模型能力」表格。
+    // 五列要在"不出现横向滚动条"的前提下放得下，右栏至少需要 ~620px，
+    // 叠加左侧 Provider 列表与边距，对话框需要 ~940px。
+    resize(940, 620);
+    setMinimumSize(760, 520);
 
     // 实时预览必须能回滚：记录"屏幕上当时的样子"，而不是 settings 里的值。
     const Theme &theme = Theme::instance();
@@ -286,11 +381,23 @@ SettingsDialog::SettingsDialog(const AppSettings &settings, QWidget *parent)
 SettingsDialog::~SettingsDialog() = default;
 
 void SettingsDialog::accept() {
-    if (!validateAllProviders()) {
+    const bool providersOk = validateAllProviders();
+    // 非法的思考档位 id 不写进配置（只写合法子集），但必须在这里也拦一道：
+    // 「确定」按钮虽然被禁用，键盘回车 / 程序化调用仍可能走到 accept()，
+    // 放过去用户就会以为非法档位已经生效。
+    const bool capabilitiesOk = !hasCapabilityErrors();
+    if (!capabilitiesOk) {
+        refreshCapabilityValidation();
+        qCWarning(log) << "模型能力覆盖校验失败，保留对话框: 存在未知思考档位 id";
+    }
+    if (!providersOk || !capabilitiesOk) {
         // 校验不通过：不关闭，并把用户带到出问题的那个 provider。
         tabs_->setCurrentIndex(1);
         return;
     }
+    // 编辑期间只保证"当前 Provider 的键"正确；收尾时统一删掉所有 Provider
+    // 里已经从模型列表移除的键，避免配置文件长期堆积无用条目。
+    pruneStaleModelOverrides();
     logAcceptedSettings();
     QDialog::accept();
 }
@@ -511,6 +618,63 @@ QWidget *SettingsDialog::buildProviderPage() {
     providerEnabledCheck_->setToolTip(QStringLiteral("停用后该 Provider 不会出现在模型选择器中"));
     form->addWidget(providerEnabledCheck_);
 
+    // ── 模型能力覆盖 ──────────────────────────────────────────────────────
+    // 用 QGroupBox 而不是自绘容器：它的 sizeHint 由布局算出（本项目踩过
+    // "把表格塞进 sizeHint 不含子布局的控件导致表格被压成 0 高"的坑）。
+    // 表格本身放在 providerForm_ 的滚动区里，且自身高度有上限，两级都能滚。
+    modelCapabilityGroup_ = new QGroupBox(QStringLiteral("模型能力"), providerForm_);
+    modelCapabilityGroup_->setObjectName(QStringLiteral("modelCapabilityGroup"));
+    auto *capabilityLayout = new QVBoxLayout(modelCapabilityGroup_);
+    capabilityLayout->setContentsMargins(12, 16, 12, 12);  // 顶部为 QGroupBox 标题留空
+    capabilityLayout->setSpacing(8);
+    capabilityLayout->addWidget(makeLabel(
+        QStringLiteral("modelCapabilityHint"),
+        QStringLiteral("覆盖 Provider 自报的模型元信息；留 0 / 留空表示沿用内置默认。"
+                       "窗口与输出上限的单位是 token。"),
+        FontRole::UiXs, ColorToken::ForegroundSubtlest, modelCapabilityGroup_));
+
+    modelCapabilityTable_ = new QTableWidget(0, 5, modelCapabilityGroup_);
+    modelCapabilityTable_->setObjectName(QStringLiteral("modelCapabilityTable"));
+    applyCapabilityHeaderLabels();
+    modelCapabilityTable_->verticalHeader()->setVisible(false);
+    // 「模型」列自适应剩余宽度，其余列固定宽度（数值/下拉宽度稳定才好扫读）。
+    modelCapabilityTable_->horizontalHeader()->setSectionResizeMode(
+        CapabilityModelColumn, QHeaderView::Stretch);
+    for (int column = CapabilityContextColumn; column <= CapabilityDefaultColumn; ++column) {
+        modelCapabilityTable_->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Fixed);
+    }
+    // 固定列宽之和要留在右栏可用宽度内：五列全固定会一打开就出现横向滚动条，
+    // 用户看不到"默认档位"那一列。（原先 132+124+236+148 = 640 就超了。）
+    modelCapabilityTable_->setColumnWidth(CapabilityContextColumn, 92);
+    modelCapabilityTable_->setColumnWidth(CapabilityOutputColumn, 92);
+    modelCapabilityTable_->setColumnWidth(CapabilityReasoningColumn, 132);
+    modelCapabilityTable_->setColumnWidth(CapabilityDefaultColumn, 104);
+    modelCapabilityTable_->horizontalHeader()->setStretchLastSection(false);
+    modelCapabilityTable_->horizontalHeader()->setHighlightSections(false);
+    modelCapabilityTable_->setWordWrap(false);
+    // 只读表格：没有"当前单元格"这一说，避免表格抢焦点后键盘操作语义混乱。
+    modelCapabilityTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    modelCapabilityTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    modelCapabilityTable_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    modelCapabilityTable_->setFrameShape(QFrame::NoFrame);
+    modelCapabilityTable_->setShowGrid(true);
+    capabilityLayout->addWidget(modelCapabilityTable_);
+
+    modelCapabilityEmptyHint_ =
+        makeLabel(QStringLiteral("modelCapabilityEmptyHint"),
+                  QStringLiteral("请先在上方填写模型列表"), FontRole::UiXs,
+                  ColorToken::ForegroundSubtlest, modelCapabilityGroup_);
+    capabilityLayout->addWidget(modelCapabilityEmptyHint_);
+
+    modelCapabilityErrorLabel_ = makeLabel(QStringLiteral("modelCapabilityError"), QString(),
+                                           FontRole::UiSm, ColorToken::Destructive,
+                                           modelCapabilityGroup_);
+    modelCapabilityErrorLabel_->setWordWrap(true);
+    modelCapabilityErrorLabel_->hide();
+    capabilityLayout->addWidget(modelCapabilityErrorLabel_);
+
+    form->addWidget(modelCapabilityGroup_);
+
     auto *separator = new QFrame(providerForm_);
     separator->setProperty("role", "separator");
     separator->setFrameShape(QFrame::HLine);
@@ -559,8 +723,11 @@ QWidget *SettingsDialog::buildProviderPage() {
         // 只记"是否显示"，绝不记内容。
         qCDebug(log) << "API Key 可见性切换:" << visible;
     });
-    connect(providerModelsEdit_, &QPlainTextEdit::textChanged, this,
-            [this]() { applyProviderForm(); });
+    connect(providerModelsEdit_, &QPlainTextEdit::textChanged, this, [this]() {
+        applyProviderForm();
+        // 模型列表变了 → 表格行跟着增删。已有行的编辑值从 settings_ 回填，不会丢。
+        reloadModelCapabilityTable();
+    });
     connect(providerEnabledCheck_, &QCheckBox::toggled, this,
             [this](bool) { applyProviderForm(); });
 
@@ -635,6 +802,7 @@ void SettingsDialog::loadProviderForm(int row) {
     syncBaseUrlPlaceholder();
     syncing_ = wasSyncing;
 
+    reloadModelCapabilityTable();
     updateProviderState();
 }
 
@@ -701,11 +869,19 @@ void SettingsDialog::updateProviderState() {
                                     currentProvider_ + 1 < settings_.providers.size());
     }
     // 没有选中项时不算"非法"（列表为空也是合法状态），只有选中且缺必填项才拦确定。
+    // 模型能力里的非法档位 id 同样拦确定：那种值写进配置后在请求阶段只会被静默忽略，
+    // 用户会以为设置生效了。
+    const bool capabilityOk = !hasCapabilityErrors();
     if (okButton_ != nullptr) {
-        okButton_->setEnabled(!hasProvider || (nameError.isEmpty() && baseUrlError.isEmpty()));
+        okButton_->setEnabled((!hasProvider ||
+                               (nameError.isEmpty() && baseUrlError.isEmpty())) &&
+                              capabilityOk);
     }
     if (hasProvider && (!nameError.isEmpty() || !baseUrlError.isEmpty())) {
         qCDebug(log) << "Provider 表单校验未通过:" << nameError << baseUrlError;
+    }
+    if (!capabilityOk) {
+        qCDebug(log) << "模型能力覆盖校验未通过: 存在未知思考档位 id";
     }
 }
 
@@ -754,6 +930,308 @@ void SettingsDialog::moveProvider(int delta) {
     settings_.providers.swapItemsAt(currentProvider_, target);
     qCDebug(log) << "调整 Provider 顺序:" << currentProvider_ << "→" << target;
     reloadProviderList(target);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Provider · 模型能力覆盖
+// ─────────────────────────────────────────────────────────────────────────────
+
+void SettingsDialog::applyCapabilityHeaderLabels() {
+    // 集中在一处：构造与 reload 都必须调用它，否则表头会被 clear() 抹掉。
+    modelCapabilityTable_->setHorizontalHeaderLabels(
+        {QStringLiteral("模型"), QStringLiteral("上下文窗口"), QStringLiteral("最大输出"),
+         QStringLiteral("思考档位"), QStringLiteral("默认档位")});
+}
+
+void SettingsDialog::reloadModelCapabilityTable() {
+    if (modelCapabilityTable_ == nullptr) {
+        return;
+    }
+    const QStringList models = parseModelIds(providerModelsEdit_->toPlainText());
+    const QString providerId =
+        (currentProvider_ >= 0 && currentProvider_ < settings_.providers.size())
+            ? settings_.providers.at(currentProvider_).id
+            : QString();
+    // 行集合与所属 Provider 都没变就不重建：重建会销毁用户正在编辑的单元格控件
+    // （光标位置、下拉展开状态都会丢）。值本身存在 settings_ 里，不需要靠控件保活。
+    if (models == capabilityModelIds_ && providerId == capabilityProviderId_) {
+        return;
+    }
+    capabilityModelIds_ = models;
+    capabilityProviderId_ = providerId;
+
+    const bool wasSyncing = syncing_;
+    syncing_ = true;
+
+    // clear() 会连单元格控件一起销毁；只 setRowCount(0) 的清理语义依赖实现细节。
+    //
+    // ⚠ QTableWidget::clear() **同时清空表头文字**，所以表头必须在这里重写一遍。
+    // 只在构造里设一次的话，第一次 reload 之后表头就退化成列号 1/2/3（实测踩到）。
+    modelCapabilityTable_->clear();
+    applyCapabilityHeaderLabels();
+    modelCapabilityTable_->setRowCount(static_cast<int>(models.size()));
+    for (int row = 0; row < models.size(); ++row) {
+        const QString &modelId = models.at(row);
+        addCapabilityRow(row, modelId, settings_.modelOverride(providerId, modelId));
+    }
+
+    syncing_ = wasSyncing;
+
+    const bool empty = models.isEmpty();
+    modelCapabilityTable_->setVisible(!empty);
+    modelCapabilityEmptyHint_->setVisible(empty);
+    if (empty) {
+        modelCapabilityErrorLabel_->clear();
+        modelCapabilityErrorLabel_->hide();
+    } else {
+        refreshCapabilityValidation();
+    }
+    applyCapabilityTableHeight();
+}
+
+void SettingsDialog::addCapabilityRow(int row, const QString &modelId,
+                                      const ModelOptionOverride &override) {
+    auto *modelItem = new QTableWidgetItem(modelId);
+    // 只读：模型 id 由上方「模型列表」维护，这里改会出现两处真相。
+    modelItem->setFlags(Qt::ItemIsEnabled);
+    // 模型 id 是技术值 → 等宽字体（FontRole::Mono）。
+    modelItem->setFont(Theme::instance().font(FontRole::Mono));
+    modelItem->setToolTip(modelId);
+    modelItem->setData(Qt::UserRole, modelId);
+    modelCapabilityTable_->setItem(row, CapabilityModelColumn, modelItem);
+
+    auto *contextSpin = new QSpinBox(modelCapabilityTable_);
+    contextSpin->setObjectName(QStringLiteral("modelContextSpin_%1").arg(row));
+    contextSpin->setRange(0, kMaxContextWindow);
+    contextSpin->setSingleStep(1000);
+    // 不加 " tokens" 后缀：五列要挤在右栏里，后缀会把「模型」列压到看不出模型名。
+    // 单位写在分组提示里，单元格里只留数字。
+    // 0 是"不覆盖"的哨兵值：显示成「默认」而不是一个会让人以为窗口只有 0 的 0。
+    contextSpin->setSpecialValueText(QStringLiteral("默认"));
+    contextSpin->setToolTip(
+        QStringLiteral("留 0 表示沿用内置默认（通常 128000，Claude 系列 200000）"));
+    contextSpin->setValue(std::clamp(override.contextWindow, 0, kMaxContextWindow));
+    modelCapabilityTable_->setCellWidget(row, CapabilityContextColumn, contextSpin);
+
+    auto *outputSpin = new QSpinBox(modelCapabilityTable_);
+    outputSpin->setObjectName(QStringLiteral("modelOutputSpin_%1").arg(row));
+    outputSpin->setRange(0, kMaxOutputTokens);
+    outputSpin->setSingleStep(256);
+    // 不加 " tokens" 后缀：五列要挤在右栏里，后缀会把「模型」列压到看不出模型名。
+    // 单位写在分组提示里，单元格里只留数字。
+    outputSpin->setSpecialValueText(QStringLiteral("默认"));
+    outputSpin->setToolTip(QStringLiteral("留 0 表示沿用内置默认（通常 8192）"));
+    outputSpin->setValue(std::clamp(override.maxOutputTokens, 0, kMaxOutputTokens));
+    modelCapabilityTable_->setCellWidget(row, CapabilityOutputColumn, outputSpin);
+
+    auto *reasoningEdit = new QLineEdit(modelCapabilityTable_);
+    reasoningEdit->setObjectName(QStringLiteral("modelReasoningEdit_%1").arg(row));
+    // 占位符给一份保守默认示例；真正生效的默认由模型自报的档位决定。
+    reasoningEdit->setPlaceholderText(defaultReasoningLevelIds().join(QLatin1Char(',')));
+    reasoningEdit->setToolTip(reasoningLevelsTooltip());
+    reasoningEdit->setProperty("capabilityInvalid", false);
+    reasoningEdit->setText(override.reasoningLevels.join(QStringLiteral(", ")));
+    applyReasoningEditStyle(reasoningEdit);
+    modelCapabilityTable_->setCellWidget(row, CapabilityReasoningColumn, reasoningEdit);
+
+    auto *defaultCombo = new QComboBox(modelCapabilityTable_);
+    defaultCombo->setObjectName(QStringLiteral("modelDefaultReasoningCombo_%1").arg(row));
+    defaultCombo->setToolTip(QStringLiteral("新建会话时默认选中的思考档位"));
+    modelCapabilityTable_->setCellWidget(row, CapabilityDefaultColumn, defaultCombo);
+    // 下拉的选项必须由同一行的「思考档位」推导，所以先建输入框再建下拉。
+    rebuildDefaultReasoningCombo(row, override.defaultReasoningLevel);
+
+    // 连接放在初值之后：构造期不会把"加载"当成"用户编辑"（syncing_ 双保险）。
+    connect(contextSpin, &QSpinBox::valueChanged, this, [this, row](int) {
+        applyCapabilityRow(row);
+    });
+    connect(outputSpin, &QSpinBox::valueChanged, this, [this, row](int) {
+        applyCapabilityRow(row);
+    });
+    connect(reasoningEdit, &QLineEdit::textChanged, this,
+            [this, row](const QString &) { onCapabilityReasoningTextChanged(row); });
+    connect(defaultCombo, &QComboBox::currentIndexChanged, this,
+            [this, row](int) { applyCapabilityRow(row); });
+}
+
+void SettingsDialog::onCapabilityReasoningTextChanged(int row) {
+    if (syncing_) {
+        return;
+    }
+    const auto *combo = qobject_cast<QComboBox *>(
+        modelCapabilityTable_->cellWidget(row, CapabilityDefaultColumn));
+    const QString previous = combo != nullptr ? combo->currentData().toString() : QString();
+    // 先重建下拉（保留仍合法的旧选择），再整体写回。
+    rebuildDefaultReasoningCombo(row, previous);
+    applyCapabilityRow(row);
+}
+
+void SettingsDialog::rebuildDefaultReasoningCombo(int row, const QString &preferredDefault) {
+    auto *combo =
+        qobject_cast<QComboBox *>(modelCapabilityTable_->cellWidget(row, CapabilityDefaultColumn));
+    if (combo == nullptr) {
+        return;
+    }
+    const bool wasSyncing = syncing_;
+    syncing_ = true;
+
+    combo->clear();
+    combo->addItem(QStringLiteral("（不指定）"), QString());
+    const QStringList valid = validReasoningIdsForRow(row, nullptr);
+    for (const QString &id : valid) {
+        combo->addItem(QStringLiteral("%1 %2").arg(id, reasoningLevelLabel(id)), id);
+    }
+    // 档位列表为空时"默认档位"没有可选值，禁用而不是给一个空下拉。
+    combo->setEnabled(!valid.isEmpty());
+    const int preferredIndex = preferredDefault.isEmpty() ? 0 : combo->findData(preferredDefault);
+    combo->setCurrentIndex(preferredIndex >= 0 ? preferredIndex : 0);
+
+    syncing_ = wasSyncing;
+}
+
+QStringList SettingsDialog::validReasoningIdsForRow(int row, QStringList *unknownOut) const {
+    const auto *edit =
+        qobject_cast<QLineEdit *>(modelCapabilityTable_->cellWidget(row, CapabilityReasoningColumn));
+    const ParsedReasoningIds parsed =
+        parseReasoningIds(edit != nullptr ? edit->text() : QString());
+    if (unknownOut != nullptr) {
+        *unknownOut = parsed.unknown;
+    }
+    return parsed.valid;
+}
+
+void SettingsDialog::applyCapabilityRow(int row) {
+    if (syncing_ || currentProvider_ < 0 || currentProvider_ >= settings_.providers.size()) {
+        return;
+    }
+    const QString modelId = capabilityModelIdAt(row);
+    if (modelId.isEmpty()) {
+        return;
+    }
+
+    const auto *contextSpin =
+        qobject_cast<QSpinBox *>(modelCapabilityTable_->cellWidget(row, CapabilityContextColumn));
+    const auto *outputSpin =
+        qobject_cast<QSpinBox *>(modelCapabilityTable_->cellWidget(row, CapabilityOutputColumn));
+    auto *reasoningEdit =
+        qobject_cast<QLineEdit *>(modelCapabilityTable_->cellWidget(row, CapabilityReasoningColumn));
+    const auto *defaultCombo =
+        qobject_cast<QComboBox *>(modelCapabilityTable_->cellWidget(row, CapabilityDefaultColumn));
+
+    ModelOptionOverride override;
+    override.contextWindow = contextSpin != nullptr ? contextSpin->value() : 0;
+    override.maxOutputTokens = outputSpin != nullptr ? outputSpin->value() : 0;
+    QStringList unknown;
+    override.reasoningLevels = validReasoningIdsForRow(row, &unknown);
+    const QString chosen = defaultCombo != nullptr ? defaultCombo->currentData().toString()
+                                                   : QString();
+    // 默认档位必须属于本行的档位列表：否则写出去的是自相矛盾的覆盖
+    //（默认档位不在可用列表里，请求阶段会被静默丢弃）。
+    if (!chosen.isEmpty() && override.reasoningLevels.contains(chosen)) {
+        override.defaultReasoningLevel = chosen;
+    }
+    // 只有"当前 Provider + 当前模型"这一个键会被写/删：
+    // 其它 Provider 的覆盖项绝不触碰（各 Provider 的模型 id 可能重名，键前缀不同）。
+    // 三个字段全空时 AppSettings::setModelOverride 会删除该键——配置文件里不留空对象。
+    settings_.setModelOverride(settings_.providers.at(currentProvider_).id, modelId, override);
+
+    if (reasoningEdit != nullptr) {
+        reasoningEdit->setProperty("capabilityInvalid", !unknown.isEmpty());
+        applyReasoningEditStyle(reasoningEdit);
+    }
+    refreshCapabilityValidation();
+    updateProviderState();
+    qCDebug(log) << "模型能力覆盖已更新: provider=" << settings_.providers.at(currentProvider_).id
+                 << "model=" << modelId << "contextWindow=" << override.contextWindow
+                 << "maxOutputTokens=" << override.maxOutputTokens
+                 << "reasoningLevels=" << override.reasoningLevels.join(QLatin1Char(','))
+                 << "defaultReasoningLevel=" << override.defaultReasoningLevel;
+}
+
+void SettingsDialog::refreshCapabilityValidation() {
+    if (modelCapabilityTable_ == nullptr || modelCapabilityErrorLabel_ == nullptr) {
+        return;
+    }
+    QStringList messages;
+    for (int row = 0; row < modelCapabilityTable_->rowCount(); ++row) {
+        QStringList unknown;
+        validReasoningIdsForRow(row, &unknown);
+        if (unknown.isEmpty()) {
+            continue;
+        }
+        messages.append(QStringLiteral("未知档位 id：%1（模型 %2）")
+                            .arg(unknown.join(QStringLiteral("、")), capabilityModelIdAt(row)));
+    }
+    const QString text = messages.join(QStringLiteral("；"));
+    modelCapabilityErrorLabel_->setText(text);
+    modelCapabilityErrorLabel_->setVisible(!text.isEmpty());
+}
+
+bool SettingsDialog::hasCapabilityErrors() const {
+    if (modelCapabilityTable_ == nullptr) {
+        return false;
+    }
+    for (int row = 0; row < modelCapabilityTable_->rowCount(); ++row) {
+        QStringList unknown;
+        validReasoningIdsForRow(row, &unknown);
+        if (!unknown.isEmpty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString SettingsDialog::capabilityModelIdAt(int row) const {
+    if (modelCapabilityTable_ == nullptr) {
+        return {};
+    }
+    const QTableWidgetItem *item = modelCapabilityTable_->item(row, CapabilityModelColumn);
+    return item != nullptr ? item->data(Qt::UserRole).toString() : QString();
+}
+
+void SettingsDialog::applyCapabilityTableHeight() {
+    if (modelCapabilityTable_ == nullptr) {
+        return;
+    }
+    const int rowHeight = capabilityRowHeight();
+    modelCapabilityTable_->verticalHeader()->setDefaultSectionSize(rowHeight);
+    const int rows = std::max(1, modelCapabilityTable_->rowCount());
+    const int headerHeight = modelCapabilityTable_->horizontalHeader()->height();
+    const int desired =
+        std::clamp(headerHeight + rowHeight * rows + 6, kCapabilityTableMinHeight,
+                   kCapabilityTableMaxHeight);
+    // 固定高度：行少时表格不占多余空间，行多时由表格自身滚动（外层还有滚动区兜底）。
+    modelCapabilityTable_->setMinimumHeight(desired);
+    modelCapabilityTable_->setMaximumHeight(desired);
+}
+
+void SettingsDialog::pruneStaleModelOverrides() {
+    int removed = 0;
+    for (const ProviderConfig &config : std::as_const(settings_.providers)) {
+        // 模型列表为空的 Provider 直接跳过：无法区分"用户删光了模型"与"还没填"，
+        // 误删会让用户在别处配好的覆盖无声消失（另一个 Provider 的键绝不能被动到）。
+        if (config.id.isEmpty() || config.models.isEmpty()) {
+            continue;
+        }
+        QSet<QString> validKeys;
+        for (const QString &modelId : config.models) {
+            validKeys.insert(modelOptionKey(config.id, modelId));
+        }
+        // 键的格式是 providerId + '/' + modelId；modelId 里可以含 '/'，所以前缀匹配
+        // 必须带上分隔符，否则 provider1 会误伤 provider10。
+        const QString prefix = config.id + QLatin1Char('/');
+        for (auto it = settings_.modelOverrides.begin(); it != settings_.modelOverrides.end();) {
+            if (it.key().startsWith(prefix) && !validKeys.contains(it.key())) {
+                it = settings_.modelOverrides.erase(it);
+                ++removed;
+            } else {
+                ++it;
+            }
+        }
+    }
+    if (removed > 0) {
+        qCInfo(log) << "清理已从模型列表移除的覆盖项，条数=" << removed;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -916,6 +1394,7 @@ void SettingsDialog::logAcceptedSettings() {
                 << "defaultSessionMode=" << toToken(settings_.defaultSessionMode)
                 << "persistSessions=" << settings_.persistSessions
                 << "providers=" << settings_.providers.size()
+                << "modelOverrides=" << settings_.modelOverrides.size()
                 << "recentWorkspaces=" << settings_.recentWorkspaces.size();
     for (const ProviderConfig &config : std::as_const(settings_.providers)) {
         qCInfo(log) << "  provider:" << config.id << config.name << toToken(config.kind)
@@ -965,6 +1444,28 @@ void SettingsDialog::refreshTokenStyles() {
     }
     for (int i = 0; i < recentList_->count(); ++i) {
         recentList_->item(i)->setFont(Theme::instance().font(FontRole::MonoSm));
+    }
+
+    // 4) 模型能力表格：等宽模型列、非法档位边框、行高都吃字号令牌；
+    //    网格线颜色也必须走令牌，否则深色主题下默认网格线会发白。
+    if (modelCapabilityTable_ != nullptr) {
+        const Palette &palette = Theme::instance().palette();
+        modelCapabilityTable_->setStyleSheet(
+            QStringLiteral("QTableWidget#%1 { gridline-color: %2; }")
+                .arg(modelCapabilityTable_->objectName(), Theme::css(palette.border)));
+        const QFont monoFont = Theme::instance().font(FontRole::Mono);
+        for (int row = 0; row < modelCapabilityTable_->rowCount(); ++row) {
+            if (QTableWidgetItem *item = modelCapabilityTable_->item(row, CapabilityModelColumn);
+                item != nullptr) {
+                item->setFont(monoFont);
+            }
+            auto *edit = qobject_cast<QLineEdit *>(
+                modelCapabilityTable_->cellWidget(row, CapabilityReasoningColumn));
+            if (edit != nullptr) {
+                applyReasoningEditStyle(edit);
+            }
+        }
+        applyCapabilityTableHeight();
     }
 }
 

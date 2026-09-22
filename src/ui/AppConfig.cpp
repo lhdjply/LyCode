@@ -61,6 +61,22 @@ void AppSettings::setModelOverride(const QString &providerId, const QString &mod
     modelOverrides.insert(key, override);
 }
 
+QString AppSettings::reasoningLevelFor(const QString &providerId, const QString &modelId) const {
+    if (providerId.isEmpty() || modelId.isEmpty()) {
+        return {};
+    }
+    return modelReasoningLevel.value(modelOptionKey(providerId, modelId));
+}
+
+void AppSettings::rememberReasoningLevel(const QString &providerId, const QString &modelId,
+                                         const QString &levelId) {
+    if (providerId.isEmpty() || modelId.isEmpty()) {
+        return;
+    }
+    // 空串是合法值（表示"关闭"），所以这里不删除记录，与 modelOverride 的语义不同。
+    modelReasoningLevel.insert(modelOptionKey(providerId, modelId), levelId);
+}
+
 ModelSelection AppSettings::modelForWorkspace(const QString &workspaceKey) const {
     if (!workspaceKey.isEmpty()) {
         const auto iterator = workspaceLastModel.constFind(workspaceKey);
@@ -119,6 +135,12 @@ QJsonObject AppSettings::toJson() const {
     }
     result.insert(QStringLiteral("modelOverrides"), overridesJson);
 
+    QJsonObject reasoningJson;
+    for (auto it = modelReasoningLevel.constBegin(); it != modelReasoningLevel.constEnd(); ++it) {
+        reasoningJson.insert(it.key(), it.value());
+    }
+    result.insert(QStringLiteral("modelReasoningLevel"), reasoningJson);
+
     result.insert(QStringLiteral("defaultSessionMode"), toToken(defaultSessionMode));
     result.insert(QStringLiteral("persistSessions"), persistSessions);
     return result;
@@ -159,6 +181,14 @@ AppSettings AppSettings::fromJson(const QJsonObject &json) {
         const ModelOptionOverride override = ModelOptionOverride::fromJson(it.value().toObject());
         if (!override.isEmpty()) {
             settings.modelOverrides.insert(it.key(), override);
+        }
+    }
+
+    const QJsonObject reasoningJson =
+        json::object(json, QStringLiteral("modelReasoningLevel"));
+    for (auto it = reasoningJson.constBegin(); it != reasoningJson.constEnd(); ++it) {
+        if (it.value().isString() && !it.value().toString().isEmpty()) {
+            settings.modelReasoningLevel.insert(it.key(), it.value().toString());
         }
     }
 

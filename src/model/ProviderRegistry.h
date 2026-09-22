@@ -39,7 +39,17 @@ public:
     QList<ProviderConfig> configurations() const;
 
     /// 全部 provider 的全部模型，供设置页与模型选择器展示。
+    /// 返回的每一项都已应用用户的模型能力覆盖。
     QList<ModelInfo> allModels() const;
+
+    /// 设置模型能力覆盖（键为 modelOptionKey）。覆盖会在 resolve/allModels
+    /// 返回前应用到模型元信息上，因此**所有**读模型信息的路径都自动生效——
+    /// 这是让"上下文窗口设置"只需一处写入的关键。
+    void setModelOverrides(const QHash<QString, ModelOptionOverride> &overrides);
+    /// 当前覆盖集合。
+    QHash<QString, ModelOptionOverride> modelOverrides() const { return overrides_; }
+    /// 取单个模型的有效元信息（已应用覆盖）。provider 不存在时返回默认值。
+    ModelInfo effectiveModelInfo(const QString &providerId, const QString &modelId) const;
 
     /// 是否有任何可用（配置完整）的 provider。
     bool hasUsableProvider() const;
@@ -49,7 +59,11 @@ signals:
     void changed();
 
 private:
+    /// 把覆盖应用到一份模型元信息上。集中在一处，避免每个读取点各写一遍。
+    void applyOverride(ModelInfo *info) const;
+
     QHash<QString, ModelProvider *> providers_;
+    QHash<QString, ModelOptionOverride> overrides_;
 };
 
 }  // namespace zcode

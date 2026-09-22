@@ -238,6 +238,13 @@ QJsonObject buildRequestBody(const ModelRequest &request) {
     }
     body.insert(QStringLiteral("temperature"), request.temperature);
     body.insert(QStringLiteral("max_tokens"), request.maxOutputTokens);
+
+    // 思考强度：OpenAI 兼容协议用 reasoning_effort 表达，与 Anthropic 的
+    // thinking.budget_tokens 是同一件事的两种写法。空值不传——部分兼容网关
+    // 见到未知字段会直接 400。
+    if (!request.reasoningEffort.isEmpty()) {
+        body.insert(QStringLiteral("reasoning_effort"), request.reasoningEffort);
+    }
     return body;
 }
 

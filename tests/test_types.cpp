@@ -33,6 +33,8 @@ private slots:
     void modelSelectionDisplayRoundTrip();
     void permissionDefaultOption();
     void workspaceIdentityKey();
+    void modelOptionOverrideRoundTrip();
+    void modelOptionOverrideAppliesToModelInfo();
 };
 
 void TestTypes::idGenerationIsPrefixedAndUnique() {
@@ -574,6 +576,67 @@ void TestTypes::workspaceIdentityKey() {
     const QJsonObject serialized = workspace.toJson();
     QCOMPARE(serialized.value(QStringLiteral("workspaceKey")).toString(),
              QStringLiteral("remote:host:/tmp/project"));
+}
+
+void TestTypes::modelOptionOverrideRoundTrip() {
+    ModelOptionOverride override;
+    // 全空等价于"没有覆盖"，这样"留 0 表示用默认"的语义才成立。
+    QVERIFY(override.isEmpty());
+    QVERIFY(override.toJson().isEmpty());
+
+    override.contextWindow = 200000;
+    override.maxOutputTokens = 32768;
+    override.reasoningLevels = {QStringLiteral("off"), QStringLiteral("high")};
+    override.defaultReasoningLevel = QStringLiteral("high");
+    QVERIFY(!override.isEmpty());
+
+    const QJsonObject serialized = override.toJson();
+    QCOMPARE(serialized.value(QStringLiteral("contextWindow")).toInt(), 200000);
+
+    const ModelOptionOverride restored = ModelOptionOverride::fromJson(serialized);
+    QCOMPARE(restored.contextWindow, 200000);
+    QCOMPARE(restored.maxOutputTokens, 32768);
+    QCOMPARE(restored.reasoningLevels.size(), 2);
+    QCOMPARE(restored.defaultReasoningLevel, QStringLiteral("high"));
+
+    // 键的格式必须与 ModelSelection::displayValue() 的前半段一致，
+    // 否则设置页写入的键与运行时查询的键对不上。
+    ModelSelection selection;
+    selection.providerId = QStringLiteral("p1");
+    selection.modelId = QStringLiteral("m1");
+    QCOMPARE(modelOptionKey(selection.providerId, selection.modelId),
+             QStringLiteral("p1/m1"));
+    QVERIFY(selection.displayValue().startsWith(modelOptionKey(selection.providerId,
+                                                              selection.modelId)));
+}
+
+void TestTypes::modelOptionOverrideAppliesToModelInfo() {
+    ModelInfo info;
+    info.providerId = QStringLiteral("p1");
+    info.modelId = QStringLiteral("m1");
+    info.contextWindow = 128000;
+    info.maxOutputTokens = 8192;
+    info.supportsReasoning = false;
+
+    // 空覆盖不得改动任何字段。
+    ModelOptionOverride empty;
+    ModelInfo untouched = info;
+    empty.applyTo(&untouched);
+    QCOMPARE(untouched.contextWindow, 128000);
+    QCOMPARE(untouched.maxOutputTokens, 8192);
+    QVERIFY(!untouched.supportsReasoning);
+
+    ModelOptionOverride override;
+    override.contextWindow = 200000;
+    override.maxOutputTokens = 32768;
+    override.reasoningLevels = {QStringLiteral("off"), QStringLiteral("low")};
+
+    override.applyTo(&info);
+    QCOMPARE(info.contextWindow, 200000);
+    QCOMPARE(info.maxOutputTokens, 32768);
+    QCOMPARE(info.reasoningLevels.size(), 2);
+    // 覆盖了档位列表就必须同步"是否支持思考"，否则 UI 会拿旧标志做判断。
+    QVERIFY(info.supportsReasoning);
 }
 
 QTEST_MAIN(TestTypes)

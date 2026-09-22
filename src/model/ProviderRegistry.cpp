@@ -120,8 +120,41 @@ ModelProvider *ProviderRegistry::resolve(const ModelSelection &selection, ModelI
     }
     if (infoOut != nullptr) {
         *infoOut = found->modelInfo(selection.modelId);
+        applyOverride(infoOut);
     }
     return found;
+}
+
+void ProviderRegistry::setModelOverrides(
+    const QHash<QString, ModelOptionOverride> &overrides) {
+    overrides_ = overrides;
+    qCInfo(log) << "模型能力覆盖已更新; count=" << overrides_.size();
+    emit changed();
+}
+
+ModelInfo ProviderRegistry::effectiveModelInfo(const QString &providerId,
+                                              const QString &modelId) const {
+    ModelInfo info;
+    info.providerId = providerId;
+    info.modelId = modelId;
+    info.displayName = modelId;
+    if (ModelProvider *found = provider(providerId)) {
+        info = found->modelInfo(modelId);
+    }
+    applyOverride(&info);
+    return info;
+}
+
+void ProviderRegistry::applyOverride(ModelInfo *info) const {
+    if (info == nullptr) {
+        return;
+    }
+    const auto iterator =
+        overrides_.constFind(modelOptionKey(info->providerId, info->modelId));
+    if (iterator == overrides_.constEnd()) {
+        return;
+    }
+    iterator.value().applyTo(info);
 }
 
 QStringList ProviderRegistry::providerIds() const {
@@ -154,7 +187,9 @@ QList<ModelInfo> ProviderRegistry::allModels() const {
         const QStringList models = provider->modelIds();
         result.reserve(result.size() + models.size());
         for (const QString &modelId : models) {
-            result.append(provider->modelInfo(modelId));
+            ModelInfo info = provider->modelInfo(modelId);
+            applyOverride(&info);
+            result.append(info);
         }
     }
     return result;

@@ -6,6 +6,7 @@
 #include "tools/TodoStore.h"
 #include "ui/ConversationView.h"
 #include "ui/Markdown.h"
+#include "model/ReasoningLevels.h"
 #include "ui/PermissionDialog.h"
 #include "ui/SettingsDialog.h"
 #include "ui/SidebarPanel.h"
@@ -113,6 +114,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     tools_ = ToolRegistry::createWithBuiltins();
 
     providers_.replaceAll(settings_.providers);
+    providers_.setModelOverrides(settings_.modelOverrides);
 
     runtime_.setProviderRegistry(&providers_);
     runtime_.setToolRegistry(&tools_);
@@ -181,6 +183,16 @@ void MainWindow::buildUi() {
     connect(modelCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModelChanged);
     headerLayout->addWidget(modelCombo_);
 
+    // 思考等级下拉：紧挨模型选择器。它的可见性由模型是否支持思考决定，
+    // 所以不支持的模型不会看到一个永远禁用的空控件。
+    reasoningCombo_ = new QComboBox;
+    reasoningCombo_->setObjectName(QStringLiteral("reasoningCombo"));
+    reasoningCombo_->setToolTip(
+        QStringLiteral("思考等级：越高推理越充分，消耗的 token 也越多"));
+    connect(reasoningCombo_, &QComboBox::currentIndexChanged, this,
+            &MainWindow::onReasoningLevelChanged);
+    headerLayout->addWidget(reasoningCombo_);
+
     modeCombo_ = new QComboBox;
     modeCombo_->setObjectName(QStringLiteral("modeCombo"));
     modeCombo_->setToolTip(
@@ -195,6 +207,7 @@ void MainWindow::buildUi() {
     headerLayout->addStretch(1);
 
     contextLabel_ = new QLabel;
+    contextLabel_->setObjectName(QStringLiteral("contextLabel"));
     contextLabel_->setFont(Theme::instance().font(FontRole::UiXs));
     headerLayout->addWidget(contextLabel_);
 
@@ -399,6 +412,10 @@ void MainWindow::applyTheme() {
 }
 
 void MainWindow::applySettingsToUi() {
+    // 顺序很重要：currentModel_ 必须先定下来。refreshModelCombo() 内部会调用
+    // refreshReasoningCombo()，而后者要靠 currentModel_ 去查模型能力；
+    // 反过来的话思考档位下拉会因为"没有当前模型"而被判为不可见（实测踩到）。
+    currentModel_ = effectiveModelSelection();
     refreshModelCombo();
 
     suppressModeSignal_ = true;
@@ -408,10 +425,10 @@ void MainWindow::applySettingsToUi() {
     }
     suppressModeSignal_ = false;
 
-    const ModelSelection selection = effectiveModelSelection();
-    currentModel_ = selection;
-    if (selection.isValid()) {
-        const int index = modelCombo_->findData(selection.displayValue());
+    if (currentModel_.isValid()) {
+        // modelCombo_ 的 itemData 不含思考档位，所以这里只同步选中项；
+        // 档位由 refreshReasoningCombo() 负责恢复。
+        const int index = modelCombo_->findData(currentModel_.displayValue());
         if (index >= 0) {
             suppressModelSignal_ = true;
             modelCombo_->setCurrentIndex(index);
@@ -444,6 +461,83 @@ void MainWindow::refreshModelCombo() {
         modelCombo_->setEnabled(true);
     }
     suppressModelSignal_ = false;
+
+    refreshReasoningCombo();
+}
+
+void MainWindow::refreshReasoningCombo() {
+    if (reasoningCombo_ == nullptr) {
+        return;
+    }
+
+    suppressModelSignal_ = true;
+    reasoningCombo_->clear();
+
+    if (!currentModel_.isValid()) {
+        reasoningCombo_->setVisible(false);
+        suppressModelSignal_ = false;
+        return;
+    }
+
+    // providers_ 是值成员，直接调用；ModelInfo 不含默认档位，默认档位属于
+    // 用户配置（ModelOptionOverride），所以从设置里取。
+    const ModelInfo info =
+        providers_.effectiveModelInfo(currentModel_.providerId, currentModel_.modelId);
+    const ModelOptionOverride override =
+        settings_.modelOverride(currentModel_.providerId, currentModel_.modelId);
+
+    if (!modelSupportsReasoning(info)) {
+        reasoningCombo_->setVisible(false);
+        suppressModelSignal_ = false;
+        return;
+    }
+
+    // 模型自报档位为空但声明支持思考时，用保守的标准集合兜底，
+    // 否则用户会看到一个支持思考却无法选择强度的模型。
+    const QStringList levelIds =
+        info.reasoningLevels.isEmpty() ? defaultReasoningLevelIds() : info.reasoningLevels;
+
+    // 决定的顺序：用户对该模型的上次选择 → 模型默认档位 → 规整后的第一个可用档位。
+    QString desired = settings_.reasoningLevelFor(currentModel_.providerId,
+                                                 currentModel_.modelId);
+    if (desired.isEmpty()) {
+        desired = override.defaultReasoningLevel;
+    }
+    desired = normalizeReasoningLevel(desired, levelIds);
+    currentModel_.reasoningLevel = desired;
+
+    for (const QString &id : levelIds) {
+        reasoningCombo_->addItem(QStringLiteral("思考 ") + reasoningLevelLabel(id), id);
+    }
+    const int index = reasoningCombo_->findData(desired);
+    if (index >= 0) {
+        reasoningCombo_->setCurrentIndex(index);
+    }
+    reasoningCombo_->setVisible(true);
+    suppressModelSignal_ = false;
+}
+
+void MainWindow::onReasoningLevelChanged(int index) {
+    if (suppressModelSignal_ || index < 0 || !currentModel_.isValid()) {
+        return;
+    }
+    const QString levelId = reasoningCombo_->itemData(index).toString();
+    if (levelId == currentModel_.reasoningLevel) {
+        return;
+    }
+
+    currentModel_.reasoningLevel = levelId;
+    settings_.rememberReasoningLevel(currentModel_.providerId, currentModel_.modelId, levelId);
+    settings_.rememberModelForWorkspace(workspace_.key(), currentModel_);
+    saveSettings();
+
+    if (runtime_.hasSession()) {
+        runtime_.setModel(currentModel_);
+    }
+    // 上下文预算不受档位影响，但状态栏的运行提示需要跟着更新一次。
+    refreshRunState();
+
+    qCInfo(log) << "思考等级变更为:" << levelId;
 }
 
 void MainWindow::loadWorkspaceSessions() {
@@ -603,6 +697,7 @@ void MainWindow::onSessionSelected(const Id &sessionId) {
                                          : ModelSelection{runtime_.session().providerId,
                                                           runtime_.session().modelId, {}};
     currentModel_ = selection;
+    refreshReasoningCombo();
 
     suppressModeSignal_ = true;
     const int modeIndex = modeCombo_->findData(static_cast<int>(runtime_.session().mode));
@@ -865,11 +960,15 @@ void MainWindow::onModelChanged(int index) {
     }
 
     currentModel_ = selection;
-    settings_.rememberModelForWorkspace(workspace_.key(), selection);
+    // 切到新模型时先恢复"这个模型上次用的档位"，再刷新下拉；
+    // 否则档位会在换模型时被静默重置成默认值。
+    refreshReasoningCombo();
+
+    settings_.rememberModelForWorkspace(workspace_.key(), currentModel_);
     saveSettings();
 
     if (runtime_.hasSession()) {
-        runtime_.setModel(selection);
+        runtime_.setModel(currentModel_);
     }
 }
 
@@ -920,6 +1019,9 @@ void MainWindow::onSettingsRequested() {
 
     // Provider 配置变化要整体替换，避免残留被删除的 provider。
     providers_.replaceAll(settings_.providers);
+    // 模型能力覆盖（上下文窗口、最大输出、思考档位）交给注册表统一应用，
+    // 这样 resolve/allModels 的每个调用点都自动拿到有效值。
+    providers_.setModelOverrides(settings_.modelOverrides);
     applySettingsToUi();
     saveSettings();
 

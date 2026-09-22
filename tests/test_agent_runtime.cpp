@@ -10,6 +10,8 @@
 // 走真实 HTTP + SSE 才能验证它们与主循环的配合。
 #include <QtTest>
 
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTcpSocket>
@@ -48,6 +50,8 @@ private slots:
     void abortInterruptsRunningTurn();
     void unknownToolFailsWithoutPrompt();
     void httpErrorFailsTheTurn();
+    void reasoningLevelReachesProviderRequest();
+    void contextWindowOverrideDrivesUsage();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -379,6 +383,102 @@ void TestAgentRuntime::httpErrorFailsTheTurn() {
     const QList<Message> messages = runtime_->messages();
     QCOMPARE(messages.last().status, MessageStatus::Failed);
     QVERIFY(!messages.last().errorMessage.isEmpty());
+}
+
+void TestAgentRuntime::reasoningLevelReachesProviderRequest() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 声明该模型支持三档思考，并指定模型默认档位。
+    ModelOptionOverride override;
+    override.reasoningLevels = {QStringLiteral("off"), QStringLiteral("low"), QStringLiteral("high")};
+    override.defaultReasoningLevel = QStringLiteral("low");
+    providers_->setModelOverrides({{modelOptionKey(QStringLiteral("test"),
+                                                  QStringLiteral("test-model")),
+                                   override}});
+
+    // ── 第一轮：用默认档位（low），应当带上 reasoning_effort ────────────────
+    gateway_->enqueue(textResponse("ok"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("hi"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(6000));
+
+    QJsonObject body = QJsonDocument::fromJson(gateway_->lastBody()).object();
+    QCOMPARE(body.value(QStringLiteral("reasoning_effort")).toString(), QStringLiteral("low"));
+
+    // ── 第二轮：把档位切到 high，请求里应变成 high ─────────────────────────
+    ModelSelection selection = runtime_->session().providerId.isEmpty()
+                                   ? ModelSelection{}
+                                   : ModelSelection{runtime_->session().providerId,
+                                                    runtime_->session().modelId,
+                                                    QStringLiteral("high")};
+    QVERIFY(selection.isValid());
+    runtime_->setModel(selection);
+
+    gateway_->enqueue(textResponse("ok again"));
+    QSignalSpy secondSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QVERIFY2(runtime_->submitText(QStringLiteral("again"), &error), qPrintable(error));
+    QVERIFY(secondSpy.wait(6000));
+
+    body = QJsonDocument::fromJson(gateway_->lastBody()).object();
+    QCOMPARE(body.value(QStringLiteral("reasoning_effort")).toString(), QStringLiteral("high"));
+
+    // ── 第三轮：切到 off，必须完全不传该字段 ───────────────────────────────
+    // 部分兼容网关见到未知/空值字段会直接 400，所以"关闭"必须是"不传"。
+    ModelSelection offSelection{runtime_->session().providerId, runtime_->session().modelId,
+                               QStringLiteral("off")};
+    runtime_->setModel(offSelection);
+
+    gateway_->enqueue(textResponse("done"));
+    QSignalSpy thirdSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QVERIFY2(runtime_->submitText(QStringLiteral("stop thinking"), &error), qPrintable(error));
+    QVERIFY(thirdSpy.wait(6000));
+
+    body = QJsonDocument::fromJson(gateway_->lastBody()).object();
+    QVERIFY2(!body.contains(QStringLiteral("reasoning_effort")),
+             "关闭思考时不应下发 reasoning_effort");
+
+    // 没有声明思考档位的模型也不该下发。
+    providers_->setModelOverrides({});
+}
+
+void TestAgentRuntime::contextWindowOverrideDrivesUsage() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    gateway_->enqueue(textResponse("hello"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("hi"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(6000));
+
+    // 默认（provider 自报）：128000。
+    QCOMPARE(json::integer(runtime_->session().contextUsage,
+                           QStringLiteral("maxTokens")),
+             128000);
+
+    // 覆盖成 32000：用量分母必须跟着变，否则压缩阈值判断会离实际很远。
+    ModelOptionOverride override;
+    override.contextWindow = 32000;
+    providers_->setModelOverrides(
+        {{modelOptionKey(QStringLiteral("test"), QStringLiteral("test-model")), override}});
+
+    gateway_->enqueue(textResponse("hello again"));
+    QSignalSpy secondSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QVERIFY2(runtime_->submitText(QStringLiteral("hi again"), &error), qPrintable(error));
+    QVERIFY(secondSpy.wait(6000));
+
+    QCOMPARE(json::integer(runtime_->session().contextUsage,
+                           QStringLiteral("maxTokens")),
+             32000);
+    // 用量百分比必须按新分母算：分子大于 0，百分比就应该明显大于 0。
+    const double percent = json::number(runtime_->session().contextUsage,
+                                        QStringLiteral("percent"));
+    QVERIFY(percent > 0.0);
+    QVERIFY(percent <= 100.0);
+
+    providers_->setModelOverrides({});
 }
 
 QTEST_MAIN(TestAgentRuntime)
