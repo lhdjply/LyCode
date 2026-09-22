@@ -133,6 +133,10 @@ class TodoStore;
 /// 从而不依赖 agent/ 的具体类型。
 class SubagentHost;
 
+/// 后台任务注册表。由 AgentRuntime 持有并注入；Bash 用它托管后台进程，
+/// TaskOutput / TaskStop 用它查询与终止。
+class BackgroundTaskRegistry;
+
 /// 执行上下文。由 Agent 主循环构造，工具只读。
 struct ToolContext {
     Id sessionId;
@@ -157,6 +161,10 @@ struct ToolContext {
     /// 子 Agent 宿主。为空的含义是"当前环境不支持派生子代理"，
     /// Agent 工具必须据此明确失败，而不是假装成功。
     SubagentHost *subagentHost = nullptr;
+
+    /// 后台任务注册表。为空表示当前环境不支持后台任务——
+    /// Bash 的 run_in_background 必须据此明确失败，而不是假装已启动。
+    BackgroundTaskRegistry *backgroundTasks = nullptr;
 
     /// 进度回调，可空。用于把长任务的中间输出推给 UI。
     std::function<void(const QString &chunk)> progress;

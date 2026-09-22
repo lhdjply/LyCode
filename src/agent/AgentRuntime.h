@@ -144,6 +144,9 @@ public:
     void launchSubagent(const LaunchRequest &request, Completion done) override;
     bool subagentsEnabled() const override;
 
+    /// 后台任务注册表。Bash 的 run_in_background 与 TaskOutput/TaskStop 共用它。
+    BackgroundTaskRegistry *backgroundTasks() const { return backgroundTasks_; }
+
     /// 重新测量上下文用量并通知 UI。
     ///
     /// 外部改了会影响上下文窗口的东西之后必须调用它：用户在设置页调整
@@ -197,6 +200,8 @@ signals:
     void subagentSessionChanged(const zcode::Session &session);
     /// 子代理结束（用于 UI 更新列表里的状态）。
     void subagentFinished(const zcode::Id &childSessionId, bool ok);
+    /// 后台任务集合发生变化（新增/结束/停止）。UI 据此刷新计数。
+    void backgroundTasksChanged(int runningCount);
     void messageAdded(const zcode::Message &message);
     void partAppended(const zcode::Id &messageId, const zcode::Part &part);
     void partUpdated(const zcode::Id &messageId, const zcode::Part &part);
@@ -231,6 +236,11 @@ private:
     /// 用 callId 而不是下标标识调用：异步回调可能在下一轮 turn 才到达，
     /// 下标那时可能已经指向新 turn 的另一个调用。
     void finishToolCall(const QString &callId, const ToolResult &result);
+    /// 把待投递的后台任务完成通知注入上下文。
+    /// 在每次模型步开始前调用：这样任务结束时如果正在跑 turn，模型能在下一步
+    /// 就看到结果；如果当时空闲，则在下一次输入的首次模型步看到（与 npm 一致）。
+    void drainBackgroundNotifications();
+
     /// 把尚未终结的调用标记为取消（中断或提前终止时）。
     void cancelPendingToolCalls(const QString &reason);
     /// 订阅权限门的信号。切换共享门之后必须重新订阅。
@@ -329,6 +339,11 @@ private:
     QString subagentDescription_;
     /// 子代理自己的 todo 存储（上下文隔离的一部分：父子不共享 todo）。
     std::unique_ptr<TodoStore> ownedTodoStore_;
+
+    /// 后台任务注册表。每个运行时一套：子代理的后台任务是它自己的，
+    /// 父代理不该看到、也不该被它的通知打扰。
+    std::unique_ptr<BackgroundTaskRegistry> ownedBackgroundTasks_;
+    BackgroundTaskRegistry *backgroundTasks_ = nullptr;
 
     /// 传给工具与权限层的取消令牌。一个 turn 一个，abort() 时置位。
     /// 用 shared_ptr 是因为工具可能在异步回调里持有它，生命周期必须独立于 turn。

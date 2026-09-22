@@ -6,6 +6,7 @@
 #include "core/Logging.h"
 #include "model/ProviderRegistry.h"
 #include "model/ReasoningLevels.h"
+#include "tools/BackgroundTaskRegistry.h"
 #include "tools/TodoStore.h"
 
 #include <QElapsedTimer>
@@ -85,6 +86,21 @@ AgentRuntime::AgentRuntime(QObject *parent) : QObject(parent) {
     ownedPermissionGate_ = std::make_unique<PermissionGate>();
     permissionGate_ = ownedPermissionGate_.get();
     wirePermissionGate();
+
+    ownedBackgroundTasks_ = std::make_unique<BackgroundTaskRegistry>();
+    backgroundTasks_ = ownedBackgroundTasks_.get();
+    // 任务状态变化要通知 UI；完成通知由 drainBackgroundNotifications() 注入上下文。
+    connect(backgroundTasks_, &BackgroundTaskRegistry::taskAdded, this,
+            [this](const Id &) { emit backgroundTasksChanged(backgroundTasks_->runningCount()); });
+    connect(backgroundTasks_, &BackgroundTaskRegistry::taskFinished, this,
+            [this](const Id &taskId, bool ok, int exitCode) {
+                qCInfo(log) << "后台任务结束通知就绪; task=" << taskId << "ok=" << ok
+                            << "exitCode=" << exitCode;
+                emit backgroundTasksChanged(backgroundTasks_->runningCount());
+            });
+    // 注意：注册表在**构造时**就完成了账本对账，那时还没有任何订阅者，
+    // 所以初始计数不能在这里播（播了也没人收到）。由界面接好线之后主动拉取，
+    // 见 MainWindow 里的 onBackgroundTasksChanged(runningCount())。
 }
 
 void AgentRuntime::wirePermissionGate() {
@@ -455,6 +471,8 @@ void AgentRuntime::closeSession() {
     if (isRunning()) {
         abort();
     }
+    // 这里**不终止**后台任务。它们已经脱离工具调用的生命周期，而且设计目标
+    // 就是活过会话切换与宿主退出（下次启动由账本认领）。要停下它们请用 TaskStop。
     permissionGate()->cancelAll(QStringLiteral("会话已关闭"));
     permissionGate()->reset();
 
@@ -637,6 +655,10 @@ void AgentRuntime::runModelStep() {
                      QStringLiteral("找不到可用的模型：") + model_.displayValue());
         return;
     }
+
+    // 先把待投递的后台任务完成通知放进上下文：任务是在 turn 之外异步结束的，
+    // 模型不会自己知道，必须由运行时注入。
+    drainBackgroundNotifications();
 
     setPhase(TurnPhase::AwaitingModelResponse);
 
@@ -1113,6 +1135,42 @@ void AgentRuntime::finishToolCall(const QString &callId, const ToolResult &resul
     QTimer::singleShot(0, this, [this]() { runToolQueue(); });
 }
 
+void AgentRuntime::drainBackgroundNotifications() {
+    if (backgroundTasks_ == nullptr || !backgroundTasks_->hasPendingNotification()) {
+        return;
+    }
+
+    QStringList notifications;
+    const QList<BackgroundTask> tasks = backgroundTasks_->tasks();
+    for (const BackgroundTask &task : tasks) {
+        const QString notification = backgroundTasks_->takeNotification(task.id);
+        if (!notification.isEmpty()) {
+            notifications.append(notification);
+        }
+    }
+    if (notifications.isEmpty()) {
+        return;
+    }
+
+    Message message;
+    message.id = newMessageId();
+    message.sessionId = session_.id;
+    message.role = MessageRole::User;
+    message.status = MessageStatus::Complete;
+    // model-only：这是运行时生成的上下文，不是用户说过的话。
+    // （与工具结果轮同样的处理，UI 不会把它显示成一条"你"的消息。）
+    message.modelOnly = true;
+    message.createdAtMs = nowMs();
+    message.updatedAtMs = message.createdAtMs;
+    message.parts.append(Part::makeText(notifications.join(QStringLiteral("\n\n"))));
+
+    messages_.append(message);
+    emit messageAdded(message);
+    persistMessage(message);
+
+    qCInfo(log) << "已注入后台任务完成通知; 条数=" << notifications.size();
+}
+
 void AgentRuntime::cancelPendingToolCalls(const QString &reason) {
     Message *assistant = currentAssistantMessage();
     for (int index = 0; index < toolQueue_.size(); ++index) {
@@ -1305,6 +1363,7 @@ void AgentRuntime::executeToolAt(int index) {
             // 子代理宿主就是本运行时。子代理里 subagentsEnabled() 为 false，
             // Agent 工具据此拒绝递归派生。
             context.subagentHost = this;
+            context.backgroundTasks = backgroundTasks_;
             // 并发执行时所有工具共享同一个取消令牌；这是刻意的：
             // 用户按一次"停止"应当让整轮的所有工具都停下。
             context.cancelled = cancelFlag_;

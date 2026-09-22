@@ -107,6 +107,29 @@ private:
     QByteArray lastBody_;
 };
 
+/// 把一段原始文本转义成可以嵌进 JSON 字符串字面量里的形式。
+/// 用于把工具入参原样塞进 `arguments` 字段，避免手写 \\\" 转义出错。
+inline QByteArray jsonStringEscape(const QByteArray &raw) {
+    QByteArray out;
+    out.reserve(raw.size() + 8);
+    for (const char character : raw) {
+        switch (character) {
+            case '"':
+            case '\\':
+                out += '\\';
+                out += character;
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            default:
+                out += character;
+                break;
+        }
+    }
+    return out;
+}
+
 /// 纯文本流式响应。
 inline QByteArray textResponse(const QByteArray &text) {
     QByteArray body;
@@ -140,6 +163,10 @@ inline QByteArray textResponseWithCache(const QByteArray &text, int promptTokens
 }
 
 /// 带工具调用的流式响应。参数故意分两片下发，以验证增量组装。
+///
+/// 契约（与 multiToolCallResponse 一致）：传入的是**原始 JSON 片段**，
+/// 由本函数负责转义后嵌进 SSE。不要在这里手写 `\\\"`——
+/// 两个构造器契约不一致正是踩过坑的地方。
 inline QByteArray toolCallResponse(const QString &toolName,
                                    const QByteArray &argumentsFirstHalf,
                                    const QByteArray &argumentsSecondHalf) {
@@ -149,38 +176,15 @@ inline QByteArray toolCallResponse(const QString &toolName,
             toolName.toUtf8() + "\",\"arguments\":\"\"}}]}}]}\n\n";
     body += "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":"
             "{\"arguments\":\"" +
-            argumentsFirstHalf + "\"}}]}}]}\n\n";
+            jsonStringEscape(argumentsFirstHalf) + "\"}}]}}]}\n\n";
     body += "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":"
             "{\"arguments\":\"" +
-            argumentsSecondHalf + "\"}}]}}]}\n\n";
+            jsonStringEscape(argumentsSecondHalf) + "\"}}]}}]}\n\n";
     body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n";
     body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":10,"
             "\"total_tokens\":60}}\n\n";
     body += "data: [DONE]\n\n";
     return body;
-}
-
-/// 把一段原始文本转义成可以嵌进 JSON 字符串字面量里的形式。
-/// 用于把工具入参原样塞进 `arguments` 字段，避免手写 \\\" 转义出错。
-inline QByteArray jsonStringEscape(const QByteArray &raw) {
-    QByteArray out;
-    out.reserve(raw.size() + 8);
-    for (const char character : raw) {
-        switch (character) {
-            case '"':
-            case '\\':
-                out += '\\';
-                out += character;
-                break;
-            case '\n':
-                out += "\\n";
-                break;
-            default:
-                out += character;
-                break;
-        }
-    }
-    return out;
 }
 
 /// 一次返回**多个**工具调用。用于验证并行调度。

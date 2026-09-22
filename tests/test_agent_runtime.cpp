@@ -24,6 +24,9 @@
 #include "model/ProviderRegistry.h"
 #include "tools/Tool.h"
 #include "storage/SessionStore.h"
+#include "tools/BackgroundTaskRegistry.h"
+#include "tools/TaskTools.h"
+#include "tools/ToolUtils.h"
 #include "tools/TodoStore.h"
 
 #include "support/FakeGateway.h"
@@ -69,6 +72,13 @@ private slots:
     void toolAllowlistBlocksBothDeclarationAndExecution();
     void subagentCannotSpawnSubagents();
     void subagentRunsItsOwnTurnAndReportsBack();
+    void backgroundBashSurvivesTheToolCall();
+    void taskOutputBlocksUntilFinished();
+    void taskStopKillsTheTask();
+    void backgroundNotificationIsInjected();
+    void taskToolsRejectUnknownIds();
+    void autoBackgroundsOnTimeout();
+    void detachedTaskSurvivesRegistryRestart();
 
 private:
     /// 组装一个指向假网关的运行时。
@@ -87,6 +97,13 @@ private:
 };
 
 void TestAgentRuntime::init() {
+    // 数据根指向临时目录：后台任务的输出文件默认落在 <数据根>/qt/tasks，
+    // 测试不应该往用户的 ~/.zcode 里写东西。
+    qputenv("ZCODE_DATA_BASE_DIR", tempDir_.path().toUtf8());
+    // 账本是全局文件：不清掉的话上一个测试的遗留任务会被下一个测试认领，
+    // 断言就不再互不干扰。
+    QFile::remove(BackgroundTaskRegistry::ledgerPath());
+
     gateway_ = std::make_unique<FakeGateway>();
     QVERIFY(gateway_->start());
 
@@ -100,6 +117,11 @@ void TestAgentRuntime::init() {
 }
 
 void TestAgentRuntime::cleanup() {
+    // 后台任务的析构语义是"放它活过宿主"，所以测试必须显式收尾，
+    // 否则会留下一堆 sleep 进程。
+    if (runtime_ != nullptr && runtime_->backgroundTasks() != nullptr) {
+        runtime_->backgroundTasks()->stopAll();
+    }
     // 先销毁运行时再销毁依赖：运行时析构会 abort 活跃的流。
     runtime_.reset();
     todos_.reset();
@@ -197,7 +219,8 @@ void TestAgentRuntime::readToolRunsWithoutPrompt() {
 
     // 第 1 轮：Read 工具调用。第 2 轮：最终文本。
     gateway_->enqueue(toolCallResponse(QStringLiteral("Read"),
-                                       "{\\\"file_path\\\":\\\"" + jsonEscape(path) + "\\\"",
+                                       QByteArray("{\"file_path\":\"") + jsonEscape(path) +
+                                           QByteArray("\""),
                                        "}"));
     gateway_->enqueue(textResponse("I read the file"));
 
@@ -241,7 +264,7 @@ void TestAgentRuntime::bashToolWaitsForPermissionAndRunsAfterAllow() {
     QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
 
     gateway_->enqueue(toolCallResponse(
-        QStringLiteral("Bash"), "{\\\"command\\\":\\\"echo zcode-ok\\\"", "}"));
+        QStringLiteral("Bash"), R"({"command":"echo zcode-ok")", "}"));
 
     QSignalSpy permissionSpy(runtime_.get(), &AgentRuntime::permissionRequested);
     QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
@@ -284,7 +307,7 @@ void TestAgentRuntime::deniedToolFeedsErrorBackToModel() {
     QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
 
     gateway_->enqueue(toolCallResponse(
-        QStringLiteral("Bash"), "{\\\"command\\\":\\\"echo nope\\\"", "}"));
+        QStringLiteral("Bash"), R"({"command":"echo nope")", "}"));
 
     QSignalSpy permissionSpy(runtime_.get(), &AgentRuntime::permissionRequested);
     QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
@@ -316,7 +339,7 @@ void TestAgentRuntime::planModeDeniesSideEffectTools() {
     QVERIFY(setupRuntime(SessionMode::Plan, PermissionMode::Plan));
 
     gateway_->enqueue(toolCallResponse(
-        QStringLiteral("Bash"), "{\\\"command\\\":\\\"rm -rf /tmp/x\\\"", "}"));
+        QStringLiteral("Bash"), R"({"command":"rm -rf /tmp/x")", "}"));
 
     QSignalSpy permissionSpy(runtime_.get(), &AgentRuntime::permissionRequested);
     QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
@@ -370,7 +393,7 @@ void TestAgentRuntime::abortInterruptsRunningTurn() {
 void TestAgentRuntime::unknownToolFailsWithoutPrompt() {
     QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
 
-    gateway_->enqueue(toolCallResponse(QStringLiteral("NoSuchTool"), "{\\\"x\\\":1", "}"));
+    gateway_->enqueue(toolCallResponse(QStringLiteral("NoSuchTool"), R"({"x":1)", "}"));
 
     QSignalSpy permissionSpy(runtime_.get(), &AgentRuntime::permissionRequested);
     QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
@@ -556,7 +579,8 @@ void TestAgentRuntime::reloadRestoresPersistedConversation() {
     }
 
     gateway_->enqueue(toolCallResponse(QStringLiteral("Read"),
-                                       "{\\\"file_path\\\":\\\"" + jsonEscape(samplePath) + "\\\"",
+                                       QByteArray("{\"file_path\":\"") +
+                                           jsonEscape(samplePath) + QByteArray("\""),
                                        "}"));
     gateway_->enqueue(textResponse("read it back"));
 
@@ -941,9 +965,8 @@ void TestAgentRuntime::toolAllowlistBlocksBothDeclarationAndExecution() {
 
     // 模型凭"记忆"直接调用白名单外的工具。
     const QByteArray writeArgsFirst =
-        QByteArray(R"RAW({\"file_path\":\")RAW") + jsonEscape(path) +
-        QByteArray(R"RAW(\")RAW");
-    const QByteArray writeArgsSecond = R"RAW(,\"content\":\"hacked\"})RAW";
+        QByteArray("{\"file_path\":\"") + jsonEscape(path) + QByteArray("\"");
+    const QByteArray writeArgsSecond = R"(,"content":"hacked"})";
     gateway_->enqueue(
         toolCallResponse(QStringLiteral("Write"), writeArgsFirst, writeArgsSecond));
     gateway_->enqueue(textResponse("ok"));
@@ -1095,6 +1118,448 @@ void TestAgentRuntime::subagentRunsItsOwnTurnAndReportsBack() {
     QVERIFY2(childSessionSpy.count() >= 1, "子会话必须通知 UI 以便出现在列表里");
     QCOMPARE(childFinishedSpy.count(), 1);
     QVERIFY(childFinishedSpy.first().at(1).toBool());
+}
+
+namespace {
+
+/// 组装一个 Bash 后台调用的参数（转义用原始字符串，避免手写 \\\" 出错）。
+/// 组装一个 Bash 调用参数。
+/// 传**原始 JSON**：multiToolCallResponse 负责转义（转义只做一次）。
+QByteArray bashArgs(const QString &command, int timeoutMs, bool background,
+                    const QString &description = {}) {
+    QJsonObject input;
+    input.insert(QStringLiteral("command"), command);
+    if (timeoutMs > 0) {
+        input.insert(QStringLiteral("timeout"), timeoutMs);
+    }
+    if (background) {
+        input.insert(QStringLiteral("run_in_background"), true);
+    }
+    if (!description.isEmpty()) {
+        input.insert(QStringLiteral("description"), description);
+    }
+    return QJsonDocument(input).toJson(QJsonDocument::Compact);
+}
+
+QByteArray backgroundBashArgs(const QString &command, const QString &description) {
+    return bashArgs(command, 0, true, description);
+}
+
+/// TaskOutput 的入参（直接调用工具用，所以是 QJsonObject；
+/// 走 SSE 的那条路才需要 JSON 文本）。
+QJsonObject taskOutputInput(const QString &taskId, bool block, int timeoutMs) {
+    QJsonObject input;
+    input.insert(QStringLiteral("task_id"), taskId);
+    input.insert(QStringLiteral("block"), block);
+    input.insert(QStringLiteral("timeout"), timeoutMs);
+    return input;
+}
+
+QJsonObject taskStopInput(const QString &taskId) {
+    QJsonObject input;
+    input.insert(QStringLiteral("task_id"), taskId);
+    return input;
+}
+
+}  // namespace
+
+void TestAgentRuntime::backgroundBashSurvivesTheToolCall() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 后台 Bash 与前台一样要过权限链。这里自动批准，把测试聚焦在后台机制上。
+    QObject::connect(
+        runtime_.get(), &AgentRuntime::permissionRequested, runtime_.get(),
+        [this](const PermissionRequest &request) {
+            PermissionResponse response;
+            response.decision = PermissionDecision::Allow;
+            runtime_->resolvePermission(request.id, response);
+        });
+
+
+    // 命令跑 2 秒，远长于工具调用本身：这正是后台任务要解决的问题。
+    gateway_->enqueue(multiToolCallResponse(
+        {{QStringLiteral("Bash"),
+          backgroundBashArgs(QStringLiteral("sleep 2; echo bg-done"),
+                             QStringLiteral("slow command"))}}));
+    gateway_->enqueue(textResponse("已在后台启动"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QElapsedTimer turnTimer;
+    turnTimer.start();
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    const qint64 turnDuration = turnTimer.elapsed();
+    QCOMPARE(finishedSpy.first().at(0).value<TurnResult>(), TurnResult::Success);
+
+    // 关键：turn 在命令跑完之前就结束了——证明工具没有阻塞等待。
+    QVERIFY2(turnDuration < 1800,
+             qPrintable(QStringLiteral("turn 耗时 %1ms，说明工具在等命令跑完").arg(turnDuration)));
+
+    const ToolPart bashPart = runtime_->messages().at(1).toolParts().first();
+    QCOMPARE(bashPart.name, QStringLiteral("Bash"));
+    QVERIFY2(bashPart.state == ToolState::Success,
+             qPrintable(QStringLiteral("Bash 未成功: error=%1 code=%2 output=%3")
+                            .arg(bashPart.error, bashPart.errorCode, bashPart.output)));
+    const QString taskId =
+        bashPart.metadata.value(QStringLiteral("backgroundTaskId")).toString();
+    QVERIFY(!taskId.isEmpty());
+    QCOMPARE(bashPart.metadata.value(QStringLiteral("status")).toString(),
+             QStringLiteral("backgrounded"));
+    // 回执里必须给出 id 与输出文件，否则模型无从查询。
+    QVERIFY(bashPart.output.contains(taskId));
+    QVERIFY(bashPart.output.contains(QStringLiteral("output_path")));
+
+    // 进程仍在跑：这是"脱离工具调用生命周期"的直接证据。
+    QCOMPARE(runtime_->backgroundTasks()->totalCount(), 1);
+    QCOMPARE(runtime_->backgroundTasks()->runningCount(), 1);
+    QVERIFY(runtime_->backgroundTasks()->task(taskId).isRunning());
+
+    // 输出文件已经建好（即使此刻还没有内容）。
+    const QString outputPath =
+        runtime_->backgroundTasks()->task(taskId).outputPath;
+    QVERIFY(!outputPath.isEmpty());
+    // 分离式任务的输出文件由 shell 异步创建（startDetached 立刻返回），
+    // 所以这里要等一下，不能立刻断言。
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(outputPath), 3000);
+}
+
+void TestAgentRuntime::taskOutputBlocksUntilFinished() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 后台 Bash 与前台一样要过权限链。这里自动批准，把测试聚焦在后台机制上。
+    QObject::connect(
+        runtime_.get(), &AgentRuntime::permissionRequested, runtime_.get(),
+        [this](const PermissionRequest &request) {
+            PermissionResponse response;
+            response.decision = PermissionDecision::Allow;
+            runtime_->resolvePermission(request.id, response);
+        });
+
+
+    gateway_->enqueue(multiToolCallResponse(
+        {{QStringLiteral("Bash"),
+          backgroundBashArgs(QStringLiteral("sleep 0.4; echo bg-finished"),
+                             QStringLiteral("quick background"))}}));
+    gateway_->enqueue(textResponse("started"));
+    gateway_->enqueue(textResponse("done"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    const QString taskId = runtime_->messages()
+                               .at(1)
+                               .toolParts()
+                               .first()
+                               .metadata.value(QStringLiteral("backgroundTaskId"))
+                               .toString();
+    QVERIFY(!taskId.isEmpty());
+
+    // 直接用 TaskOutput 工具（不经过模型）：block=true 应当等到任务结束。
+    TaskOutputTool tool;
+    ToolContext context;
+    context.sessionId = runtime_->session().id;
+    context.workspace = runtime_->session().workspace;
+    context.backgroundTasks = runtime_->backgroundTasks();
+
+    ToolResult captured;
+    bool called = false;
+    tool.execute(taskOutputInput(taskId, true, 8000), context, [&](ToolResult result) {
+        called = true;
+        captured = result;
+    });
+
+    // block=true 是异步的（等任务结束或超时），必须跑事件循环等回调，
+    // 不能立刻断言。
+    QTRY_VERIFY_WITH_TIMEOUT(called, 10000);
+    QVERIFY(captured.ok);
+    QCOMPARE(captured.metadata.value(QStringLiteral("status")).toString(),
+             QStringLiteral("completed"));
+    QCOMPARE(captured.metadata.value(QStringLiteral("exitCode")).toInt(), 0);
+    QVERIFY2(captured.output.contains(QStringLiteral("bg-finished")),
+             qPrintable(captured.output));
+    // 完整输出也要在文件里。
+    const QString outputPath =
+        captured.metadata.value(QStringLiteral("outputPath")).toString();
+    QFile log(outputPath);
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    QVERIFY(log.readAll().contains("bg-finished"));
+}
+
+void TestAgentRuntime::taskStopKillsTheTask() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 后台 Bash 与前台一样要过权限链。这里自动批准，把测试聚焦在后台机制上。
+    QObject::connect(
+        runtime_.get(), &AgentRuntime::permissionRequested, runtime_.get(),
+        [this](const PermissionRequest &request) {
+            PermissionResponse response;
+            response.decision = PermissionDecision::Allow;
+            runtime_->resolvePermission(request.id, response);
+        });
+
+
+    gateway_->enqueue(multiToolCallResponse(
+        {{QStringLiteral("Bash"),
+          backgroundBashArgs(QStringLiteral("sleep 30"), QStringLiteral("long sleep"))}}));
+    gateway_->enqueue(textResponse("started"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    const QString taskId = runtime_->messages()
+                               .at(1)
+                               .toolParts()
+                               .first()
+                               .metadata.value(QStringLiteral("backgroundTaskId"))
+                               .toString();
+    QVERIFY(!taskId.isEmpty());
+    QVERIFY(runtime_->backgroundTasks()->task(taskId).isRunning());
+
+    TaskStopTool stopTool;
+    ToolContext context;
+    context.sessionId = runtime_->session().id;
+    context.workspace = runtime_->session().workspace;
+    context.backgroundTasks = runtime_->backgroundTasks();
+
+    QSignalSpy taskFinishedSpy(runtime_->backgroundTasks(),
+                              &BackgroundTaskRegistry::taskFinished);
+    ToolResult stopResult;
+    stopTool.execute(taskStopInput(taskId), context,
+                     [&](ToolResult result) { stopResult = result; });
+    QVERIFY(stopResult.ok);
+    QVERIFY(stopResult.metadata.value(QStringLiteral("stopRequested")).toBool());
+
+    // 分离式任务没有 QProcess 可等 finished，stop() 是**同步**收尾的，
+    // 所以信号在 wait() 之前就已经发出。QSignalSpy::wait() 只等待新的发射，
+    // 必须先查已有计数，否则会误判为超时。
+    QTRY_VERIFY_WITH_TIMEOUT(taskFinishedSpy.count() >= 1, 5000);
+    QCOMPARE(runtime_->backgroundTasks()->runningCount(), 0);
+    const BackgroundTask stopped = runtime_->backgroundTasks()->task(taskId);
+    QCOMPARE(stopped.status, QStringLiteral("killed"));
+    QVERIFY(!stopped.isRunning());
+
+    // 重复停止是幂等的：返回成功但标记"已经结束"，不报错。
+    ToolResult secondStop;
+    stopTool.execute(taskStopInput(taskId), context,
+                     [&](ToolResult result) { secondStop = result; });
+    QVERIFY(secondStop.ok);
+    QVERIFY(secondStop.metadata.value(QStringLiteral("alreadyFinished")).toBool());
+}
+
+void TestAgentRuntime::backgroundNotificationIsInjected() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    // 后台 Bash 与前台一样要过权限链。这里自动批准，把测试聚焦在后台机制上。
+    QObject::connect(
+        runtime_.get(), &AgentRuntime::permissionRequested, runtime_.get(),
+        [this](const PermissionRequest &request) {
+            PermissionResponse response;
+            response.decision = PermissionDecision::Allow;
+            runtime_->resolvePermission(request.id, response);
+        });
+
+
+    gateway_->enqueue(multiToolCallResponse(
+        {{QStringLiteral("Bash"),
+          backgroundBashArgs(QStringLiteral("sleep 0.2; echo notify-me"),
+                             QStringLiteral("notify test"))}}));
+    gateway_->enqueue(textResponse("started"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    // 等任务结束 → 通知进入待投递队列。
+    QTRY_VERIFY_WITH_TIMEOUT(runtime_->backgroundTasks()->hasPendingNotification(), 5000);
+    QVERIFY2(runtime_->backgroundTasks()->runningCount() == 0, "任务应当已经结束");
+
+    // 下一次用户输入时，通知必须在第一个模型步之前注入上下文。
+    gateway_->enqueue(textResponse("我看到了后台任务的结果"));
+    QSignalSpy secondSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QVERIFY2(runtime_->submitText(QStringLiteral("继续"), &error), qPrintable(error));
+    QVERIFY(secondSpy.wait(10000));
+
+    const QByteArray body = gateway_->lastBody();
+    QVERIFY2(body.contains("task-notification"),
+             "后台任务完成通知必须注入到模型上下文里");
+    QVERIFY(body.contains("notify-me"));
+    QVERIFY(body.contains("<status>completed</status>"));
+
+    // 通知是一次性的：取走后不再重复注入。
+    QVERIFY(!runtime_->backgroundTasks()->hasPendingNotification());
+
+    // 注入的是 model-only 消息，UI 不会把它显示成用户说的话。
+    bool foundModelOnly = false;
+    for (const Message &message : runtime_->messages()) {
+        if (message.modelOnly && message.plainText().contains(QStringLiteral("task-notification"))) {
+            foundModelOnly = true;
+            break;
+        }
+    }
+    QVERIFY(foundModelOnly);
+}
+
+void TestAgentRuntime::taskToolsRejectUnknownIds() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+    ToolContext context;
+    context.sessionId = runtime_->session().id;
+    context.backgroundTasks = runtime_->backgroundTasks();
+
+    TaskOutputTool outputTool;
+    ToolResult outputResult;
+    outputTool.execute(taskOutputInput(QStringLiteral("task_does_not_exist"), false, 0),
+                       context,
+                       [&](ToolResult result) { outputResult = result; });
+    QVERIFY(!outputResult.ok);
+    QCOMPARE(outputResult.errorCode, QStringLiteral("task_not_found"));
+
+    TaskStopTool stopTool;
+    ToolResult stopResult;
+    stopTool.execute(taskStopInput(QStringLiteral("task_does_not_exist")), context,
+                     [&](ToolResult result) { stopResult = result; });
+    QVERIFY(!stopResult.ok);
+    QCOMPARE(stopResult.errorCode, QStringLiteral("task_not_found"));
+
+    // 没有注册表时（例如宿主没注入）必须明确失败，而不是假装成功。
+    ToolContext bare;
+    bare.sessionId = runtime_->session().id;
+    ToolResult noRegistry;
+    TaskOutputTool()
+        .execute(taskOutputInput(QStringLiteral("task_x"), false, 0), bare,
+                 [&](ToolResult result) { noRegistry = result; });
+    QVERIFY(!noRegistry.ok);
+    QCOMPARE(noRegistry.errorCode, QStringLiteral("unsupported"));
+}
+
+void TestAgentRuntime::autoBackgroundsOnTimeout() {
+    QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+    QObject::connect(
+        runtime_.get(), &AgentRuntime::permissionRequested, runtime_.get(),
+        [this](const PermissionRequest &request) {
+            PermissionResponse response;
+            response.decision = PermissionDecision::Allow;
+            runtime_->resolvePermission(request.id, response);
+        });
+
+    // 前台命令 + 500ms 超时，但命令要跑 5 秒：应当自动转入后台而不是被杀。
+    gateway_->enqueue(multiToolCallResponse(
+        {{QStringLiteral("Bash"),
+          bashArgs(QStringLiteral("sleep 5; echo late-result"), 500, false,
+                   QStringLiteral("慢命令"))}}));
+    gateway_->enqueue(textResponse("好的，它在后台跑"));
+
+    QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+    QElapsedTimer timer;
+    timer.start();
+    QString error;
+    QVERIFY2(runtime_->submitText(QStringLiteral("go"), &error), qPrintable(error));
+    QVERIFY(finishedSpy.wait(10000));
+
+    // 结果必须是**成功**并说明已转入后台，而不是"超时失败"。
+    const ToolPart part = runtime_->messages().at(1).toolParts().first();
+    QVERIFY2(part.state == ToolState::Success,
+             qPrintable(QStringLiteral("state=%1 error=%2")
+                            .arg(static_cast<int>(part.state))
+                            .arg(part.error)));
+    QVERIFY2(part.metadata.value(QStringLiteral("assistantAutoBackgrounded")).toBool(),
+             "必须标记这是自动后台化，而不是用户/模型显式要求");
+
+    const QString taskId =
+        part.metadata.value(QStringLiteral("backgroundTaskId")).toString();
+    QVERIFY(!taskId.isEmpty());
+    QVERIFY(part.output.contains(QStringLiteral("已自动转入后台")));
+    QVERIFY(part.output.contains(taskId));
+
+    // 进程仍在跑：没有被杀掉，只是把控制权还给了模型。
+    const BackgroundTask task = runtime_->backgroundTasks()->task(taskId);
+    QVERIFY2(task.isRunning(), qPrintable(QStringLiteral("status=%1").arg(task.status)));
+    QVERIFY2(!task.detached, "自动后台化继承的是前台管道，不是分离式任务");
+    QVERIFY(task.autoBackgrounded);
+    // turn 必须在命令跑完之前就结束（5 秒的命令，turn 却很快返回）。
+    QVERIFY2(timer.elapsed() < 3000,
+             qPrintable(QStringLiteral("turn 耗时 %1ms").arg(timer.elapsed())));
+
+    // 收尾：别把 sleep 5 留着。
+    QVERIFY(runtime_->backgroundTasks()->stop(taskId));
+    QTRY_VERIFY_WITH_TIMEOUT(runtime_->backgroundTasks()->runningCount() == 0, 5000);
+}
+
+void TestAgentRuntime::detachedTaskSurvivesRegistryRestart() {
+    // 直接手工起一个分离式进程，模拟"宿主退出、进程留下"。
+    const QString taskId = QStringLiteral("task_persist_probe");
+    const QString outputPath = BackgroundTaskRegistry::outputPathForTask(taskId);
+    QVERIFY2(!outputPath.isEmpty(), "输出路径必须可创建（数据根指向临时目录）");
+
+    int pid = 0;
+    {
+        BackgroundTaskRegistry first;
+
+        // 与生产路径完全一致：startDetached + shell 重定向到文件。
+        // 关键在于**不持有 QProcess**——~QProcess 会杀掉仍在运行的进程。
+        const QString wrapped =
+            QStringLiteral("exec sh -c ") +
+            toolutil::shellSingleQuote(QStringLiteral("sleep 2; echo survived-restart")) +
+            QStringLiteral(" >> ") + toolutil::shellSingleQuote(outputPath) +
+            QStringLiteral(" 2>&1");
+        qint64 launchedPid = 0;
+        QVERIFY(QProcess::startDetached(QStringLiteral("/bin/sh"),
+                                        {QStringLiteral("-lc"), wrapped}, QString(), &launchedPid));
+        QVERIFY(launchedPid > 0);
+        pid = static_cast<int>(launchedPid);
+
+        BackgroundTaskRegistry::AdoptRequest request;
+        request.type = QStringLiteral("bash");
+        request.command = QStringLiteral("sleep 2; echo survived-restart");
+        request.pid = pid;
+        request.outputPath = outputPath;
+        request.taskId = taskId;
+        request.detached = true;
+        QVERIFY(!first.adopt(request).isEmpty());
+
+        QVERIFY(first.task(taskId).isRunning());
+        QVERIFY(first.task(taskId).detached);
+        // 离开作用域：析构走 detachAll（记账、不杀进程）。
+    }
+
+    // ★ 这是"跨重启存活"的核心断言：宿主没了，进程还在。
+    QVERIFY2(processAlive(pid, 0), "分离式后台任务必须活过宿主析构");
+
+    // 新注册表对账 → 从账本认领它。
+    BackgroundTaskRegistry second;
+    QVERIFY2(second.contains(taskId), "重启后应当从账本认领遗留任务");
+    const BackgroundTask recovered = second.task(taskId);
+    QVERIFY2(recovered.recovered, "必须是恢复出来的任务");
+    QVERIFY2(recovered.isRunning(), "认领时进程还活着，状态应当是 running");
+    QCOMPARE(recovered.pid, pid);
+
+    // 等它跑完：轮询会发现进程消失。退出码不可知（孤儿进程没人 wait），
+    // 所以必须如实记 -1，而不是猜一个 0 让模型以为成功。
+    QTRY_VERIFY_WITH_TIMEOUT(!second.task(taskId).isRunning(), 10000);
+    const BackgroundTask ended = second.task(taskId);
+    QCOMPARE(ended.status, QStringLiteral("failed"));
+    QCOMPARE(ended.exitCode, -1);
+
+    // 输出与宿主生死无关：进程直接写的文件。
+    QFile log(outputPath);
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    QVERIFY2(log.readAll().contains("survived-restart"),
+             "分离式任务的输出必须落盘，与宿主是否存活无关");
+
+    // 结束通知也要生成，且带上 recovered 标记。
+    QVERIFY(second.hasPendingNotification());
+    const QString notification = second.takeNotification(taskId);
+    QVERIFY(notification.contains(QStringLiteral("<status>failed</status>")));
+    QVERIFY(notification.contains(QStringLiteral("<recovered>true</recovered>")));
+
+    QFile::remove(outputPath);
 }
 
 QTEST_MAIN(TestAgentRuntime)

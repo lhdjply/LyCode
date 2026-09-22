@@ -16,6 +16,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QString>
 #include <QStringList>
@@ -56,6 +57,21 @@ QString commandFirstWord(const QString &command);
 
 /// 目录前缀（用于生成 `always allow Write(/src)` 这类规则）。
 QString directoryPrefix(const QString &path);
+
+/// 让子进程成为独立会话的组长（Unix 下 setsid）。
+///
+/// 命令可能自己再 fork（`npm run dev` 会拉起一堆子进程），只 kill 直接子进程
+/// 会留下孤儿继续占着端口或文件锁。建立独立进程组后 killProcessGroup 能命中整组。
+/// 由 BashTool 与 BackgroundTaskRegistry 共用——两处各写一份迟早会漂移。
+void configureProcessGroup(QProcess *process);
+
+/// 终止整个进程组。SIGKILL 而不是 SIGTERM：工具被取消/超时/后台任务被停止后
+/// 必须立即释放资源，不做"优雅退出"协商（模型可以自己再发一条命令收尾）。
+void killProcessGroup(QProcess *process);
+
+/// 把字符串包成 shell 单引号字面量（内含的单引号按 '\'' 转义）。
+/// 用于把路径安全地拼进 shell 重定向表达式，避免空格或特殊字符改变语义。
+QString shellSingleQuote(const QString &value);
 
 /// 参数日志用：把敏感/超长内容截断到 200 字符，避免把整篇文件写进日志。
 QString redactForLog(const QString &value, int maxChars = 200);

@@ -79,6 +79,8 @@ private slots:
     /// 子代理的会话状态变化：只更新列表，**不切换**当前会话。
     void onSubagentSessionChanged(const zcode::Session &session);
     void onSubagentFinished(const zcode::Id &childSessionId, bool ok);
+    /// 后台任务数量变化：状态栏给出可见提示，否则用户不知道有进程还在跑。
+    void onBackgroundTasksChanged(int runningCount);
 
     // ── 交互 ────────────────────────────────────────────────────────────────
     void onSendRequested();
@@ -143,6 +145,7 @@ private:
     QPushButton *stopButton_ = nullptr;
 
     QLabel *runStateLabel_ = nullptr;
+    QLabel *backgroundLabel_ = nullptr;
     QLabel *usageLabel_ = nullptr;
     QTimer *usageTimer_ = nullptr;
     /// 本轮运行已耗时。用于状态栏的"运行中（12s）"。

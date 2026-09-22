@@ -16,6 +16,7 @@
 #include "tools/BashTool.h"
 
 #include "core/Json.h"
+#include "tools/BackgroundTaskRegistry.h"
 #include "tools/ToolUtils.h"
 
 #include <QDir>
@@ -24,6 +25,7 @@
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QTimer>
 
 #include <csignal>
@@ -46,23 +48,6 @@ constexpr int kMaxOutputBytes = 10'000'000;
 
 /// 取消轮询间隔。100ms 是"用户感觉不到延迟"与"不浪费 CPU"之间的折中。
 constexpr int kCancelPollIntervalMs = 100;
-
-/// 终止整个进程组。
-/// setsid() 让子进程成为新会话的组长，其 pgid == pid，因此 kill(-pid) 命中整组。
-void killProcessGroup(QProcess *process) {
-#ifdef Q_OS_UNIX
-    const qint64 pid = process->processId();
-    if (pid > 0) {
-        // SIGKILL 而不是 SIGTERM：工具被取消/超时后必须立即释放资源，
-        // 不做"优雅退出"协商（模型可以自己再发一条命令处理收尾）。
-        ::kill(-static_cast<pid_t>(pid), SIGKILL);
-    }
-#endif
-    // 兜底：进程组信号失败（或非 Unix）时至少杀掉直接子进程。
-    if (process->state() != QProcess::NotRunning) {
-        process->kill();
-    }
-}
 
 }  // namespace
 
@@ -154,6 +139,8 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
     // 同一个事件循环批次里都尝试收尾，护栏保证回调恰好一次。
     struct State {
         bool finished = false;
+        /// 前台超时后自动转入后台。
+        bool autoBackgrounded = false;
         bool timedOut = false;
         bool cancelled = false;
     };
@@ -191,15 +178,6 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
                                    QStringLiteral("invalid_input")));
         return;
     }
-    if (runInBackground) {
-        // 有意未实现：真正的后台任务需要任务表、输出落盘、恢复与清理。
-        // 谎报成功会让模型以为进程在跑，从而做出错误的后续决策。
-        finish(ToolResult::failure(
-            QStringLiteral("run_in_background is not supported yet"),
-            QStringLiteral("unsupported")));
-        return;
-    }
-
     // 只读模式下 Bash 属于写入集（System），直接拒绝。
     if (toolutil::shouldRejectForReadOnly(meta, context)) {
         qCWarning(log) << "只读模式拒绝 Bash:" << toolutil::redactForLog(command);
@@ -232,6 +210,95 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
     const QStringList arguments{QStringLiteral("-lc"), command};
 #endif
 
+    // ── 分离式后台任务分支 ──────────────────────────────────────────────────
+    // 在创建 QProcess **之前**分流，而且**不持有** QProcess：
+    // `~QProcess` 会杀掉仍在运行的进程，那样"活过宿主、跨重启"就无从谈起。
+    // 所以用 startDetached 起进程，输出由 shell 自己重定向到文件——
+    // 全程没有管道，宿主退出也不会让子进程拿到 EPIPE。
+    if (runInBackground) {
+        if (context.backgroundTasks == nullptr) {
+            finish(ToolResult::failure(
+                QStringLiteral("当前环境不支持后台任务（run_in_background）。"),
+                QStringLiteral("unsupported")));
+            return;
+        }
+
+        const QString taskId = context.backgroundTasks->allocateTaskId();
+        const QString outputPath = BackgroundTaskRegistry::outputPathForTask(taskId);
+        if (outputPath.isEmpty()) {
+            finish(ToolResult::failure(QStringLiteral("无法创建后台任务输出目录。"),
+                                       QStringLiteral("output_path_unavailable")));
+            return;
+        }
+
+        // 刻意**不用 exec**：让外层 shell 留下来，跑完命令后把 $? 写进旁路文件。
+        // 分离式任务没有 wait() 可取退出码，没有这一步就永远只能记 -1，
+        // 一个正常退出的任务会被报成"失败"。
+        const QString exitPath = BackgroundTaskRegistry::exitCodePathFor(outputPath);
+        const QString wrapped = QStringLiteral("{ ") + command + QStringLiteral("; } >> ") +
+                                toolutil::shellSingleQuote(outputPath) +
+                                QStringLiteral(" 2>&1; echo $? > ") +
+                                toolutil::shellSingleQuote(exitPath);
+
+        // 用 setsid 起：`QProcess::startDetached` **不会**给子进程建新会话/进程组，
+        // 于是记录到的 pid 不是组长，TaskStop 的 kill(-pid) 够不到命令自己 fork 的
+        // 子进程（实测漏掉过 `sleep 45`）。setsid exec 掉自己，pid 因此就是组长。
+        const QString setsid = QStandardPaths::findExecutable(QStringLiteral("setsid"));
+        const bool useSetsid = !setsid.isEmpty();
+        const QString launcher = useSetsid ? setsid : program;
+        const QStringList launcherArgs =
+            useSetsid ? QStringList{program, QStringLiteral("-lc"), wrapped}
+                      : QStringList{QStringLiteral("-lc"), wrapped};
+        if (!useSetsid) {
+            // 没有 setsid 就只能直起，进程树清理会不完整，如实告警。
+            qCWarning(log) << "找不到 setsid，后台任务的子进程可能无法被 TaskStop 一并终止";
+        }
+
+        qint64 pid = 0;
+        const bool launched = QProcess::startDetached(launcher, launcherArgs, cwd, &pid);
+        if (!launched || pid <= 0) {
+            qCCritical(log) << "后台任务启动失败; program=" << program << "cwd=" << cwd;
+            finish(ToolResult::failure(
+                QStringLiteral("后台任务无法启动（program=%1，cwd=%2）。").arg(program, cwd),
+                QStringLiteral("spawn_failed")));
+            return;
+        }
+
+        BackgroundTaskRegistry::AdoptRequest adoptRequest;
+        adoptRequest.type = QStringLiteral("bash");
+        adoptRequest.description = description;
+        adoptRequest.command = command;
+        adoptRequest.pid = static_cast<int>(pid);
+        adoptRequest.outputPath = outputPath;
+        adoptRequest.taskId = taskId;
+        adoptRequest.detached = true;
+        if (context.backgroundTasks->adopt(adoptRequest).isEmpty()) {
+            qCCritical(log) << "后台任务登记失败，进程将成为孤儿; pid=" << pid;
+            finish(ToolResult::failure(QStringLiteral("后台任务登记失败。"),
+                                       QStringLiteral("background_register_failed")));
+            return;
+        }
+
+        qCInfo(log) << "后台任务已分离启动; id=" << taskId << "pid=" << pid
+                    << "output=" << outputPath;
+        ToolResult result = ToolResult::success(
+            QStringLiteral("命令已在后台启动（已与宿主分离，可跨重启存活）。\n"
+                           "task_id: %1\n"
+                           "output_path: %2\n"
+                           "pid: %3\n\n"
+                           "用 TaskOutput 读取进度或结果，用 TaskStop 终止。")
+                .arg(taskId, outputPath)
+                .arg(pid));
+        result.metadata.insert(QStringLiteral("status"), QStringLiteral("backgrounded"));
+        result.metadata.insert(QStringLiteral("backgroundTaskId"), taskId);
+        result.metadata.insert(QStringLiteral("outputPath"), outputPath);
+        result.metadata.insert(QStringLiteral("pid"), static_cast<double>(pid));
+        result.metadata.insert(QStringLiteral("detached"), true);
+        result.metadata.insert(QStringLiteral("cwd"), cwd);
+        finish(std::move(result));
+        return;
+    }
+
     auto *process = new QProcess();
     process->setProgram(program);
     process->setArguments(arguments);
@@ -239,10 +306,9 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
     process->setProcessChannelMode(QProcess::SeparateChannels);
     // 命令的工作目录（cwd）与 conpty/编码无关，这里不动 locale，
     // 让 shell 继承进程环境，行为与用户终端一致。
-#ifdef Q_OS_UNIX
-    // 建立独立进程组：超时/取消时可以对整组发信号。
-    process->setChildProcessModifier([]() { ::setsid(); });
-#endif
+    // 建立独立进程组：超时/取消/停止时可以对整组发信号。
+    // 与后台任务注册表共用同一份实现，避免两处漂移。
+    toolutil::configureProcessGroup(process);
 
     auto stdoutBudget = std::make_shared<toolutil::OutputBudget>(meta.maxOutputBytes);
     auto stderrBudget = std::make_shared<toolutil::OutputBudget>(meta.maxOutputBytes);
@@ -272,27 +338,91 @@ void BashTool::execute(const QJsonObject &input, const ToolContext &context, Too
                          stderrBudget->appendBytes(process->readAllStandardError());
                      });
 
+    // 取消轮询定时器必须**先**创建：超时处理器要停掉它。
+    // 否则自动后台化之后，它仍会在用户点中断时杀掉一个已经归后台所有的进程。
+    auto *cancelTimer = new QTimer(process);
+    cancelTimer->setInterval(kCancelPollIntervalMs);
+
     auto *timeoutTimer = new QTimer(process);
     timeoutTimer->setSingleShot(true);
     timeoutTimer->setInterval(timeoutMs);
-    QObject::connect(timeoutTimer, &QTimer::timeout, process, [process, state, timeoutMs]() {
-        if (process->state() == QProcess::NotRunning) {
-            return;
-        }
-        state->timedOut = true;
-        qCWarning(log) << "Bash 超时，终止进程组; timeoutMs=" << timeoutMs;
-        killProcessGroup(process);
-    });
+    QObject::connect(timeoutTimer, &QTimer::timeout, process,
+                     [process, state, timeoutMs, finish, context, cancelTimer, stdoutBudget,
+                      stderrBudget]() {
+                         if (process->state() == QProcess::NotRunning) {
+                             return;
+                         }
 
-    auto *cancelTimer = new QTimer(process);
-    cancelTimer->setInterval(kCancelPollIntervalMs);
+                         // 超时不一定要杀掉：命令还在跑，说明它可能只是慢。
+                         // 有注册表时**自动转入后台**，把控制权还给模型，
+                         // 让它去做别的事、稍后再读结果（npm 的 assistantAutoBackgrounded）。
+                         if (context.backgroundTasks == nullptr) {
+                             state->timedOut = true;
+                             qCWarning(log) << "Bash 超时且无后台任务支持，终止进程组; timeoutMs="
+                                            << timeoutMs;
+                             toolutil::killProcessGroup(process);
+                             return;
+                         }
+
+                         state->timedOut = true;
+                         state->autoBackgrounded = true;
+                         qCInfo(log) << "Bash 超时，自动转入后台; timeoutMs=" << timeoutMs;
+
+                         // 停掉前台定时器，并断开前台挂在这个进程上的全部处理器：
+                         // 不断开的话前台读取器会继续抢走输出，finished 处理器还会
+                         // deleteLater 掉一个已经归注册表所有的进程。
+                         if (cancelTimer != nullptr) {
+                             cancelTimer->stop();
+                         }
+                         QObject::disconnect(process, nullptr, process, nullptr);
+
+                         BackgroundTaskRegistry::AdoptRequest adoptRequest;
+                         adoptRequest.type = QStringLiteral("bash");
+                         adoptRequest.command = process->program() +
+                                                QLatin1Char(' ') +
+                                                process->arguments().join(QLatin1Char(' '));
+                         adoptRequest.process = process;
+                         adoptRequest.autoBackgrounded = true;
+                         // 进程已经在跑，且前台读取器刚被断开，可以由注册表接管。
+                         adoptRequest.takeOverRunningProcess = true;
+                         // 把前台已经读到的输出带过去，历史不丢。
+                         adoptRequest.initialOutput =
+                             stdoutBudget->text() + stderrBudget->text();
+                         const QString taskId = context.backgroundTasks->adopt(adoptRequest);
+                         if (taskId.isEmpty()) {
+                             qCWarning(log) << "自动后台化失败，改为终止进程组";
+                             toolutil::killProcessGroup(process);
+                             return;
+                         }
+                         context.backgroundTasks->recordProcessIdentity(taskId);
+
+                         const BackgroundTask task = context.backgroundTasks->task(taskId);
+                         ToolResult result = ToolResult::success(
+                             QStringLiteral("命令超过超时（%1ms）仍在运行，已自动转入后台。\n"
+                                            "task_id: %2\n"
+                                            "output_path: %3\n\n"
+                                            "用 TaskOutput 读取进度，用 TaskStop 终止。\n"
+                                            "注意：它继承的是前台管道，只在本进程存活期间继续"
+                                            "运行；需要跨重启请用 run_in_background 显式启动。")
+                                 .arg(timeoutMs)
+                                 .arg(taskId, task.outputPath));
+                         result.metadata.insert(QStringLiteral("status"),
+                                                QStringLiteral("backgrounded"));
+                         result.metadata.insert(QStringLiteral("backgroundTaskId"), taskId);
+                         result.metadata.insert(QStringLiteral("assistantAutoBackgrounded"), true);
+                         result.metadata.insert(QStringLiteral("outputPath"), task.outputPath);
+                         result.metadata.insert(QStringLiteral("timedOut"), true);
+                         result.metadata.insert(QStringLiteral("autoBackgrounded"), true);
+                         finish(std::move(result));
+                     });
+
     QObject::connect(cancelTimer, &QTimer::timeout, process, [process, state, context]() {
         if (!context.isCancelled() || process->state() == QProcess::NotRunning) {
             return;
         }
         state->cancelled = true;
         qCInfo(log) << "Bash 收到取消，终止进程组";
-        killProcessGroup(process);
+        toolutil::killProcessGroup(process);
     });
 
     QObject::connect(process, &QProcess::errorOccurred, process,

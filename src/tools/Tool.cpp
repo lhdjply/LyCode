@@ -8,6 +8,12 @@
 //   * 每个工具的 execute 必须恰好回调一次（各工具用统一的成功/失败出口保证）。
 #include "tools/Tool.h"
 
+#include <csignal>
+
+#ifdef Q_OS_UNIX
+#include <unistd.h>  // setsid()
+#endif
+
 #include "core/Json.h"
 #include "tools/TodoStore.h"
 #include "tools/ToolUtils.h"
@@ -27,6 +33,7 @@
 #include "tools/GrepTool.h"
 #include "tools/ReadTool.h"
 #include "tools/AgentTool.h"
+#include "tools/TaskTools.h"
 #include "tools/TodoTool.h"
 #include "tools/WriteTool.h"
 
@@ -612,6 +619,11 @@ ToolRegistry ToolRegistry::createWithBuiltins() {
     registry.add(new TodoWriteTool());
     // `Task` 是 npm 里 Agent 的 Claude Code 兼容别名，模型两种写法都能调到。
     registry.add(new AgentTool(), {QStringLiteral("Task")});
+    // 别名与 npm 对齐，兼容按 Claude Code 习惯发起的调用。
+    registry.add(new TaskOutputTool(),
+                 {QStringLiteral("BashOutput"), QStringLiteral("AgentOutput")});
+    registry.add(new TaskStopTool(),
+                 {QStringLiteral("KillBash"), QStringLiteral("KillShell")});
     qCInfo(log) << "已注册内置工具:" << registry.names().join(QStringLiteral(", "));
     return registry;
 }
@@ -1004,6 +1016,41 @@ QString OutputBudget::text() const {
         result += QStringLiteral("\n…[输出被截断：超过 %1 字节预算]").arg(maxBytes_);
     }
     return result;
+}
+
+QString shellSingleQuote(const QString &value) {
+    QString escaped = value;
+    // 单引号里唯一不能直接出现的就是单引号本身；关掉、插一个转义的单引号、再打开。
+    escaped.replace(QLatin1String("'"), QLatin1String("'\\''"));
+    return QLatin1Char('\'') + escaped + QLatin1Char('\'');
+}
+
+void configureProcessGroup(QProcess *process) {
+    if (process == nullptr) {
+        return;
+    }
+#ifdef Q_OS_UNIX
+    process->setChildProcessModifier([]() { ::setsid(); });
+#else
+    // Windows 没有会话组概念；终止时由 killProcessGroup 走 taskkill /T 兜底。
+    Q_UNUSED(process)
+#endif
+}
+
+void killProcessGroup(QProcess *process) {
+    if (process == nullptr) {
+        return;
+    }
+#ifdef Q_OS_UNIX
+    const qint64 pid = process->processId();
+    if (pid > 0) {
+        ::kill(-static_cast<pid_t>(pid), SIGKILL);
+    }
+#endif
+    // 兜底：进程组信号失败（或非 Unix）时至少杀掉直接子进程。
+    if (process->state() != QProcess::NotRunning) {
+        process->kill();
+    }
 }
 
 }  // namespace toolutil

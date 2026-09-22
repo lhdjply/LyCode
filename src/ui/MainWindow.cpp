@@ -3,6 +3,7 @@
 #include "core/Ids.h"
 #include "core/Json.h"
 #include "core/Logging.h"
+#include "tools/BackgroundTaskRegistry.h"
 #include "tools/TodoStore.h"
 #include "ui/ConversationView.h"
 #include "ui/Markdown.h"
@@ -298,8 +299,24 @@ void MainWindow::buildUi() {
     // ── 状态栏 ──────────────────────────────────────────────────────────────
     // 上下文用量原先在顶部工具条右侧。三个选择器搬进输入区后顶部就空了，
     // 与其留一条只有一项的横栏，不如把它并入状态栏（这里本来就在展示用量）。
+    // ⚠ 一律用 addPermanentWidget，不用 addWidget。
+    // QStatusBar::showMessage() 会**隐藏所有普通控件**（addWidget 添加的），
+    // 只保留 permanent 的。用它的话，"就绪/正在生成"与后台任务提示会在每次
+    // 状态消息出现的几秒里消失——而那恰恰是用户最需要看到它们的时刻（实测踩到）。
     runStateLabel_ = new QLabel(runStateText(RunState::Idle));
-    statusBar()->addWidget(runStateLabel_);
+    statusBar()->addPermanentWidget(runStateLabel_);
+
+    // 后台任务计数。没有它用户根本不知道还有进程在跑——后台任务的全部意义
+    // 就是"离开视线继续工作"，因此必须有个常驻的可见提示。
+    backgroundLabel_ = new QLabel;
+    backgroundLabel_->setObjectName(QStringLiteral("backgroundLabel"));
+    backgroundLabel_->setFont(Theme::instance().font(FontRole::UiXs));
+    statusBar()->addPermanentWidget(backgroundLabel_);
+
+    // 主动拉一次初始计数：后台任务注册表在**构造时**就完成了账本对账
+    // （认领上次退出时遗留的任务），那时界面还没接上信号。不拉这一下，
+    // 重启后被认领的任务就完全不可见——而那正是"跨重启"唯一的可见结果。
+    onBackgroundTasksChanged(runtime_.backgroundTasks()->runningCount());
 
     contextLabel_ = new QLabel;
     contextLabel_->setObjectName(QStringLiteral("contextLabel"));
@@ -425,6 +442,8 @@ void MainWindow::wireRuntime() {
             &MainWindow::onSubagentSessionChanged);
     connect(&runtime_, &AgentRuntime::subagentFinished, this,
             &MainWindow::onSubagentFinished);
+    connect(&runtime_, &AgentRuntime::backgroundTasksChanged, this,
+            &MainWindow::onBackgroundTasksChanged);
 
     connect(sidebar_, &SidebarPanel::newSessionRequested, this,
             &MainWindow::onNewSessionRequested);
@@ -959,6 +978,22 @@ void MainWindow::onSubagentFinished(const Id &childSessionId, bool ok) {
         loadWorkspaceSessions();
         sidebar_->setActiveSession(activeSessionId_);
     }
+}
+
+void MainWindow::onBackgroundTasksChanged(int runningCount) {
+    const Palette &palette = Theme::instance().palette();
+    if (runningCount <= 0) {
+        backgroundLabel_->clear();
+        backgroundLabel_->setToolTip(QString());
+        return;
+    }
+    backgroundLabel_->setText(QStringLiteral("· 后台任务 %1").arg(runningCount));
+    backgroundLabel_->setStyleSheet(
+        QStringLiteral("color: %1;").arg(Theme::css(palette.warning)));
+    backgroundLabel_->setToolTip(
+        QStringLiteral("有 %1 个后台任务正在运行。用 TaskOutput 查看它们的输出，"
+                       "或在工具卡片里用 TaskStop 终止。")
+            .arg(runningCount));
 }
 
 void MainWindow::onFailed(const QString &message) {

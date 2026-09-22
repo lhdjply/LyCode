@@ -26,7 +26,13 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QMenu>
+#include "tools/BackgroundTaskRegistry.h"
+
 #include <QListWidget>
+
+#ifdef Q_OS_UNIX
+#include <csignal>
+#endif
 #include <QMenuBar>
 #include <QProgressBar>
 #include <QScrollArea>
@@ -156,7 +162,32 @@ void TestUiFlow::initTestCase() {
     qputenv("ZCODE_DATA_BASE_DIR", dataDir_->path().toUtf8());
 }
 
+/// 按账本清掉仍然存活的后台任务进程。
+/// 后台任务的析构语义是"放它活过宿主"，所以测试必须自己收尾，
+/// 否则每跑一次测试就漏一个 sleep 进程。
+static void killLedgerTasks() {
+    QFile ledger(zcode::BackgroundTaskRegistry::ledgerPath());
+    if (!ledger.open(QIODevice::ReadOnly)) {
+        return;
+    }
+    const QJsonObject root = QJsonDocument::fromJson(ledger.readAll()).object();
+    for (const QJsonValue &value : root.value(QStringLiteral("tasks")).toArray()) {
+        const QJsonObject item = value.toObject();
+        if (item.value(QStringLiteral("status")).toString() != QLatin1String("running")) {
+            continue;
+        }
+        const int pid = item.value(QStringLiteral("pid")).toInt();
+        if (pid > 0) {
+#ifdef Q_OS_UNIX
+            ::kill(-pid, SIGKILL);   // 进程组优先：命令可能自己 fork 过
+            ::kill(pid, SIGKILL);
+#endif
+        }
+    }
+}
+
 void TestUiFlow::cleanupTestCase() {
+    killLedgerTasks();
     qunsetenv("ZCODE_DATA_BASE_DIR");
     dataDir_.reset();
     gateway_.reset();
@@ -164,8 +195,9 @@ void TestUiFlow::cleanupTestCase() {
 
 void TestUiFlow::drivesFullToolAndPermissionFlow() {
     // ── 第 1 轮：模型要求执行 Bash；第 2 轮：模型给出最终回复 ──────────────
+    // 传**原始 JSON**：toolCallResponse 负责转义（转义只做一次）。
     gateway_->enqueue(toolCallResponse(QStringLiteral("Bash"),
-                                       "{\\\"command\\\":\\\"echo hello-from-zcode\\\"", "}"));
+                                       R"({"command":"echo hello-from-zcode")", "}"));
     // 第二轮故意带缓存用量：prompt 1000 里有 750 命中缓存。
     // 用于端到端验证"SSE → provider 口径归一 → 用量累加 → 状态栏文案"整条链路。
     gateway_->enqueue(textResponseWithCache(
@@ -400,6 +432,53 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
         screenshotDir() + QStringLiteral("/08-subagent-session.png");
     QVERIFY2(window.grab().save(subagentShot), qPrintable(subagentShot));
 
+    // ── 后台任务：状态栏必须给出可见提示 ───────────────────────────────────
+    // 后台任务的全部意义就是"离开视线继续工作"，所以必须有个常驻提示，
+    // 否则用户不知道还有进程在跑。
+    const int yoloIndex = modeCombo->findData(static_cast<int>(SessionMode::Yolo));
+    QVERIFY(yoloIndex >= 0);
+    modeCombo->setCurrentIndex(yoloIndex);  // yolo：后台 Bash 不必逐个批准
+
+    QJsonObject bgInput;
+    // 跑得比整个测试长：这样它能活过下面的"关闭再打开"，用来验证跨重启认领。
+    bgInput.insert(QStringLiteral("command"), QStringLiteral("sleep 45"));
+    bgInput.insert(QStringLiteral("description"), QStringLiteral("长跑任务"));
+    bgInput.insert(QStringLiteral("run_in_background"), true);
+    gateway_->enqueue(multiToolCallResponse(
+        {{QStringLiteral("Bash"),
+          QJsonDocument(bgInput).toJson(QJsonDocument::Compact)}}));
+    gateway_->enqueue(textResponse("后台已启动"));
+
+    const int beforeBackground = conversation->messageCount();
+    composer->setPlainText(QStringLiteral("起个后台任务"));
+    sendButton->click();
+    QVERIFY2(waitFor([&]() { return conversation->messageCount() >= beforeBackground + 3; },
+                     15000),
+             "后台任务这一轮也应当正常收尾");
+    QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }, 15000));
+
+    auto *backgroundLabel = window.findChild<QLabel *>(QStringLiteral("backgroundLabel"));
+    QVERIFY2(backgroundLabel != nullptr, "状态栏应当有后台任务提示标签");
+    QCOMPARE(backgroundLabel->text(), QStringLiteral("· 后台任务 1"));
+    // 必须检查**可见性**，不能只查 text()：状态栏的普通控件会被 showMessage()
+    // 隐藏，只查文本的话这个缺陷会漏过去（实测漏过一次）。
+    QVERIFY2(backgroundLabel->isVisible(),
+             "后台任务提示必须始终可见——状态栏消息不得把它藏起来");
+    QVERIFY2(backgroundLabel->toolTip().contains(QStringLiteral("正在运行")),
+             "提示的悬浮说明应当解释怎么查看/终止");
+
+    const QString backgroundShot =
+        screenshotDir() + QStringLiteral("/09-background-task.png");
+    const QPixmap backgroundPixmap = window.grab();
+    QVERIFY2(backgroundPixmap.copy(0, backgroundPixmap.height() - 150,
+                                   backgroundPixmap.width(), 150)
+                 .save(backgroundShot),
+             qPrintable(backgroundShot));
+
+    // 回到默认模式，避免影响后面的设置与重启验证。
+    const int buildIndex = modeCombo->findData(static_cast<int>(SessionMode::Build));
+    modeCombo->setCurrentIndex(buildIndex);
+
     // ── 回归：重启后必须能打开之前的会话 ───────────────────────────────────
     // 用"重启前的实际条数"做基准，而不是写死数字：这条路径上新增任何一轮
     // 对话都不该让断言失效（写死 3 就踩过这个坑）。
@@ -591,6 +670,19 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
                  qPrintable(QStringLiteral("正常关闭后重新打开应能看到历史，实际 %1 条")
                                 .arg(reopenedConversation->messageCount())));
         QCOMPARE(reopenedConversation->messageCount(), messagesBeforeClose);
+
+        // ★ 跨重启：后台任务活过了应用退出，新实例必须从账本把它认领回来。
+        // 这是"持久化恢复"唯一对用户可见的结果。
+        auto *reopenedBackground =
+            reopened.findChild<QLabel *>(QStringLiteral("backgroundLabel"));
+        QVERIFY(reopenedBackground != nullptr);
+        QVERIFY2(waitFor(
+                     [&]() {
+                         return reopenedBackground->text().contains(QStringLiteral("后台任务"));
+                     },
+                     5000),
+                 qPrintable(QStringLiteral("重启后应当认领遗留的后台任务，实际标签=%1")
+                                .arg(reopenedBackground->text())));
         QVERIFY(!reopenedConversation->findChildren<ToolCallWidget *>().isEmpty());
     }
 

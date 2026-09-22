@@ -71,7 +71,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-6 个套件、168 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
+6 个套件、175 项断言，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。
 
 | 套件 | 断言 | 覆盖 |
 | --- | ---: | --- |
@@ -135,6 +135,78 @@ ctest --test-dir build --output-on-failure
 | `build` | 默认。读写文件与执行命令都需要确认 |
 | `edit` | 文件写入自动放行，执行命令仍需确认 |
 | `yolo` | 全部放行。请自行判断风险 |
+
+### 后台任务
+
+`Bash(run_in_background: true)` 让命令在工具返回之后继续跑（起 dev server、跑耗时测试）。这带来三个必须解决的问题，也正是这一节的全部内容：
+
+| 问题 | 处理方式 |
+| --- | --- |
+| **生命周期** | 工具调用早已返回，栈上的 `QProcess` 承载不了它。`BackgroundTaskRegistry` 接管所有权，并在会话关闭 / 运行时就绪销毁时 `stopAll()`，不留孤儿进程 |
+| **输出去哪** | 边读边落盘到 `<数据根>/qt/tasks/<task_id>.log`，内存只保留 **8 KiB 尾部预览**。后台任务可能产出几十 MB，全留在内存里会撑爆 |
+| **完成通知** | 任务在 turn 之外异步结束，模型不会自己知道。注册表在结束时生成一条 `<task-notification>`，由运行时注入下一轮上下文 |
+
+配套的两个工具（别名与 npm 对齐）：
+
+| 工具 | 别名 | 作用 |
+| --- | --- | --- |
+| `TaskOutput` | `BashOutput` / `AgentOutput` | 读任务状态与输出；`block=true`（默认）会等到任务结束，`timeout` 上限 600s |
+| `TaskStop` | `KillBash` / `KillShell` | 终止任务，或查询一个已结束任务的状态 |
+
+通知的投递时机与 npm 一致：**每次模型步开始前**投递。任务结束时如果正在跑 turn，模型在下一步就看到；如果当时空闲，则在下一次输入的首次模型步看到。通知是一条 `modelOnly` 消息，UI 不会把它显示成用户说过的话。
+
+通知的形状与 npm 的 `<task-notification>` 同形，便于模型稳定解析：
+
+```xml
+<task-notification>
+<task-id>task_xxx</task-id>
+<task-type>bash</task-type>
+<status>completed</status>
+<exit-code>0</exit-code>
+<output-path>/home/u/.zcode/qt/tasks/task_xxx.log</output-path>
+<bytes>1234</bytes>
+<duration-ms>2013</duration-ms>
+<output-tail>…输出尾部…</output-tail>
+</task-notification>
+```
+
+界面：状态栏用警示色常驻显示 `· 后台任务 N`。这条提示**必须是 permanent 控件**——`QStatusBar::showMessage()` 会隐藏所有普通控件（`addWidget` 添加的），用普通控件的话它会在每次状态消息出现的几秒里消失，而那恰恰是最需要看到它的时刻。
+
+#### 超时自动后台化
+
+前台命令超时**不再一律杀掉**：有后台任务支持时，它会被自动转入后台，把控制权还给模型，让它去做别的事、稍后再用 `TaskOutput` 读结果（对应 npm 的 `assistantAutoBackgrounded`）。结果里会带 `assistantAutoBackgrounded: true`，与模型/用户显式要求后台化的情形区分开。
+
+转交时要处理三件事，缺一不可：停掉前台定时器（否则中断轮询会杀掉一个已经归后台所有的进程）、断开前台挂在该进程上的全部处理器（否则前台读取器继续抢输出，`finished` 处理器还会 `deleteLater` 掉一个已经不属于它的进程）、把前台已读到的输出带进后台记录（历史不丢）。
+
+#### 跨重启恢复
+
+后台任务要**活过宿主退出**，就不能让输出走管道——宿主退出后管道读端关闭，子进程再写会拿到 EPIPE。所以：
+
+| 机制 | 做法 |
+| --- | --- |
+| 启动方式 | `QProcess::startDetached`，**不持有** `QProcess`。这是硬要求：`~QProcess` 会杀掉仍在运行的进程，"活过宿主"就无从谈起 |
+| 输出 | 由 shell 自己重定向到日志文件，全程没有管道 |
+| 退出码 | 分离式任务没有 `wait()` 可取退出码，所以让 shell 把 `$?` 写到 `<log>.exit` 旁路文件 |
+| 账本 | `<数据根>/qt/tasks/ledger.json` 原子写入，记录 id/pid/启动指纹/输出路径/状态 |
+| 重启对账 | 启动时按 `pid` + **启动时间指纹**（`/proc/<pid>/stat` 的 starttime）判断是否还活着：活着则认领并轮询其输出文件；已结束则标记 `lost`，退出码如实记 -1，**不猜一个 0 让模型以为成功** |
+
+启动指纹是必要的：pid 会被复用，只靠 `kill(pid, 0)` 会把一个恰好复用了该 pid 的无关进程当成我们的任务。
+
+#### 两种后台任务
+
+这不是实现取巧，是 spawn 方式决定的：
+
+| | 分离式（显式 `run_in_background`） | 管道式（超时自动后台化） |
+| --- | --- | --- |
+| 输出 | 直接写文件，无管道 | 继承前台管道 |
+| 跨重启 | **可以**，由账本认领 | **不可以**，宿主退出即拿不到输出 |
+| 退出码 | 由旁路文件取得 | `QProcess` 直接给出 |
+
+管道式任务无法在启动后改重定向，所以它只在本进程存活期间继续运行。需要跨重启就用显式 `run_in_background`。宿主退出时会对管道式任务明确告警，不假装它还能活。
+
+#### 已知限制
+
+`TaskStop` 对分离式任务按 pid 发信号，因此**只能终止仍然存活的进程**；如果进程已自行退出而 pid 又被复用，指纹校验会拦住误杀（记 `lost` 而不是杀掉无关进程）。此外，分离式任务不会继承宿主的环境变更，输出也不区分 stdout/stderr（合并写同一份日志，因为 QProcess 无法把两条流落到同一句柄）。
 
 ### 子 Agent
 
@@ -310,6 +382,7 @@ tests/          单元测试（领域模型、权限链、Markdown 渲染）
 - 8 个内置工具：`Bash`、`Read`、`Write`、`Edit`、`Glob`、`Grep`、`TodoRead`、`TodoWrite`
 - 权限门：5 步判定链 + 规则匹配（前缀 / `*` / `prefix:*`）+ 异步裁决 + 取消收尾
 - Agent 主循环：模型步 ↔ 工具队列循环、turn 相位、中断、安全上限
+- **后台任务**：`Bash(run_in_background)` + `TaskOutput`/`TaskStop`，含输出落盘、完成通知、超时自动后台化、跨重启恢复与状态栏提示
 - **子 Agent**：`Agent` 工具（别名 `Task`），含子会话、上下文隔离、两种 profile、结论与用量回传
 - **工具并行调度**：按 `canRunInParallel` 分组，组内并行（上限 10）、组间串行；不可并行的工具独占一组形成串行屏障
 - **思考等级**：输入区选择器 + 两种协议的字段映射（Anthropic `thinking.budget_tokens` / OpenAI `reasoning_effort`），按模型记住上次档位
@@ -325,7 +398,6 @@ tests/          单元测试（领域模型、权限链、Markdown 渲染）
 
 | 项 | 状态 | 说明 |
 | --- | --- | --- |
-| `Bash` 后台任务 | **未实现** | `run_in_background` 会明确返回"不支持"，不假装成功 |
 | MCP | **未实现** | 无 MCP server 接入 |
 | 上下文压缩 | **未实现** | 已估算用量并在 UI 显示压力，但还没有 microcompact / full compact |
 | 代码语法高亮 | **未实现** | 代码块用等宽字体渲染，无着色 |
