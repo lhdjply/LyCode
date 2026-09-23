@@ -15,6 +15,7 @@
 #pragma once
 
 #include <QColor>
+#include <QList>
 #include <QString>
 
 namespace lycode::ui {
@@ -59,6 +60,24 @@ public:
 
     /// 纯文本预览：去掉 Markdown 标记，用于会话列表的一行摘要。
     static QString toPlainPreview(const QString &markdown, int maxChars = 120);
+
+    /// 一个可点选的选项。
+    struct Choice {
+        /// 按钮上显示的短标签。
+        QString label;
+        /// 点选后填进输入框的文本（通常就是选项原文）。
+        QString text;
+    };
+
+    /// 从 markdown **尾部**识别"让用户在若干选项里选一个"的列表。
+    ///
+    /// 判定刻意保守：宁可不识别，也不要把正文里的普通编号列表变成一排按钮——
+    /// 那会让正常的回答看起来像在要求用户做选择。全部条件都要满足：
+    ///   * 尾部是一个 2–6 项的列表（有序 `1.` / `1)` / `1、`，或无序 `-` / `*`）
+    ///   * 每项只有一行、且不超过 80 字符
+    ///   * 列表**前面紧邻**一行是提问（以 ? / ？ 结尾，或含"选择/哪种/哪个/which/choose"）
+    /// 不满足时返回空列表，调用方据此不显示任何按钮。
+    static QList<Choice> detectChoices(const QString &markdown);
 };
 
 }  // namespace lycode::ui

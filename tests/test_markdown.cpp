@@ -42,6 +42,7 @@ private slots:
     void rendersFencedCodeBlockWithLanguage();
     void rendersIndentedFenceWithTildes();
     void inlineCodeSurvivesEmphasisRules();
+    void detectsChoicesOnlyFromTheUnifiedFormat();
     void rendersEmphasis();
     void rendersLists();
     void rendersTaskList();
@@ -247,6 +248,59 @@ void TestMarkdown::plainPreviewStripsMarkup() {
         Markdown::toPlainPreview(QString(500, QLatin1Char('a')), 40);
     QVERIFY(longPreview.size() <= 41);
     QVERIFY(longPreview.endsWith(QStringLiteral("…")));
+}
+
+void TestMarkdown::detectsChoicesOnlyFromTheUnifiedFormat() {
+    // 只认统一的 `choices` 围栏。这是刻意的：去猜正文里的编号列表必然误判，
+    // 把"步骤如下：1. 2. 3."或目录变成一排按钮，正常的回答看起来像在逼用户选。
+    const QList<Markdown::Choice> fromFence = Markdown::detectChoices(
+        QStringLiteral("我看了两种改法：\n\n"
+                       "```choices\n"
+                       "- 只改 Read 工具，最小改动\n"
+                       "- 同时改 Read 与 Grep\n"
+                       "```\n"));
+    QCOMPARE(fromFence.size(), 2);
+    QCOMPARE(fromFence.at(0).label, QStringLiteral("只改 Read 工具，最小改动"));
+    // 点选后填进输入框的就是选项原文。
+    QCOMPARE(fromFence.at(1).text, QStringLiteral("同时改 Read 与 Grep"));
+
+    // 有序列表写法的选项也要能认。
+    const QList<Markdown::Choice> ordered = Markdown::detectChoices(
+        QStringLiteral("```choices\n1. 方案甲\n2. 方案乙\n3. 方案丙\n```"));
+    QCOMPARE(ordered.size(), 3);
+    QCOMPARE(ordered.at(2).label, QStringLiteral("方案丙"));
+
+    // ★ 正文里的普通编号列表**不该**被当成选项——这正是放弃启发式识别的理由。
+    QVERIFY2(Markdown::detectChoices(QStringLiteral("步骤如下：\n\n"
+                                                    "1. 打开文件\n"
+                                                    "2. 修改配置\n"
+                                                    "3. 重启服务\n"))
+                 .isEmpty(),
+             "普通的编号步骤不该被当成选项");
+
+    // 列表就该是列表，不能因为"看起来像选项"就变成按钮。
+    QVERIFY(Markdown::detectChoices(QStringLiteral("你可以选择：\n- 甲\n- 乙\n")).isEmpty());
+
+    // 只有一个选项、或超过 6 项，都不算选择。
+    QVERIFY(Markdown::detectChoices(QStringLiteral("```choices\n- 只有一个\n```")).isEmpty());
+    QVERIFY(Markdown::detectChoices(QStringLiteral(
+                                        "```choices\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n```"))
+                .isEmpty());
+
+    // 只认**最后**一个 choices 块：前一轮的选项不该再摆出来。
+    const QList<Markdown::Choice> last = Markdown::detectChoices(
+        QStringLiteral("```choices\n- 旧的甲\n- 旧的乙\n```\n\n中间说明\n\n"
+                       "```choices\n- 新的甲\n- 新的乙\n```\n"));
+    QCOMPARE(last.size(), 2);
+    QCOMPARE(last.at(0).label, QStringLiteral("新的甲"));
+
+    // 渲染成列表，而不是代码块（否则选项会在正文与按钮里各出现一次）。
+    const QString html = Markdown::toHtml(
+        QStringLiteral("```choices\n- 甲方案\n- 乙方案\n```"), testStyle());
+    QVERIFY2(html.contains(QStringLiteral("<ul class=\"choices\">")), qPrintable(html));
+    QVERIFY2(!html.contains(QStringLiteral("code-block")),
+             "choices 块不该渲染成代码块");
+    QVERIFY(html.contains(QStringLiteral("甲方案")));
 }
 
 QTEST_MAIN(TestMarkdown)

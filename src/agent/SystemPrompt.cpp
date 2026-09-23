@@ -412,7 +412,23 @@ QString SystemPromptBuilder::build(const SystemPromptInput &input) {
         sections << toolingNormsSection(input.tools);
     }
 
-    // ④ 技能清单。只放名字与描述：正文由 Skill 工具按需加载。
+    // ④ 让用户做选择时的统一格式。
+    // 解析端只认这个格式（不去猜正文列表），所以这段是功能的一部分，
+    // 不是"建议"——改这里就要同步改 Markdown::detectChoices。
+    sections << QStringLiteral(
+        "## Offering choices\n\n"
+        "When you need the user to pick between concrete alternatives, do not just list "
+        "them in prose. Put them in a fenced block whose info string is exactly "
+        "`choices`, one option per line:\n\n"
+        "```choices\n"
+        "- First option\n"
+        "- Second option\n"
+        "```\n\n"
+        "Rules: 2-6 options; each on a single line, under 40 characters; no explanation "
+        "inside the block (put it outside). The UI turns them into buttons the user can "
+        "click, which is faster and less error-prone than retyping one.");
+
+    // ⑤ 技能清单。只放名字与描述：正文由 Skill 工具按需加载。
     if (!input.skillsSection.trimmed().isEmpty()) {
         sections << input.skillsSection.trimmed();
     }

@@ -107,6 +107,7 @@ private slots:
     void removingCurrentWorkspaceActuallyWorks();
     void everyWorkspaceShowsFoldMarker();
     void windowUsesTheAppIcon();
+    void choiceButtonsFillTheComposer();
 
 private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -1467,6 +1468,52 @@ void TestUiFlow::windowUsesTheAppIcon() {
     QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
     QApplication::setWindowIcon(icon);
     QVERIFY2(!window.windowIcon().isNull(), "主窗口应当带应用图标");
+}
+
+void TestUiFlow::choiceButtonsFillTheComposer() {
+    // 用户诉求："当 ai 给你几个选项时需要可以选择"。模型按系统提示词的统一格式
+    // （`choices` 围栏）给出选项，界面渲染成按钮，点一下填进输入框。
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    auto *composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+    auto *sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+    QVERIFY(sidebar != nullptr && composer != nullptr && sendButton != nullptr);
+
+    // 前面的测试会改动工作区，这里显式准备一个可用的。
+    {
+        QTemporaryDir own;
+        QVERIFY(own.isValid());
+        emit sidebar->workspaceRecentRequested(own.path());
+        QVERIFY(waitFor([&]() { return sendButton->isEnabled(); }, 5000));
+    }
+
+    gateway_->enqueue(textResponse(
+        QByteArray("我看到两种改法：\n\n```choices\n- 只改 Read 工具\n- 同时改 Read 与 Grep\n```")));
+    composer->setPlainText(QStringLiteral("怎么改？"));
+    sendButton->click();
+
+    auto *bar = window.findChild<QWidget *>(QStringLiteral("choiceBar"));
+    QVERIFY2(bar != nullptr, "输入框上方应当有选项按钮条");
+    QVERIFY2(waitFor([&]() { return bar->isVisible(); }, 15000),
+             "模型按统一格式给出选项后，按钮条应当出现");
+
+    const QList<QPushButton *> buttons =
+        window.findChildren<QPushButton *>(QStringLiteral("choiceButton"));
+    QCOMPARE(buttons.size(), 2);
+    QCOMPARE(buttons.at(0)->text(), QStringLiteral("只改 Read 工具"));
+
+    // 截图要在点击**之前**拍：点完按钮条就收起了，拍到的会是空状态，
+    // 那张图看不出这个功能长什么样。
+    const QString shot = screenshotDir() + QStringLiteral("/18-choice-buttons.png");
+    QVERIFY2(window.grab().save(shot), qPrintable(shot));
+
+    buttons.at(1)->click();
+    // 填进输入框而不是直接发送：用户还能改一改，也避免误点直接发出。
+    QCOMPARE(composer->toPlainText(), QStringLiteral("同时改 Read 与 Grep"));
+    QVERIFY2(!bar->isVisible(), "选完之后按钮条应当收起");
 }
 
 QTEST_MAIN(TestUiFlow)

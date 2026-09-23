@@ -3,6 +3,8 @@
 #include "ui/SyntaxHighlighter.h"
 
 #include <QRegularExpression>
+
+#include <utility>
 #include <QStringList>
 #include <QUrl>
 
@@ -189,6 +191,30 @@ QString Markdown::toHtml(const QString &markdown, const MarkdownStyle &style) {
         tokenColors.type = style.syntaxType;
         tokenColors.function = style.syntaxFunction;
         tokenColors.preprocessor = style.syntaxPreproc;
+        // `choices` 围栏是给界面读的选项清单，不是代码：渲染成列表。
+        // 当代码块渲染的话，同一批选项会在正文里以代码块出现、又在输入框上方
+        // 以按钮出现，看起来像重复了两遍。
+        if (codeLanguage.trimmed().compare(QLatin1String("choices"),
+                                          Qt::CaseInsensitive) == 0) {
+            QString list;
+            for (const QString &item : std::as_const(codeLines)) {
+                QString text = item.trimmed();
+                if (text.isEmpty()) {
+                    continue;
+                }
+                if (text.size() > 1 && (text.at(0) == QLatin1Char('-') ||
+                                        text.at(0) == QLatin1Char('*'))) {
+                    text = text.mid(1).trimmed();
+                }
+                list += QStringLiteral("<li>%1</li>").arg(escape(text));
+            }
+            html += QStringLiteral("<ul class=\"choices\">%1</ul>\n").arg(list);
+            codeLines.clear();
+            codeLanguage.clear();
+            inCodeBlock = false;
+            return;  // closeCode 是 lambda，这里用 return 而非 continue
+        }
+
         const QString body = SyntaxHighlighter::highlight(
             codeLines.join(QLatin1Char('\n')), codeLanguage, tokenColors);
         html += QStringLiteral("<div class=\"code-block\">%1<pre class=\"code\">%2</pre></div>\n")
@@ -422,6 +448,78 @@ QString Markdown::styleSheet(const MarkdownStyle &style) {
                .arg(style.border.name());
 
     return css;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 选项识别
+// ─────────────────────────────────────────────────────────────────────────────
+
+QList<Markdown::Choice> Markdown::detectChoices(const QString &markdown) {
+    constexpr int kMaxChoices = 6;
+    constexpr int kMaxLabelChars = 80;
+    constexpr char kFenceInfo[] = "choices";
+
+    // 只认**统一格式**：一个 info 为 `choices` 的围栏块。
+    //
+    // 为什么不去猜正文里的编号列表：那样必然误判——"步骤如下：1. 2. 3."、
+    // 目录、并列的要点，全都会被变成一排按钮，正常的回答看起来像在逼用户做选择。
+    // 由系统提示词要求模型按这个格式输出，解析就变成精确匹配。
+    const QStringList lines = markdown.split(QLatin1Char('\n'));
+    QStringList labels;
+    bool inside = false;
+    for (const QString &line : lines) {
+        const QString trimmed = line.trimmed();
+        if (!inside) {
+            if (!trimmed.startsWith(QLatin1String("```")) &&
+                !trimmed.startsWith(QLatin1String("~~~"))) {
+                continue;
+            }
+            const QString info =
+                trimmed.mid(3, trimmed.size() - 3).trimmed().toLower();
+            if (info == QLatin1String(kFenceInfo)) {
+                inside = true;
+                labels.clear();  // 只认**最后**一个 choices 块
+            }
+            continue;
+        }
+        if (trimmed.startsWith(QLatin1String("```")) ||
+            trimmed.startsWith(QLatin1String("~~~"))) {
+            inside = false;
+            continue;
+        }
+        if (trimmed.isEmpty()) {
+            continue;
+        }
+
+        // 允许 `- 选项` / `* 选项` / `1. 选项`，也允许直接写一行。
+        QString body = trimmed;
+        if (body.size() > 1 &&
+            (body.at(0) == QLatin1Char('-') || body.at(0) == QLatin1Char('*') ||
+             body.at(0) == QLatin1Char('+')) &&
+            body.at(1).isSpace()) {
+            body = body.mid(1).trimmed();
+        } else {
+            static const QRegularExpression ordered(
+                QStringLiteral("^\\d{1,2}[.)\\x{3001}]\\s*"));
+            body.remove(ordered);
+        }
+
+        if (body.isEmpty() || body.size() > kMaxLabelChars ||
+            labels.size() >= kMaxChoices) {
+            return {};  // 格式不合规就整体放弃，不做"尽力而为"的截取
+        }
+        labels.append(body);
+    }
+
+    if (labels.size() < 2) {
+        return {};
+    }
+    QList<Choice> choices;
+    choices.reserve(labels.size());
+    for (const QString &label : labels) {
+        choices.append(Choice{label, label});
+    }
+    return choices;
 }
 
 QString Markdown::toPlainPreview(const QString &markdown, int maxChars) {

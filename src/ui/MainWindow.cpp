@@ -335,6 +335,16 @@ void MainWindow::buildUi() {
     attachmentStrip_->hide();  // 没有附件时不占位置
     composerLayout->addWidget(attachmentStrip_);
 
+    // 选项按钮条：位置在附件条与输入框之间。放在这里而不是对话流里，
+    // 是因为它描述的是"这次要输入什么"，与输入框同属一个操作单元。
+    choiceBar_ = new QWidget;
+    choiceBar_->setObjectName(QStringLiteral("choiceBar"));
+    choiceLayout_ = new QHBoxLayout(choiceBar_);
+    choiceLayout_->setContentsMargins(0, 0, 0, 0);
+    choiceLayout_->setSpacing(6);
+    choiceBar_->hide();
+    composerLayout->addWidget(choiceBar_);
+
     composer_ = new QPlainTextEdit;
     composer_->setObjectName(QStringLiteral("composer"));
     composer_->setPlaceholderText(
@@ -1275,6 +1285,8 @@ void MainWindow::onTurnFinished(TurnResult result) {
             if (settings_.generateSessionTitles) {
                 runtime_.requestTitleFromModel();
             }
+            // 模型刚给出这一轮的结论，看看有没有要用户选的选项。
+            refreshChoices();
             break;
         case TurnResult::Interrupted:
             setStatusMessage(QStringLiteral("已中断。"));
@@ -1545,6 +1557,55 @@ void MainWindow::refreshAttachmentStrip() {
     }
     attachmentLayout_->addStretch(1);
     attachmentStrip_->show();
+}
+
+void MainWindow::refreshChoices() {
+    if (choiceBar_ == nullptr || choiceLayout_ == nullptr) {
+        return;
+    }
+    while (QLayoutItem *item = choiceLayout_->takeAt(0)) {
+        if (QWidget *widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
+    }
+
+    // 只看**最后一条有正文的 assistant 消息**：选项是针对"当前该选什么"的，
+    // 翻看历史时不应该把早先那轮的选项又摆出来。
+    QString latest;
+    for (auto it = runtime_.messages().crbegin(); it != runtime_.messages().crend(); ++it) {
+        if (it->role != MessageRole::Assistant || it->modelOnly) {
+            continue;
+        }
+        const QString text = it->plainText().trimmed();
+        if (!text.isEmpty()) {
+            latest = text;
+            break;
+        }
+    }
+
+    const QList<Markdown::Choice> choices = Markdown::detectChoices(latest);
+    if (choices.isEmpty()) {
+        choiceBar_->hide();
+        return;
+    }
+
+    for (const Markdown::Choice &choice : choices) {
+        auto *button = new QPushButton(choice.label);
+        button->setObjectName(QStringLiteral("choiceButton"));
+        button->setCursor(Qt::PointingHandCursor);
+        button->setToolTip(QStringLiteral("点击填入输入框：%1").arg(choice.text));
+        connect(button, &QPushButton::clicked, this, [this, choice]() {
+            // 填进输入框而不是直接发送：用户可以改一改再发，也避免误点直接发出。
+            composer_->setPlainText(choice.text);
+            composer_->setFocus();
+            choiceBar_->hide();
+        });
+        choiceLayout_->addWidget(button);
+    }
+    choiceLayout_->addStretch(1);
+    choiceBar_->show();
+    qCDebug(log) << "已显示选项按钮; 数量=" << choices.size();
 }
 
 void MainWindow::onSendRequested() {

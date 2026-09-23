@@ -173,6 +173,12 @@ private:
     QList<FilePart> pendingAttachments_;
     /// 重建附件条。
     void refreshAttachmentStrip();
+
+    /// 选项按钮条：模型按统一的 `choices` 格式给出选项时，渲染成可点的按钮。
+    /// 直接开在输入框上方——它是"这一次输入"的辅助，不是对话内容的一部分。
+    void refreshChoices();
+    QWidget *choiceBar_ = nullptr;
+    QHBoxLayout *choiceLayout_ = nullptr;
     QPushButton *sendButton_ = nullptr;
     QPushButton *stopButton_ = nullptr;
 
