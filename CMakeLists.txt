@@ -1,8 +1,20 @@
 cmake_minimum_required(VERSION 3.21)
 
+# 版本号只有一个来源：仓库根目录的 VERSION 文件。
+# 发布 CI 直接读同一个文件（.github/workflows/release.yaml 里的
+# "Get PROJECT_VERSION from VERSION file"），所以界面上的版本、安装包名与
+# release 产物名不会各说各话。
+# string(STRIP) 顺带吃掉行尾的 \r：Windows 上若按 CRLF 检出，版本号会带进
+# 一个回车，project(VERSION ...) 会直接解析失败。
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" LYCODE_VERSION LIMIT_COUNT 1)
+string(STRIP "${LYCODE_VERSION}" LYCODE_VERSION)
+if(LYCODE_VERSION STREQUAL "")
+  message(FATAL_ERROR "无法从 ${CMAKE_CURRENT_SOURCE_DIR}/VERSION 读取版本号（文件缺失或为空）")
+endif()
+
 project(
   LyCode
-  VERSION 0.1.0
+  VERSION ${LYCODE_VERSION}
   DESCRIPTION "LyCode 桌面版 — Qt6 / C++ 原生实现"
   LANGUAGES CXX
 )

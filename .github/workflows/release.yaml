@@ -1,0 +1,241 @@
+name: 发布
+
+on:
+  push:
+    branches: [ '*' ]
+    tags: [ '*' ]
+  pull_request:
+    branches: [ '*' ]
+  workflow_dispatch:
+  
+env:
+  APP_NAME: "lycode"
+  BUILD_TYPE: "Release"
+
+jobs:
+  build-deb:
+    name: 打包 (Linux deb)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        include:
+          - platform: amd64
+            image: linuxdeepin/deepin:crimson
+          - platform: arm64
+            image: linuxdeepin/deepin:crimson-arm64
+          - platform: loong64
+            image: linuxdeepin/deepin:crimson-loong64
+          - platform: riscv64
+            image: linuxdeepin/deepin:crimson-riscv64
+    steps:
+    - name: 安装 QEMU
+      uses: docker/setup-qemu-action@v4
+      with:
+        platforms: ${{ matrix.platform }}
+
+    - name: 安装 Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - uses: actions/checkout@v6
+
+    - name: 构建 ${{ matrix.platform }} 安装包
+      run: |
+        docker run --rm --platform linux/${{ matrix.platform }} -v ${{ github.workspace }}:/workspace \
+          ${{ matrix.image }} \
+          bash -c "
+          cd /workspace &&
+          apt update &&
+          apt install -y build-essential devscripts dh-make equivs &&
+          mk-build-deps -i -t 'apt-get -y' './debian/control' &&
+          debuild -us -uc &&
+          cp ../*.deb ./
+          "
+
+    - name: 归集 deb 安装包
+      run: |
+        if ls ./*dbgsym*.deb 1> /dev/null 2>&1; then
+          rm ./*dbgsym*.deb
+        fi
+
+        if ls ./*build-deps*.deb 1> /dev/null 2>&1; then
+          rm ./*build-deps*.deb
+        fi
+        
+        mkdir deb_package
+        cp ./*.deb deb_package
+
+    - name: 上传 deb 产物
+      uses: actions/upload-artifact@v7
+      with:
+          name: ${{ env.APP_NAME }}_linux_deb_${{ matrix.platform }}
+          path: deb_package/*.deb
+      
+  build-windows:
+    name: 打包 (Windows)
+    runs-on: ${{ matrix.config.os }}
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - os: windows-latest
+            msystem: ucrt64
+            platform_tag: win_x64                 
+          - os: windows-11-arm
+            msystem: clangarm64
+            platform_tag: win_arm64
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:  
+    - name: 关闭 Git 换行转换
+      shell: pwsh
+      run: |
+        git config --global core.autocrlf false
+        git config --global core.eol lf
+
+    - name: 检出代码
+      uses: actions/checkout@v6
+      with:
+        submodules: recursive
+
+    - name: 安装 MSYS2 环境
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{ matrix.config.msystem }}
+        cache: true
+        update: true
+        install: zip
+        pacboy: cmake:p gcc:p ninja:p qt6-base:p
+
+    - name: 用 CMake 构建
+      run: |
+        cmake.exe -B build/ -G 'Ninja' \
+                  -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+                  -DCMAKE_INSTALL_PREFIX=build/${{ env.APP_NAME }}
+        cmake.exe --build build/ --parallel --config ${{env.BUILD_TYPE}}
+
+    - name: 从 VERSION 文件读取版本号
+      shell: pwsh
+      run: |
+        $version = Get-Content VERSION -First 1
+        echo "APP_VERSION=$version" >> $env:GITHUB_ENV
+        echo "版本号: $version"
+
+    - name: 安装到暂存目录
+      run: |
+        cmake --build build/ --target install
+        strip build/${{ env.APP_NAME }}/bin/*.exe 
+
+    - name: 部署 Qt6 依赖
+      run: |
+        deploy_tool="windeployqt.exe"
+        bin_dir="build/${{ env.APP_NAME }}/bin"
+        options="--no-translations --no-system-d3d-compiler --no-network"
+
+        executables=(
+          "${{ env.APP_NAME }}.exe"
+        )
+
+        for exe in "${executables[@]}"; do
+          $deploy_tool "$bin_dir/$exe" $options
+        done
+          
+    - name: 复制非 Qt 的 DLL
+      run: |
+        shopt -s extglob
+        FILES=$(ldd build/${{ env.APP_NAME }}/bin/${{ env.APP_NAME }}.exe | awk '($3 ~ /\/${{ matrix.config.msystem }}\/bin\//) {print $3}')
+        for file in $FILES; do
+          if [[ $(basename "$file") != Qt6* ]]; then
+            cp -r "$file" build/${{ env.APP_NAME }}/bin
+          fi
+        done
+            
+    - name: 打包为 zip
+      run: |
+        mkdir -p build/${{ env.APP_NAME }}
+        cd build/${{ env.APP_NAME }}
+        zip -r ../../${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}.zip ./bin ./share ./lib
+        cd ../..
+
+    - name: 上传构建产物
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}
+        path: ${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}.zip
+
+  create-release:
+    name: 发布 Release
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    needs: [build-deb, build-windows]
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v6
+
+    - name: 下载构建产物
+      uses: actions/download-artifact@v8
+      with:
+        path: ~/artifacts
+        merge-multiple: true
+
+    - name: 计算 SHA-256 校验和
+      run: |
+        cd ~/artifacts
+        > hashes.sha256
+        for file in $(find . -type f \( -name "*.deb" -o -name "*-win-arm64.zip" -o -name "*-win-x64.zip" \)); do
+          filename=$(basename "$file")
+          sha256sum "$file" | awk -v fname="$filename" '{print $1 " *" fname}' >> hashes.sha256
+        done
+        cd ..
+        tree ~/artifacts
+
+    - name: 准备发布信息
+      run: |
+        if [ "${{github.ref_type}}" == "tag" ]; then
+          echo "PRERELEASE=" >> $GITHUB_ENV
+          echo "RELEASE_NAME=${{ env.APP_NAME }} ${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "TAG_NAME=${{ github.ref_name }}" >> $GITHUB_ENV
+          echo "RELEASE_NOTES=--generate-notes" >> $GITHUB_ENV
+        else
+          echo "PRERELEASE=-p" >> $GITHUB_ENV
+          echo "RELEASE_NAME=持续构建" >> $GITHUB_ENV
+          echo "TAG_NAME=continuous_build" >> $GITHUB_ENV
+          echo "RELEASE_NOTES=--notes \"由 CI 自动生成，对应提交 ${{ github.sha }}\"" >> $GITHUB_ENV
+        fi
+          
+    - name: 创建 GitHub Release
+      continue-on-error: false
+      run: |
+        # 找出已有的产物文件
+        zip_files=$(find ~/artifacts -name "*win*.zip"  -print0 | xargs -0 echo)
+        deb_files=$(find ~/artifacts -name "*.deb" -print0 | xargs -0 echo)
+
+        # 同名 release 已存在就先删掉（continuous_build 连带删 tag）
+        if gh release view ${{ env.TAG_NAME }} --repo $GITHUB_REPOSITORY &> /dev/null; then
+          if [ "${{ env.TAG_NAME }}" == "continuous_build" ]; then
+            gh release delete ${{ env.TAG_NAME }} --repo $GITHUB_REPOSITORY --cleanup-tag  --yes
+          else
+            gh release delete ${{ env.TAG_NAME }} --repo $GITHUB_REPOSITORY
+          fi
+          echo "已删除 ${{ env.TAG_NAME }}"
+        fi
+        
+        if [ -n "$zip_files" ] && [ -n "$deb_files" ]; then
+          gh release create ${{ env.TAG_NAME }} \
+                            $zip_files \
+                            $deb_files \
+                            ${{ env.PRERELEASE }} \
+                            --repo $GITHUB_REPOSITORY \
+                            --title "${{ env.RELEASE_NAME }}" \
+                            ${{ env.RELEASE_NOTES }}
+
+            echo "已创建 release: ${{ env.TAG_NAME }}"
+        else
+          echo "没有可上传的产物。"
+          exit 1
+        fi
+        
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
