@@ -134,7 +134,7 @@ void TestUiFlow::initTestCase() {
     dataDir_ = std::make_unique<QTemporaryDir>();
     QVERIFY(dataDir_->isValid());
 
-    const QString configDirectory = dataDir_->path() + QStringLiteral("/qt");
+    const QString configDirectory = dataDir_->path();
     QVERIFY(QDir().mkpath(configDirectory));
 
     QJsonObject provider;
@@ -187,7 +187,7 @@ void TestUiFlow::initTestCase() {
     file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
     file.close();
 
-    // MainWindow 在构造时读这个环境变量决定数据根，所以必须在构造之前设置。
+    // MainWindow 在构造时读这个环境变量决定数据目录，所以必须在构造之前设置。
     qputenv("LYCODE_DATA_BASE_DIR", dataDir_->path().toUtf8());
 }
 
@@ -766,7 +766,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow() {
     }
 
     // 会话应当已落盘（标题取自首条用户输入）。
-    QVERIFY(QFile::exists(dataDir_->path() + QStringLiteral("/qt/sessions.db")));
+    QVERIFY(QFile::exists(dataDir_->path() + QStringLiteral("/sessions.db")));
 }
 
 void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles() {
@@ -795,7 +795,7 @@ void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles() {
     QVERIFY(waitFor([&]() { return conversation->messageCount() >= 0; }, 3000));
 
     SessionStore probe;
-    QVERIFY(probe.open(dataDir_->path() + QStringLiteral("/qt/sessions.db")));
+    QVERIFY(probe.open(dataDir_->path() + QStringLiteral("/sessions.db")));
     const QString key = Workspace{workspaceDir.path(), {}, {}}.key();
     QVERIFY2(!probe.listSessions(key).isEmpty(), "切换工作区后应当自动建了一个会话");
     const int sessionsBefore = probe.listSessions(key).size();

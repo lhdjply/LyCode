@@ -1,5 +1,6 @@
 #include "ui/AppConfig.h"
 
+#include "core/DataPaths.h"
 #include "core/Json.h"
 #include "core/Logging.h"
 
@@ -15,18 +16,10 @@ namespace {
 
 Q_LOGGING_CATEGORY(log, "lycode.config")
 
-QString dataRoot() {
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
-    if (!base.isEmpty()) {
-        return base;
-    }
-    return QDir::homePath() + QStringLiteral("/.lycode");
-}
-
 }  // namespace
 
 QString AppConfig::configDirectory() {
-    const QString directory = dataRoot() + QStringLiteral("/qt");
+    const QString directory = dataDir();
     if (!QDir().mkpath(directory)) {
         qCWarning(log) << "配置目录创建失败:" << directory;
         return {};

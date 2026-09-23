@@ -100,8 +100,8 @@ private:
 };
 
 void TestAgentRuntime::init() {
-    // 数据根指向临时目录：后台任务的输出文件默认落在 <数据根>/qt/tasks，
-    // 测试不应该往用户的 ~/.lycode 里写东西。
+    // 数据目录指向临时目录：后台任务的输出文件默认落在 <数据目录>/tasks，
+    // 测试不应该往用户的 ~/.cache/lycode 里写东西。
     qputenv("LYCODE_DATA_BASE_DIR", tempDir_.path().toUtf8());
     // 账本是全局文件：不清掉的话上一个测试的遗留任务会被下一个测试认领，
     // 断言就不再互不干扰。
@@ -1499,7 +1499,7 @@ void TestAgentRuntime::detachedTaskSurvivesRegistryRestart() {
     // 直接手工起一个分离式进程，模拟"宿主退出、进程留下"。
     const QString taskId = QStringLiteral("task_persist_probe");
     const QString outputPath = BackgroundTaskRegistry::outputPathForTask(taskId);
-    QVERIFY2(!outputPath.isEmpty(), "输出路径必须可创建（数据根指向临时目录）");
+    QVERIFY2(!outputPath.isEmpty(), "输出路径必须可创建（数据目录指向临时目录）");
 
     int pid = 0;
     {

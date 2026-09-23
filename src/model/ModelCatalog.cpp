@@ -1,8 +1,8 @@
 #include "model/ModelCatalog.h"
 
+#include "core/DataPaths.h"
 #include "core/Logging.h"
 
-#include <QDir>
 #include <QFile>
 #include <QLoggingCategory>
 #include <QRegularExpression>
@@ -11,11 +11,6 @@ namespace lycode::model {
 namespace {
 
 Q_LOGGING_CATEGORY(log, "lycode.model.catalog")
-
-QString dataRoot() {
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
-}
 
 QStringList splitList(const QString &value) {
     QStringList result;
@@ -42,7 +37,7 @@ QString ModelCatalog::bundledResourcePath() {
 }
 
 QString ModelCatalog::overridePath() {
-    return dataRoot() + QStringLiteral("/model_list.txt");
+    return dataDir() + QStringLiteral("/model_list.txt");
 }
 
 QList<CatalogProvider> ModelCatalog::load(QString *errorOut) {

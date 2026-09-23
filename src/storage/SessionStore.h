@@ -75,7 +75,7 @@ public:
     /// 按标题 / 消息正文做模糊搜索，返回命中的会话摘要。
     QList<SessionSummary> searchSessions(const QString &query, int limit = 50) const;
 
-    /// 默认数据库文件路径：<数据根>/qt/sessions.db
+    /// 默认数据库文件路径：<数据目录>/sessions.db
     static QString defaultDatabasePath();
 
 private:

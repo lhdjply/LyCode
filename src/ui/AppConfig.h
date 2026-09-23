@@ -1,7 +1,7 @@
 // LyCode — 应用配置
 //
-// 与会话数据分开存放：会话在 SQLite（`<数据根>/qt/sessions.db`），
-// 应用配置在 `<数据根>/qt/settings.json`。
+// 与会话数据分开存放：会话在 SQLite（`<数据目录>/sessions.db`），
+// 应用配置在 `<数据目录>/settings.json`。
 //
 // 分成两个存储的理由：配置是"少写多读、整份替换"的小文档，用 JSON 文件
 // 便于用户手工检查与迁移；会话是"高频增量写、按条件查询"的结构化数据，
@@ -98,7 +98,7 @@ struct AppSettings {
 
 class AppConfig {
 public:
-    /// 配置文件路径：`<数据根>/qt/settings.json`。
+    /// 配置文件路径：`<数据目录>/settings.json`。
     static QString configPath();
     /// 配置目录（已确保存在）；失败返回空。
     static QString configDirectory();

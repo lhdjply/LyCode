@@ -34,6 +34,7 @@
 //     理，与整体替换语义一致）。
 #include "storage/SessionStore.h"
 
+#include "core/DataPaths.h"
 #include "core/Ids.h"
 #include "core/Json.h"
 
@@ -340,10 +341,7 @@ SessionStore::~SessionStore() {
 }
 
 QString SessionStore::defaultDatabasePath() {
-    // 数据根：环境变量优先，缺失时回落到 ~/.lycode（与 本实现同口径）。
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR").trimmed();
-    const QString root = base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
-    const QString path = QDir(root).filePath(QStringLiteral("qt/sessions.db"));
+    const QString path = QDir(dataDir()).filePath(QStringLiteral("sessions.db"));
 
     // 目录不存在时先建好：SQLite 能创建文件，但不会创建父目录。
     const QDir directory = QFileInfo(path).absoluteDir();

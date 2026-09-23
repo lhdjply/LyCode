@@ -1,3 +1,4 @@
+#include "core/DataPaths.h"
 #include "core/Logging.h"
 
 #include <QDateTime>
@@ -19,13 +20,8 @@ Q_LOGGING_CATEGORY(log, "lycode.logging")
 QMutex g_mutex;
 std::unique_ptr<QFile> g_logFile;
 
-/// 按既定语义的数据目录约定：~/.lycode。
 QString resolveLogDirectory() {
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
-    const QString root = base.isEmpty()
-                             ? QDir::homePath() + QStringLiteral("/.lycode")
-                             : base;
-    return root + QStringLiteral("/qt/logs");
+    return dataDir() + QStringLiteral("/logs");
 }
 
 /// 把 Qt 的日志级别映射为固定宽度文本，便于 grep。

@@ -1,5 +1,6 @@
 #include "tools/BackgroundTaskRegistry.h"
 
+#include "core/DataPaths.h"
 #include "core/Ids.h"
 #include "core/Json.h"
 #include "core/Logging.h"
@@ -22,11 +23,6 @@ namespace lycode {
 namespace {
 
 Q_LOGGING_CATEGORY(log, "lycode.tools.background")
-
-QString dataRoot() {
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
-}
 
 }  // namespace
 
@@ -93,7 +89,7 @@ bool processAlive(int pid, qint64 startTicks) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 QString BackgroundTaskRegistry::defaultOutputDirectory() {
-    const QString directory = dataRoot() + QStringLiteral("/qt/tasks");
+    const QString directory = dataDir() + QStringLiteral("/tasks");
     if (!QDir().mkpath(directory)) {
         qCWarning(log) << "后台任务输出目录创建失败:" << directory;
         return {};

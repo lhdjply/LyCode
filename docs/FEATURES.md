@@ -30,7 +30,7 @@
 | 问题 | 处理方式 |
 | --- | --- |
 | **生命周期** | 工具调用早已返回，栈上的 `QProcess` 承载不了它。`BackgroundTaskRegistry` 接管所有权，并在会话关闭 / 运行时就绪销毁时 `stopAll()`，不留孤儿进程 |
-| **输出去哪** | 边读边落盘到 `<数据根>/qt/tasks/<task_id>.log`，内存只保留 **8 KiB 尾部预览**。后台任务可能产出几十 MB，全留在内存里会撑爆 |
+| **输出去哪** | 边读边落盘到 `<数据目录>/tasks/<task_id>.log`，内存只保留 **8 KiB 尾部预览**。后台任务可能产出几十 MB，全留在内存里会撑爆 |
 | **完成通知** | 任务在 turn 之外异步结束，模型不会自己知道。注册表在结束时生成一条 `<task-notification>`，由运行时注入下一轮上下文 |
 
 配套的两个工具（别名按既定语义）：
@@ -50,7 +50,7 @@
 <task-type>bash</task-type>
 <status>completed</status>
 <exit-code>0</exit-code>
-<output-path>/home/u/.lycode/qt/tasks/task_xxx.log</output-path>
+<output-path>/home/u/.cache/lycode/tasks/task_xxx.log</output-path>
 <bytes>1234</bytes>
 <duration-ms>2013</duration-ms>
 <output-tail>…输出尾部…</output-tail>
@@ -74,7 +74,7 @@
 | 启动方式 | `QProcess::startDetached`，**不持有** `QProcess`。这是硬要求：`~QProcess` 会杀掉仍在运行的进程，"活过宿主"就无从谈起 |
 | 输出 | 由 shell 自己重定向到日志文件，全程没有管道 |
 | 退出码 | 分离式任务没有 `wait()` 可取退出码，所以让 shell 把 `$?` 写到 `<log>.exit` 旁路文件 |
-| 账本 | `<数据根>/qt/tasks/ledger.json` 原子写入，记录 id/pid/启动指纹/输出路径/状态 |
+| 账本 | `<数据目录>/tasks/ledger.json` 原子写入，记录 id/pid/启动指纹/输出路径/状态 |
 | 重启对账 | 启动时按 `pid` + **启动时间指纹**（`/proc/<pid>/stat` 的 starttime）判断是否还活着：活着则认领并轮询其输出文件；已结束则标记 `lost`，退出码如实记 -1，**不猜一个 0 让模型以为成功** |
 
 启动指纹是必要的：pid 会被复用，只靠 `kill(pid, 0)` 会把一个恰好复用了该 pid 的无关进程当成我们的任务。
@@ -210,7 +210,7 @@
 Skill 是一份**可复用的指令包**：一个目录里放 `SKILL.md`，带 name/description 与正文。
 
 ```
-<数据根>/qt/skills/pdf/SKILL.md     ← 用户级
+<数据目录>/skills/pdf/SKILL.md      ← 用户级
 <工作区>/.lycode/skills/pdf/SKILL.md ← 项目级（同名时覆盖用户级）
 ```
 

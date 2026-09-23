@@ -8,7 +8,7 @@ LyCode 是 **Qt6 / C++ 原生桌面编码代理**：工作区与会话管理、�
 
 - **UI**：Qt Widgets（不是 QML——Widgets 对自绘对话流与工具卡片更可控）
 - **构建**：CMake + Ninja，C++20，产物是**单一可执行文件**
-- **本地优先**：配置、会话与日志都落在 `~/.lycode/`，不经过任何中转服务
+- **本地优先**：配置、会话与日志都落在 `~/.cache/lycode/`，不经过任何中转服务
 
 ## 常用命令
 
@@ -56,7 +56,7 @@ cmake --build build
 
 ## 配置与数据目录
 
-数据都在 `~/.lycode/qt/` 下：
+数据都在 `~/.cache/lycode/` 下（Windows 为 `C:\Users\<用户名>\lycode\`）：
 
 ```
 settings.json    应用配置（Provider、主题、字号、最近工作区）
@@ -66,7 +66,7 @@ logs/lycode.log  日志
 
 | 变量 | 用途 |
 | --- | --- |
-| `LYCODE_DATA_BASE_DIR` | 覆盖数据根目录（默认 `~/.lycode`），数据写入其下的 `qt/` |
+| `LYCODE_DATA_BASE_DIR` | 覆盖数据目录（默认值见上） |
 
 ## 安装
 

@@ -46,7 +46,7 @@ class ModelCatalog {
 public:
     /// 仓库内随二进制一起分发的目录文件（编译进资源）。
     static QString bundledResourcePath();
-    /// 用户可覆盖的目录文件：`<数据根>/model_list.txt`。
+    /// 用户可覆盖的目录文件：`<数据目录>/model_list.txt`。
     /// 放一份在这里就能改模型清单而不必重新编译。
     static QString overridePath();
 

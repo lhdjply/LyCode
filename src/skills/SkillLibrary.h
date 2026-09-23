@@ -37,7 +37,7 @@ struct Skill {
 class Library {
 public:
     /// 默认搜索目录：用户级 + 项目级。
-    /// 用户级 `<数据根>/qt/skills`；项目级 `<workspace>/.lycode/skills`。
+    /// 用户级 `<数据目录>/skills`；项目级 `<workspace>/.lycode/skills`。
     static QStringList defaultDirectories(const QString &workspacePath);
 
     /// 重新扫描。`directories` 里不存在的会被跳过。

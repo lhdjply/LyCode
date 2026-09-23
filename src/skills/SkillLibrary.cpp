@@ -1,5 +1,6 @@
 #include "skills/SkillLibrary.h"
 
+#include "core/DataPaths.h"
 #include "core/Logging.h"
 
 #include <QDir>
@@ -12,11 +13,6 @@ namespace lycode::skills {
 namespace {
 
 Q_LOGGING_CATEGORY(log, "lycode.skills")
-
-QString dataRoot() {
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
-}
 
 /// 把 id 归一成可用作工具入参的形式（小写、空格换连字符）。
 QString normalizeId(const QString &raw) {
@@ -31,7 +27,7 @@ QStringList Library::defaultDirectories(const QString &workspacePath) {
     QStringList directories;
     // 用户级在前、项目级在后。rescan 让后扫到的覆盖先扫到的，
     // 于是项目级 skill 会覆盖同名的用户级 skill——项目级更具体，应当胜出。
-    directories.append(dataRoot() + QStringLiteral("/qt/skills"));
+    directories.append(dataDir() + QStringLiteral("/skills"));
     if (!workspacePath.isEmpty()) {
         directories.append(QDir(workspacePath).filePath(QStringLiteral(".lycode/skills")));
     }

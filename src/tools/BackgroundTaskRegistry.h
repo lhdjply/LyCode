@@ -162,9 +162,9 @@ public:
     /// 是否有待投递的完成通知。
     bool hasPendingNotification() const;
 
-    /// 默认的输出目录：`<数据根>/qt/tasks`。目录不存在时创建；失败返回空。
+    /// 默认的输出目录：`<数据目录>/tasks`。目录不存在时创建；失败返回空。
     static QString defaultOutputDirectory();
-    /// 账本文件路径：`<数据根>/qt/tasks/ledger.json`。
+    /// 账本文件路径：`<数据目录>/tasks/ledger.json`。
     static QString ledgerPath();
 
 signals:

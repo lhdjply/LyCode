@@ -1,5 +1,6 @@
 #include "agent/SystemPrompt.h"
 
+#include "core/DataPaths.h"
 #include "tools/SubagentHost.h"
 
 #include <QDateTime>
@@ -20,12 +21,6 @@ Q_LOGGING_CATEGORY(log, "lycode.prompt")
 /// 目录树上行的最大层数。纯粹是防御性兜底：任何真实路径都不可能接近这个深度，
 /// 它的存在是为了保证"即使路径形态异常，也绝不出现死循环"。
 constexpr int kMaxDirectoryWalkDepth = 128;
-
-/// 数据根目录：按既定语义，允许用 LYCODE_DATA_BASE_DIR 覆盖。
-QString dataRoot() {
-    const QString base = qEnvironmentVariable("LYCODE_DATA_BASE_DIR");
-    return base.isEmpty() ? QDir::homePath() + QStringLiteral("/.lycode") : base;
-}
 
 /// 读一个文件并截断。读不到时返回空字符串。
 /// 传入 outTruncated 以便上层知道内容被裁过。
@@ -169,8 +164,8 @@ QString SystemPromptBuilder::loadProjectInstructions(const QString &workspacePat
     QStringList chunks;
     QStringList sources;
 
-    // ① 用户级：<数据根>/AGENTS.md
-    const QString userInstructionPath = dataRoot() + QStringLiteral("/AGENTS.md");
+    // ① 用户级：<数据目录>/AGENTS.md
+    const QString userInstructionPath = dataDir() + QStringLiteral("/AGENTS.md");
     if (isRegularFile(userInstructionPath)) {
         bool truncated = false;
         const QString content = readCapped(userInstructionPath, maxBytesPerFile, &truncated);

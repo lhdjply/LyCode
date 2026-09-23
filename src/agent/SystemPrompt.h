@@ -67,7 +67,7 @@ public:
 
     /// 从用户级目录与工作区逐层向上收集项目说明文件内容。
     ///
-    /// 候选来源最多两个：`<数据根>/AGENTS.md`（用户级）与从 cwd 向上到
+    /// 候选来源最多两个：`<数据目录>/AGENTS.md`（用户级）与从 cwd 向上到
     /// 项目根（第一个含 `.git` 的目录）找到的**第一个** `AGENTS.md`（工作区级）。
     /// 用户级在前、工作区级在后，用空行拼接。两者都缺失时返回空字符串。
     static QString loadProjectInstructions(const QString &workspacePath, const QString &cwd,

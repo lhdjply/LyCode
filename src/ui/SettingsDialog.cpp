@@ -1508,7 +1508,7 @@ QWidget *SettingsDialog::buildIntegrationsPage() {
 
     auto *skillsHint = new QLabel(QStringLiteral(
         "在这些目录下发现 <名称>/SKILL.md 或 <名称>.md。留空表示使用默认目录："
-        "用户级 <数据根>/qt/skills，以及当前工作区的 .lycode/skills。"));
+        "用户级 <数据目录>/skills，以及当前工作区的 .lycode/skills。"));
     skillsHint->setWordWrap(true);
     skillsHint->setFont(Theme::instance().font(FontRole::UiXs));
     layout->addWidget(skillsHint);
