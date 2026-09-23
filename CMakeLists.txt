@@ -105,3 +105,17 @@ install(
   DIRECTORY assets/icons/linux/hicolor/
   DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor"
 )
+
+# 桌面条目只在用 freedesktop 约定的平台安装（Linux/BSD）。
+#
+# 文件名必须是 lycode.desktop：main.cpp 里 setDesktopFileName("lycode")，
+# Wayland 的 app id 与 X11 的 StartupWMClass 都靠它把运行中的窗口对上图标；
+# Icon=lycode 也要求 hicolor 下有同名图标（见上面那条安装规则）。
+#
+# 这里用相对的 CMAKE_INSTALL_DATADIR 而不是 FULL_DATADIR：只有相对路径才会
+# 跟着 `cmake --install --prefix` 与 DESTDIR 走（装到 ~/.local 依赖这一点）。
+if(UNIX AND NOT APPLE)
+  install(FILES assets/desktop/lycode.desktop
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/applications"
+  )
+endif()

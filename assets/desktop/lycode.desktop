@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=LyCode
+Comment=Native desktop coding agent built with Qt6 / C++
+Comment[zh_CN]=Qt6 / C++ 原生桌面编码代理
+Exec=lycode
+Icon=lycode
+Terminal=false
+Categories=Development;IDE;
+Keywords=code;agent;ai;assistant;ide;
+Keywords[zh_CN]=编码;代理;助手;编辑器;
+StartupNotify=false
+StartupWMClass=LyCode

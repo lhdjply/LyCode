@@ -74,7 +74,13 @@ logs/lycode.log  日志
 cmake --install build --prefix ~/.local
 ```
 
-会安装 `bin/lycode` 与 `share/icons/hicolor/<size>x<size>/apps/lycode.png`。Windows 上图标编进可执行文件资源（`.ico` + `.rc`），窗口图标与文件图标同源。仓库目前不含 `.desktop` 文件，桌面环境需要的话请自行添加。
+会安装 `bin/lycode`、`share/applications/lycode.desktop` 与 `share/icons/hicolor/<size>x<size>/apps/lycode.png`。Windows 上图标编进可执行文件资源（`.ico` + `.rc`），窗口图标与文件图标同源。
+
+若装到 `~/.local`，应用菜单可能不会立刻刷新：
+
+```bash
+update-desktop-database ~/.local/share/applications
+```
 
 ## 测试
 
@@ -99,7 +105,7 @@ Windows CI 只跑其中 10 个：`test_agent_runtime` 与 `test_ui_flow` 依赖 
 | `src/storage` | SQLite 会话持久化 |
 | `src/ui` | 主题令牌、Markdown 渲染、对话流、工具卡片、对话框、文件查看器、主窗口 |
 | `tests` | 12 个测试套件；`support/` 下是假网关与假 MCP 服务器（后者是被拉起的真子进程） |
-| `assets` | 图标资源树（Linux hicolor PNG、Windows ICO + RC）与内置模型目录 |
+| `assets` | 图标资源树（Linux hicolor PNG、Windows ICO + RC）、Linux 桌面条目与内置模型目录 |
 | `docs` | 功能与状态文档 |
 
 `src/ui/MainWindow.*` 同时是**组装点**：它持有存储、注册表与运行时并把它们连起来。当前只有一个窗口与一个运行时，额外的 Application 层只会让所有权变模糊。
