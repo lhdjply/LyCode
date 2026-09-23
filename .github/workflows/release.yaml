@@ -141,15 +141,49 @@ jobs:
       run: |
         deploy_tool="windeployqt.exe"
         bin_dir="build/${{ env.APP_NAME }}/bin"
-        options="--no-translations --no-system-d3d-compiler --no-network"
+        # 不要加 --no-network：windeployqt 的 --no-<模块> 是"不部署该模块"，
+        # 而模型 provider 依赖 Network。
+        options="--no-translations --no-system-d3d-compiler"
 
         executables=(
           "${{ env.APP_NAME }}.exe"
         )
 
         for exe in "${executables[@]}"; do
-          $deploy_tool "$bin_dir/$exe" $options
+          $deploy_tool "$bin_dir/$exe" $options || { echo "::error::windeployqt 部署 $exe 失败"; exit 1; }
         done
+
+    - name: 校验 Qt 依赖已部署齐全
+      run: |
+        bin_dir="build/${{ env.APP_NAME }}/bin"
+        exe="$bin_dir/${{ env.APP_NAME }}.exe"
+
+        # exe 导入表里的 Qt6*.dll 必须都在 bin/ 下。被 --no-<模块> 关掉的模块
+        # 属于"成功地没部署"，退出码照样是 0，只能这样查。
+        missing=0
+        for dll in $(objdump -p "$exe" | awk '/DLL Name:/ {print $3}'); do
+          case "$dll" in
+            Qt6*)
+              if [ ! -f "$bin_dir/$dll" ]; then
+                echo "::error::$dll 没有部署，但它在 ${{ env.APP_NAME }}.exe 的导入表里"
+                missing=1
+              fi
+              ;;
+          esac
+        done
+
+        # 缺 TLS 后端插件时 HTTPS 会失败，但程序能正常启动，很难排查。
+        if ! ls "$bin_dir"/tls/*.dll > /dev/null 2>&1; then
+          echo "::error::bin/tls 下没有任何 TLS 后端插件"
+          missing=1
+        fi
+
+        if [ "$missing" -ne 0 ]; then
+          ls -la "$bin_dir" || true
+          exit 1
+        fi
+
+        ls "$bin_dir"/Qt6*.dll
           
     - name: 复制非 Qt 的 DLL
       run: |
