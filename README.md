@@ -113,4 +113,4 @@ Windows CI 只跑其中 10 个：`test_agent_runtime` 与 `test_ui_flow` 依赖 
 
 ## 许可
 
-见仓库根目录的 `LICENSE`（当前仓库尚未包含该文件）。
+本项目采用 [Apache License 2.0](LICENSE)。
