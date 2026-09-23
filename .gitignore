@@ -2,6 +2,9 @@
 build/
 build-*/
 
+# Windows 安装包（Inno Setup 的输出目录）
+dist/
+
 # IDE / clangd
 compile_commands.json
 .cache/

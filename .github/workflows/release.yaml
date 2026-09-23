@@ -81,10 +81,19 @@ jobs:
         config:
           - os: windows-latest
             msystem: ucrt64
-            platform_tag: win_x64                 
+            platform_tag: win_x64
+            arch: x64
+            arch_allowed: x64compatible
+            installer: true
           - os: windows-11-arm
             msystem: clangarm64
             platform_tag: win_arm64
+            arch: arm64
+            arch_allowed: arm64
+            # arm64 也出安装包：GitHub 的 arm64 runner 镜像同样自带 Inno Setup，
+            # 而 ISCC 虽是 x86 程序，却能产出 arm64 安装包（目标架构由脚本的
+            # ArchitecturesAllowed 决定，与编译器架构无关）。
+            installer: true
     defaults:
       run:
         shell: msys2 {0}
@@ -159,11 +168,48 @@ jobs:
         zip -r ../../${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}.zip ./bin ./share ./lib
         cd ../..
 
+    - name: 编译 Windows 安装包
+      if: matrix.config.installer
+      shell: pwsh
+      run: |
+        # Inno Setup 用 6.3+ 才有 x64compatible / arm64 这两个架构约束值。
+        $ver = (Get-Content VERSION -First 1).Trim()
+        $src = Join-Path $env:GITHUB_WORKSPACE 'build\lycode'
+        $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
+        New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+        # GitHub 的 Windows runner 镜像自带 Inno Setup（x64 与 arm64 都有），
+        # 直接调 ISCC 即可，不需要额外的安装步骤。
+        # 目标架构写在脚本里（ArchitecturesAllowed=arm64，需 Inno Setup 6.3+），
+        # 与 ISCC 自身的架构无关，所以 x86 的编译器也能产出 arm64 安装包。
+        $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+        if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+        if (-not (Test-Path $iscc)) {
+          throw "找不到 ISCC.exe：这个 runner 镜像里应当自带 Inno Setup，确实没有就装一个（choco install innosetup）"
+        }
+
+        & $iscc "/DMyAppVersion=$ver" `
+                "/DMyArch=${{ matrix.config.arch }}" `
+                "/DMyArchAllowed=${{ matrix.config.arch_allowed }}" `
+                "/DMySourceDir=$src" `
+                "/DMyOutputDir=$out" `
+                "/DMyRepoRoot=$env:GITHUB_WORKSPACE" `
+                "assets\windows\lycode.iss"
+        if ($LASTEXITCODE -ne 0) { throw "ISCC 编译失败，退出码 $LASTEXITCODE" }
+        Get-ChildItem $out
+
     - name: 上传构建产物
       uses: actions/upload-artifact@v7
       with:
         name: ${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}
         path: ${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}.zip
+
+    - name: 上传 Windows 安装包
+      if: matrix.config.installer
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ env.APP_NAME }}_${{ env.APP_VERSION }}_${{ matrix.config.platform_tag }}_setup
+        path: dist/*.exe
 
   create-release:
     name: 发布 Release
@@ -184,7 +230,9 @@ jobs:
       run: |
         cd ~/artifacts
         > hashes.sha256
-        for file in $(find . -type f \( -name "*.deb" -o -name "*-win-arm64.zip" -o -name "*-win-x64.zip" \)); do
+        # 产物名用的是 platform_tag（win_x64 / win_arm64，下划线），所以这里不能再写
+        # 连字符的 win-x64，否则永远匹配不到，校验和里会缺掉 zip。
+        for file in $(find . -type f \( -name "*.deb" -o -name "*win*.zip" -o -name "*-setup.exe" \)); do
           filename=$(basename "$file")
           sha256sum "$file" | awk -v fname="$filename" '{print $1 " *" fname}' >> hashes.sha256
         done
@@ -211,6 +259,8 @@ jobs:
         # 找出已有的产物文件
         zip_files=$(find ~/artifacts -name "*win*.zip"  -print0 | xargs -0 echo)
         deb_files=$(find ~/artifacts -name "*.deb" -print0 | xargs -0 echo)
+        setup_files=$(find ~/artifacts -name "*-setup.exe" -print0 | xargs -0 echo)
+        hash_files=$(find ~/artifacts -name "*.sha256" -print0 | xargs -0 echo)
 
         # 同名 release 已存在就先删掉（continuous_build 连带删 tag）
         if gh release view ${{ env.TAG_NAME }} --repo $GITHUB_REPOSITORY &> /dev/null; then
@@ -222,10 +272,12 @@ jobs:
           echo "已删除 ${{ env.TAG_NAME }}"
         fi
         
-        if [ -n "$zip_files" ] && [ -n "$deb_files" ]; then
+        if [ -n "$zip_files" ] && [ -n "$deb_files" ] && [ -n "$setup_files" ]; then
           gh release create ${{ env.TAG_NAME }} \
                             $zip_files \
                             $deb_files \
+                            $setup_files \
+                            $hash_files \
                             ${{ env.PRERELEASE }} \
                             --repo $GITHUB_REPOSITORY \
                             --title "${{ env.RELEASE_NAME }}" \
@@ -233,7 +285,10 @@ jobs:
 
             echo "已创建 release: ${{ env.TAG_NAME }}"
         else
-          echo "没有可上传的产物。"
+          echo "产物不全，放弃发布。"
+          echo "  zip   = [$zip_files]"
+          echo "  deb   = [$deb_files]"
+          echo "  setup = [$setup_files]"
           exit 1
         fi
         
