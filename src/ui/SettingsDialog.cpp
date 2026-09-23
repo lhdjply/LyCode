@@ -1032,7 +1032,7 @@ void SettingsDialog::moveProvider(int delta)
 void SettingsDialog::applyCapabilityHeaderLabels()
 {
   // 集中在一处：构造与 reload 都必须调用它，否则表头会被 clear() 抹掉。
-  modelCapabilityTable_->setHorizontalHeaderLabels( {
+  modelCapabilityTable_->setHorizontalHeaderLabels({
     QStringLiteral("模型"), QStringLiteral("上下文窗口"), QStringLiteral("最大输出"),
     QStringLiteral("思考档位"), QStringLiteral("默认档位")});
 }

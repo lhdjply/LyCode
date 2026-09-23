@@ -11,6 +11,10 @@ compile_commands.json
 .vscode/
 .idea/
 
+# Python 字节码缓存（scripts/ 下的辅助脚本被 import 时会生成）
+__pycache__/
+*.py[cod]
+
 # 临时验证产物（各模块自测时使用，不入库）
 .tmp-verify-*/
 .probe/

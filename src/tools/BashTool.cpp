@@ -57,13 +57,44 @@ ToolMetadata BashTool::metadata() const
 {
   ToolMetadata meta;
   meta.name = QStringLiteral("Bash");
+  // 描述按平台生成，不能写死一种 shell：工具名叫 Bash，但 Windows 上根本没有
+  // bash，告诉模型 `bash -lc` 会让它写出 cmd/PowerShell 解析不了的命令
+  // （`for c in gcc; do command -v $c; done` 就是这样失败的，而且报错只剩
+  // 一个光秃秃的退出码 1）。契约必须随执行方式走。
+  const toolutil::ShellSpec spec = toolutil::shellSpec();
+  const bool powershell = !spec.posix && spec.label != QLatin1String("cmd");
   meta.description = QStringLiteral(
                        "Executes a shell command in the workspace. Output is captured and "
                        "returned; long-running commands must be kept under the timeout.");
-  meta.modelInstructions = QStringLiteral(
-                             "Commands run through `bash -lc`, so the user's PATH is available. "
-                             "Avoid interactive commands. timeout is in milliseconds "
-                             "(default 120000, max 600000). Background execution is not supported yet.");
+  if(spec.posix) {
+    meta.modelInstructions = QStringLiteral(
+                               "Commands run through `%1 -lc`, so the user's PATH is available. "
+                               "Avoid interactive commands. timeout is in milliseconds "
+                               "(default 120000, max 600000). Background execution is not supported yet.")
+                             .arg(spec.label);
+  }
+  else if(powershell) {
+    meta.modelInstructions = QStringLiteral(
+                               "This is Windows: commands are executed by %1, which parses "
+                               "PowerShell syntax — write PowerShell, NOT bash/POSIX. "
+                               "`for c in x; do ...; done`, `command -v`, `/dev/null`, `&&` chains "
+                               "and single-quoted strings do not work as they would in bash. "
+                               "Use PowerShell idioms (Get-ChildItem, Where-Object, Test-Path, "
+                               "Get-Command, $null, 'single quotes', `;` separators); "
+                               "separate arguments as an array rather than with backslashes. "
+                               "Avoid interactive commands. timeout is in milliseconds "
+                               "(default 120000, max 600000). Background execution is not supported yet.")
+                             .arg(spec.label);
+  }
+  else {
+    meta.modelInstructions = QStringLiteral(
+                               "This is Windows and commands are executed by cmd.exe — write "
+                               "cmd syntax, NOT bash/POSIX. `for c in x; do ...; done`, "
+                               "`command -v`, `/dev/null` and single-quoted strings do not work. "
+                               "Use `where`, `%VAR%`, `>nul 2>&1`, `dir` and `;`-free `&&` chains. "
+                               "Avoid interactive commands. timeout is in milliseconds "
+                               "(default 120000, max 600000). Background execution is not supported yet.");
+  }
   meta.allowedInPlanMode = false;
   meta.readOnly = false;
   meta.destructive = true;
@@ -217,16 +248,11 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     return;
   }
 
-#ifdef Q_OS_WIN
-  const QString program = qEnvironmentVariable("ComSpec", QStringLiteral("cmd.exe"));
-  const QStringList arguments{QStringLiteral("/c"), command};
-#else
-  // `/bin/bash` 在极简容器里可能不存在；退回 /bin/sh 也比直接失败好。
-  const QString program = QFileInfo::exists(QStringLiteral("/bin/bash"))
-                          ? QStringLiteral("/bin/bash")
-                          : QStringLiteral("/bin/sh");
-  const QStringList arguments{QStringLiteral("-lc"), command};
-#endif
+  // shell 由平台决定，不在这里写 ifdef：Unix 是 `/bin/bash -lc`（登录 shell 的
+  // PATH 才包含 node/cargo/brew），Windows 是 PowerShell（pwsh 优先）→ cmd 兜底。
+  // 探测逻辑与后台任务包装共用同一份实现，避免"前台能跑、后台换了个 shell"。
+  const toolutil::ShellSpec shell = toolutil::shellSpec();
+  const QString & program = shell.program;
 
   // ── 分离式后台任务分支 ──────────────────────────────────────────────────
   // 在创建 QProcess **之前**分流，而且**不持有** QProcess：
@@ -249,25 +275,26 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
       return;
     }
 
-    // 刻意**不用 exec**：让外层 shell 留下来，跑完命令后把 $? 写进旁路文件。
-    // 分离式任务没有 wait() 可取退出码，没有这一步就永远只能记 -1，
-    // 一个正常退出的任务会被报成"失败"。
+    // 跑完把退出码写进旁路文件：分离式任务没有 wait() 可取退出码，
+    // 没有这一步就永远只能记 -1，一个正常退出的任务会被报成"失败"。
+    // 包装写法按 shell 语义分流（POSIX 与 PowerShell/cmd 完全不同）。
     const QString exitPath = BackgroundTaskRegistry::exitCodePathFor(outputPath);
-    const QString wrapped = QStringLiteral("{ ") + command + QStringLiteral("; } >> ") +
-                            toolutil::shellSingleQuote(outputPath) +
-                            QStringLiteral(" 2>&1; echo $? > ") +
-                            toolutil::shellSingleQuote(exitPath);
+    const QString wrapped =
+      toolutil::shellBackgroundWrapper(shell, command, outputPath, exitPath);
 
     // 用 setsid 起：`QProcess::startDetached` **不会**给子进程建新会话/进程组，
     // 于是记录到的 pid 不是组长，TaskStop 的 kill(-pid) 够不到命令自己 fork 的
     // 子进程（实测漏掉过 `sleep 45`）。setsid exec 掉自己，pid 因此就是组长。
+    // Windows 没有 setsid，进程树清理由 TaskStop 走 taskkill /T。
+    // 这里的 `-lc` 只在 setsid 分支用：setsid 是 POSIX 程序，能走到这一支就
+    // 一定是 Unix + bash，参数不随平台变。
     const QString setsid = QStandardPaths::findExecutable(QStringLiteral("setsid"));
     const bool useSetsid = !setsid.isEmpty();
     const QString launcher = useSetsid ? setsid : program;
     const QStringList launcherArgs =
       useSetsid ? QStringList{program, QStringLiteral("-lc"), wrapped}
       :
-      QStringList{QStringLiteral("-lc"), wrapped};
+      toolutil::shellArgumentsFor(shell, wrapped);
     if(!useSetsid) {
       // 没有 setsid 就只能直起，进程树清理会不完整，如实告警。
       qCWarning(log) << "找不到 setsid，后台任务的子进程可能无法被 TaskStop 一并终止";
@@ -320,7 +347,7 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
 
   auto * process = new QProcess();
   process->setProgram(program);
-  process->setArguments(arguments);
+  process->setArguments(toolutil::shellArgumentsFor(shell, command));
   process->setWorkingDirectory(cwd);
   process->setProcessChannelMode(QProcess::SeparateChannels);
   // 命令的工作目录（cwd）与 conpty/编码无关，这里不动 locale，
@@ -367,7 +394,7 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
   timeoutTimer->setInterval(timeoutMs);
   QObject::connect(timeoutTimer, &QTimer::timeout, process,
                    [process, state, timeoutMs, finish, context, cancelTimer, stdoutBudget,
-  stderrBudget]() {
+  stderrBudget, command]() {
     if(process->state() == QProcess::NotRunning) {
       return;
     }
@@ -397,9 +424,9 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
 
     BackgroundTaskRegistry::AdoptRequest adoptRequest;
     adoptRequest.type = QStringLiteral("bash");
-    adoptRequest.command = process->program() +
-                           QLatin1Char(' ') +
-                           process->arguments().join(QLatin1Char(' '));
+    // 记用户/模型写的原始命令，不要拿 process->arguments() 拼：PowerShell 分支
+    // 那里塞的是 Base64 编码命令，拼出来是一串无法阅读的乱码。
+    adoptRequest.command = command;
     adoptRequest.process = process;
     adoptRequest.autoBackgrounded = true;
     // 进程已经在跑，且前台读取器刚被断开，可以由注册表接管。

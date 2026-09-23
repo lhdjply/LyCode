@@ -23,7 +23,10 @@
 #include <QHash>
 #include <QJsonValue>
 #include <QLoggingCategory>
+#include <QRegularExpression>
 #include <QSaveFile>
+#include <QStandardPaths>
+#include <QStringConverter>
 
 #include <algorithm>
 
@@ -1099,6 +1102,221 @@ QString shellSingleQuote(const QString & value)
   return QLatin1Char('\'') + escaped + QLatin1Char('\'');
 }
 
+#ifdef Q_OS_WIN
+namespace
+{
+
+/// 把候选程序名解析成绝对路径；解析不出返回空。
+QString resolveOnWindows(const QString & name)
+{
+  return QStandardPaths::findExecutable(name);
+}
+
+/// PowerShell 的固定前缀：UTF-8 输出 + Unix 习惯的 sleep。
+///
+/// 编码部分：不做这一步，`pwsh -Command` 在中文 Windows 上按控制台代码页（936）
+/// 输出，而调用方按 UTF-8 解码，中文会变成乱码。两个变量缺一不可：
+/// `[Console]::OutputEncoding` 管原生命令（git/cmake）写进管道的那一路，
+/// `$OutputEncoding` 管 PowerShell 自己写给自己管道的那一路。
+/// 注意编码部分用**单引号**字符串，`$` 才不会被外层提前展开。
+///
+/// sleep 部分不是可有可无的糖：PowerShell 自带的 `Start-Sleep 2` 按**毫秒**解释
+/// 位置参数，也就是 2ms 而不是 2 秒；而 `sleep 2` 恰恰是模型最常写的等待写法。
+/// 没有这个垫片，命令会"成功"但等待时间差了三个数量级——比直接报错更危险。
+/// 这里把它改成 Unix 语义（按秒，支持小数），并让 `-Seconds`/`-Milliseconds`
+/// 这类显式写法继续走原生参数绑定，不破坏正确的 PowerShell 写法。
+QString powershellPreamble()
+{
+  return QStringLiteral(
+           "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
+           "$OutputEncoding=[System.Text.Encoding]::UTF8;"
+           "function global:sleep { param([Parameter(Position=0)][double]$Seconds,"
+           "[double]$Milliseconds) "
+           "$ms = if ($PSBoundParameters.ContainsKey('Milliseconds')) { $Milliseconds } "
+           "else { $Seconds * 1000 }; "
+           "Start-Sleep -Milliseconds ([int]$ms) };");
+}
+
+/// 去掉整体包裹命令的一对花括号。
+///
+/// 调用方习惯写 `{ cmd; }` 表示"把这几条语句当一个整体"（POSIX shell 里合法），
+/// 但在 PowerShell 里 `{ ... }` 是 ScriptBlock **字面量**，只有 `&` / `.` 去调用
+/// 它才会执行。留着它，命令会被静默当成一个值——不报错、不执行，只是没效果；
+/// 而 `;` 后面直接跟 `{` 还会变成语法错误。两种情况都比报错更难排查。
+///
+/// 只剥离"整个字符串被一对括号包住"的情形。带参数声明的真脚本块
+/// （`{ param($a) ... }`）不匹配，原样保留——那是调用方有意写的。
+QString normalizePowerShellBlock(const QString & command)
+{
+  static const QRegularExpression outerBraces(
+    QStringLiteral(R"(^\s*\{\s*(.*?)\s*\}\s*$)"),
+    QRegularExpression::DotMatchesEverythingOption);
+  const QRegularExpressionMatch match = outerBraces.match(command);
+  return match.hasMatch() ? match.captured(1) : command;
+}
+
+/// 命令 → `-EncodedCommand` 需要的 Base64（UTF-16LE）。
+///
+/// 走编码命令而不是普通参数：命令里带引号、`$`、中文、换行是常态，用命令行参数
+/// 传递要经过 QProcess → CreateProcess → PowerShell 解析三层引号转义，任何一层
+/// 出错都是静默变形（命令被截断或参数错位）。编码后只剩 [A-Za-z0-9+/=]，
+/// 与引号、空格、代码页全都无关。
+QString encodePowershellCommand(const QString & command)
+{
+  QStringEncoder encoder(QStringConverter::Utf16LE);
+  const QByteArray utf16 = encoder(command);
+  return QString::fromLatin1(utf16.toBase64());
+}
+
+}  // namespace
+#endif
+
+ShellSpec shellSpec()
+{
+  // 探测只做一次：一个进程内的 shell 不会中途换人，而 metadata()（拼给模型的
+  // 说明）和 execute()（真正启动进程）必须拿到**同一个**结果——如果两次探测
+  // 结果不同，"告诉模型的 shell"和"实际执行的 shell"就会分叉，那正是本工具的
+  // 原始故障模式。函数内静态变量顺带省掉 Windows 上重复的 PATH 遍历。
+  static const ShellSpec cached = []() -> ShellSpec {
+    ShellSpec spec;
+#ifdef Q_OS_WIN
+    // 先看显式覆盖：用户可以据此指定特定版本的 PowerShell（如 7 的 pwsh）。
+    const QString override = qEnvironmentVariable("LYCODE_SHELL").trimmed();
+    if(!override.isEmpty()) {
+      const QString resolved = resolveOnWindows(override);
+      if(!resolved.isEmpty()) {
+        spec.program = resolved;
+        spec.label = QFileInfo(resolved).completeBaseName();
+        spec.posix = false;
+        spec.arguments = spec.label.compare(QLatin1String("cmd"), Qt::CaseInsensitive) == 0
+        ? QStringList{QStringLiteral("/d"), QStringLiteral("/s"), QStringLiteral("/c")}
+:
+        QStringList{QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"),
+                    QStringLiteral("-EncodedCommand")};
+        return spec;
+      }
+      qWarning("LYCODE_SHELL=%s 解析不到可执行文件，改用自动探测",
+               qUtf8Printable(override));
+    }
+
+    // PowerShell 7（pwsh）优先，其次 Windows 自带的 Windows PowerShell 5.1。
+    for(const QString & name : {
+    QStringLiteral("pwsh.exe"), QStringLiteral("powershell.exe")
+    })
+    {
+      const QString resolved = resolveOnWindows(name);
+      if(resolved.isEmpty()) {
+        continue;
+      }
+      spec.program = resolved;
+      spec.label = name.startsWith(QLatin1String("pwsh"), Qt::CaseInsensitive)
+                   ? QStringLiteral("PowerShell")
+                   : QStringLiteral("Windows PowerShell");
+      spec.posix = false;
+      // -NoProfile：不加载用户 profile。profile 里的 Write-Host 横幅会混进工具输出，
+      // 而工具输出是喂给模型的——每一行噪声都是白花的 token。
+      // -NonInteractive：明确不要交互提示，否则命令卡在确认框上直到超时。
+      spec.arguments = QStringList{QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"),
+                                   QStringLiteral("-EncodedCommand")};
+      return spec;
+    }
+
+    // 兜底：PowerShell 不可用（被裁剪的系统镜像）时退回 cmd。
+    spec.program = qEnvironmentVariable("ComSpec", QStringLiteral("cmd.exe"));
+    spec.label = QStringLiteral("cmd");
+    spec.posix = false;
+    // /d 跳过 AutoRun（某些机器上的注册表 AutoRun 会先跑一段无关命令），
+    // /s 保证首尾引号按 cmd 的规则处理，不额外剥一层。
+    spec.arguments = QStringList{QStringLiteral("/d"), QStringLiteral("/s"), QStringLiteral("/c")};
+    return spec;
+#else
+    // `/bin/bash` 在极简容器里可能不存在；退回 /bin/sh 也比直接失败好。
+    const bool hasBash = QFileInfo::exists(QStringLiteral("/bin/bash"));
+    spec.program = hasBash ? QStringLiteral("/bin/bash") : QStringLiteral("/bin/sh");
+    spec.label = hasBash ? QStringLiteral("bash") : QStringLiteral("sh");
+    spec.posix = true;
+    spec.arguments = QStringList{QStringLiteral("-lc")};
+    return spec;
+#endif
+  }();
+  return cached;
+}
+
+QStringList shellArgumentsFor(const ShellSpec & spec, const QString & command)
+{
+  QStringList arguments = spec.arguments;
+#ifdef Q_OS_WIN
+  if(!spec.posix && spec.label != QLatin1String("cmd")) {
+    // PowerShell：编码命令，见 encodePowershellCommand 的说明。
+    // -EncodedCommand 收的是**脚本原文**，所以这里传的就是命令本身，
+    // 不能带引号或 `-Command` 那套转义（那是 `-Command` 的规矩）。
+    arguments << encodePowershellCommand(powershellPreamble() + command);
+    return arguments;
+  }
+#endif
+  arguments << command;
+  return arguments;
+}
+
+QString shellBackgroundWrapper(const ShellSpec & spec, const QString & command,
+                               const QString & outputPath, const QString & exitPath)
+{
+  if(spec.posix) {
+    // 刻意**不用 exec**：让外层 shell 留下来，跑完命令后把 $? 写进旁路文件。
+    // 分离式任务没有 wait() 可取退出码，没有这一步就永远只能记 -1。
+    return QStringLiteral("{ ") + command + QStringLiteral("; } >> ") +
+           shellSingleQuote(outputPath) +
+           QStringLiteral(" 2>&1; echo $? > ") +
+           shellSingleQuote(exitPath);
+  }
+
+#ifdef Q_OS_WIN
+  if(spec.label == QLatin1String("cmd")) {
+    // 退出码取自 cmd 的 errorlevel，写完再重定向，保证 echo 本身不被记成结果。
+    // 刻意**不用括号**把命令包起来：cmd 是整行预解析的，`( ... | findstr x )`
+    // 这种带管道的命令会被拆坏，直接执行才是正确的语义。
+    return QStringLiteral(">> \"") + outputPath + QStringLiteral("\" 2>&1 ") +
+           command + QStringLiteral(" & echo %errorlevel% > \"") + exitPath +
+           QLatin1Char('"');
+  }
+
+  // PowerShell：整段必须是**一条语句**，重定向才能挂在它末尾。
+  //
+  // 踩过两次的坑，都是"把 PowerShell 当 POSIX 写"：
+  //   1. 用分号把 `*>>` 和前面的语句切开 → `*>>` 变成一条独立语句，PowerShell
+  //      去把它当命令名找，报 "The term '*>>' is not recognized"。重定向是
+  //      **语句级操作符**，必须紧跟被重定向的语句。
+  //   2. 把命令写成语句序列、`*>>` 贴在最后一句 → 只有最后一句的输出被重定向，
+  //      命令自己的输出直接漏到 stdout。
+  //
+  // 正解就是 PowerShell 自己的写法：`& { <语句序列> } *>> <file>`。
+  // 外层大括号在这里是**调用一个脚本块**，不是块字面量——不会触发前两个坑。
+  // `*>>` 覆盖所有流（stdout/stderr/verbose…），比 `>> ... 2>&1` 更贴合流模型。
+  //
+  // 退出码：原生命令取 $LASTEXITCODE，纯 cmdlet 用 $? 落到 0/1。
+  //
+  // 源码里刻意让每条内容字面量都短于 120 列：超过就会触发 astyle 的
+  // `--max-code-length` 在 `+` 处折行，`*>>` 跟着换行，拼出来的脚本虽然相邻，
+  // 但阅读和 diff 都更难核对（本文件已经被这样折过一次）。
+  QString body = normalizePowerShellBlock(command);
+  // 剥壳后可能留下结尾分号（`{ cmd; }` → `cmd;`），和后面拼的 `;` 撞成 `;;`。
+  // PowerShell 容忍空语句，但那是拼装没收敛，顺手收干净。
+  while(body.endsWith(QLatin1Char(';'))) {
+    body.chop(1);
+  }
+  return QStringLiteral("& { $ErrorActionPreference='Continue'; ") + body +
+         QStringLiteral("; $c = if ($LASTEXITCODE -ne $null) { $LASTEXITCODE } "
+                        "elseif ($?) { 0 } else { 1 }; "
+                        "$c | Out-File -FilePath '") + QString(exitPath) +
+         QStringLiteral("' -Encoding ascii -NoNewline } *>> '") + outputPath +
+         QStringLiteral("'");
+#else
+  Q_UNUSED(outputPath)
+  Q_UNUSED(exitPath)
+  return command;
+#endif
+}
+
 void configureProcessGroup(QProcess * process)
 {
   if(process == nullptr) {
@@ -1119,10 +1337,25 @@ void killProcessGroup(QProcess * process)
   if(process == nullptr) {
     return;
   }
-#ifdef Q_OS_UNIX
   const qint64 pid = process->processId();
+#ifdef Q_OS_UNIX
   if(pid > 0) {
     ::kill(-static_cast<pid_t>(pid), SIGKILL);
+  }
+#else
+  // Windows 的等价物是 taskkill /T：连同子进程一起终止。
+  // 只调 process->kill() 会漏掉命令自己 fork 出来的孙进程（`make -j`、`npm run`
+  // 这类最常见），而 configureProcessGroup 的注释一直承诺这里走 /T——
+  // 之前没实现，承诺是空的。
+  if(pid > 0 && process->state() != QProcess::NotRunning) {
+    QProcess taskkill;
+    taskkill.start(QStringLiteral("taskkill"), {
+      QStringLiteral("/PID"), QString::number(pid),
+      QStringLiteral("/T"), QStringLiteral("/F")
+    });
+    // 有界等待：taskkill 正常毫秒级返回。取消/超时路径上不能无限等——
+    // 这个函数被调用的场合本身就是"必须立刻释放资源"。
+    taskkill.waitForFinished(5000);
   }
 #endif
   // 兜底：进程组信号失败（或非 Unix）时至少杀掉直接子进程。

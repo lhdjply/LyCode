@@ -117,7 +117,7 @@ jobs:
         run: |
           set +e
           ctest --test-dir build -C RelWithDebInfo --output-on-failure \
-            -E "test_agent_runtime|test_ui_flow" 2>&1 | tee build/ctest-run.log
+            -E "test_ui_flow" 2>&1 | tee build/ctest-run.log
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then

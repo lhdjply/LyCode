@@ -27,6 +27,7 @@
 #include <QPlainTextEdit>
 #include <QIcon>
 #include <QMenu>
+#include <QProcess>
 #include "storage/SessionStore.h"
 #include "tools/BackgroundTaskRegistry.h"
 #include "ui/AppConfig.h"
@@ -216,6 +217,14 @@ static void killLedgerTasks()
 #ifdef Q_OS_UNIX
       ::kill(-pid, SIGKILL);   // 进程组优先：命令可能自己 fork 过
       ::kill(pid, SIGKILL);
+#else
+      // Windows 没有进程组信号，等价物是 taskkill /T（连整棵进程树）。
+      // 这里原先是空操作，于是"收尾"在 Windows 上根本不生效：每跑一次就漏一个
+      // sleep 进程，攒够了会拖垮后面的 CI 运行。
+      QProcess::execute(QStringLiteral("taskkill"), {
+        QStringLiteral("/PID"), QString::number(pid),
+        QStringLiteral("/T"), QStringLiteral("/F")
+      });
 #endif
     }
   }
@@ -549,7 +558,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
   bgInput.insert(QStringLiteral("command"), QStringLiteral("sleep 45"));
   bgInput.insert(QStringLiteral("description"), QStringLiteral("长跑任务"));
   bgInput.insert(QStringLiteral("run_in_background"), true);
-  gateway_->enqueue(multiToolCallResponse( {
+  gateway_->enqueue(multiToolCallResponse({
     {
       QStringLiteral("Bash"),
       QJsonDocument(bgInput).toJson(QJsonDocument::Compact)

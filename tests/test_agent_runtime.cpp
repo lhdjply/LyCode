@@ -10,8 +10,11 @@
 // 走真实 HTTP + SSE 才能验证它们与主循环的配合。
 #include <QtTest>
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStringConverter>
+#include <QDir>
 #include <QFile>
 #include <QTcpServer>
 #include <QTimer>
@@ -55,6 +58,8 @@ class TestAgentRuntime : public QObject
     void plainTextTurnCompletes();
     void readToolRunsWithoutPrompt();
     void bashToolWaitsForPermissionAndRunsAfterAllow();
+    void bashToolTellsModelTheShellItActuallyUses();
+    void backgroundWrapperSyntaxMatchesShell();
     void deniedToolFeedsErrorBackToModel();
     void planModeDeniesSideEffectTools();
     void abortInterruptsRunningTurn();
@@ -313,6 +318,191 @@ void TestAgentRuntime::bashToolWaitsForPermissionAndRunsAfterAllow()
 
   // 执行前必须是 PendingApproval 而不是直接 Running。
   QCOMPARE(toolPart.metadata.value(QStringLiteral("exitCode")).toInt(), 0);
+}
+
+// 回归：Windows 上工具曾把命令交给 cmd.exe，却仍然告诉模型"命令通过 bash -lc 执行"。
+// 模型据此写出 `for c in gcc; do command -v $c; done`，cmd 解析不了，最后只剩一个
+// 光秃秃的"退出码 1"——连报错原因都看不到。
+//
+// 这里钉住契约本身：发给模型的工具说明必须与真正执行的 shell 一致，
+// 且参数拼接方式（POSIX 直接追加 / PowerShell 走 -EncodedCommand）与 shell 语义匹配。
+void TestAgentRuntime::bashToolTellsModelTheShellItActuallyUses()
+{
+  const toolutil::ShellSpec spec = toolutil::shellSpec();
+
+  // 1. 探测结果必须自洽，否则后面两条断言都会失去意义。
+  QVERIFY2(!spec.program.isEmpty(), "shell 程序不能为空");
+  QVERIFY2(!spec.arguments.isEmpty(), "shell 启动参数不能为空");
+  QVERIFY2(!spec.label.isEmpty(), "shell 名称不能为空");
+
+  // 2. 真正传给 QProcess 的参数：命令必须能被执行到，且不能泄漏成"裸命令"。
+  const QString command = QStringLiteral("echo lycode-shell-contract");
+  const QStringList arguments = toolutil::shellArgumentsFor(spec, command);
+  QVERIFY2(arguments.size() > spec.arguments.size(),
+           "命令必须以参数形式追加到 shell 启动参数之后");
+
+  const QString lastArg = arguments.last();
+  if(spec.posix) {
+    // POSIX：命令原样追加，最后的参数就是命令本身。
+    QCOMPARE(lastArg, command);
+  }
+  else {
+    // Windows 原生 shell：命令必须经过编码传递，绝不能原样拼进命令行
+    // （命令里的引号、$、中文、换行在多层转义下会静默变形）。
+    QVERIFY2(lastArg != command,
+             "Windows 原生 shell 下命令不应原样作为参数传递");
+
+    // 开关名必须与参数内容配套：写 `-Command <Base64>` 会让 PowerShell 把
+    // Base64 当成命令名去执行，报 "The term 'WwBD...' is not recognized"。
+    // 这个断言就是为那次线上失败加的——只检查位置不检查开关名是抓不住的。
+    QCOMPARE(spec.arguments.last(), QStringLiteral("-EncodedCommand"));
+
+    // 解码回来验证命令内容真的在里面（而不是一串无关的 Base64）。
+    // 编码是 UTF-16LE，必须按 UTF-16LE 解；按 latin1 解会得到交错的空字节。
+    const QByteArray payload = QByteArray::fromBase64(lastArg.toLatin1());
+    QVERIFY2(!payload.isEmpty(), "编码命令必须能解出内容");
+    QStringDecoder decoder(QStringConverter::Utf16LE);
+    const QString decoded = decoder(payload);
+    QVERIFY2(!decoder.hasError(), "编码命令必须是合法 UTF-16LE");
+    QVERIFY2(decoded.contains(command),
+             qPrintable(QStringLiteral("解码后的编码命令必须包含原始命令，实际为：%1").arg(decoded)));
+  }
+
+  // 3. 契约一致性：发给模型的说明里声明的 shell，必须就是上面这个 program。
+  QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+  gateway_->enqueue(textResponse("ok"));
+
+  // 请求是异步派发的：submitText 返回时 HTTP body 还没到假网关，必须等一轮结束，
+  // 否则 lastBody() 是空的（会把"没等到"误判成"没声明工具"）。
+  QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+  QString error;
+  QVERIFY2(runtime_->submitText(QStringLiteral("hi"), &error), qPrintable(error));
+  QVERIFY(finishedSpy.wait(8000));
+
+  const QJsonObject body = QJsonDocument::fromJson(gateway_->lastBody()).object();
+  const QJsonArray tools = json::array(body, QStringLiteral("tools"));
+  QVERIFY2(!tools.isEmpty(), "发给模型的请求里必须带工具声明");
+  // OpenAI 兼容格式：每一项是 { "type": "function", "function": {...} }。
+  QJsonObject bashFunction;
+  for(const QJsonValue & value : tools) {
+    const QJsonObject function =
+      json::object(value.toObject(), QStringLiteral("function"));
+    if(function.value(QStringLiteral("name")).toString() == QStringLiteral("Bash")) {
+      bashFunction = function;
+      break;
+    }
+  }
+  QVERIFY2(!bashFunction.isEmpty(), "发给模型的工具列表里必须有 Bash");
+  const QString description = bashFunction.value(QStringLiteral("description")).toString();
+  QVERIFY2(!description.isEmpty(), "Bash 的工具说明不能为空");
+
+  if(spec.posix) {
+    QVERIFY2(description.contains(spec.label),
+             qPrintable(QStringLiteral("说明里必须声明实际使用的 shell（%1）：%2")
+                        .arg(spec.label, description)));
+    QVERIFY2(description.contains(QStringLiteral("bash")),
+             "POSIX 环境下必须明确告诉模型命令走 bash 语法");
+  }
+  else {
+    // 关键回归点：绝不能再说 `bash -lc`。
+    QVERIFY2(!description.contains(QStringLiteral("bash -lc")),
+             qPrintable(QStringLiteral("Windows 下不能声称走 bash：%1").arg(description)));
+    QVERIFY2(description.contains(QStringLiteral("PowerShell")) ||
+             description.contains(spec.label),
+             qPrintable(QStringLiteral("说明里必须声明实际使用的 shell（%1）：%2")
+                        .arg(spec.label, description)));
+  }
+}
+
+// 回归：后台任务的命令包装必须与目标 shell 的语法匹配。
+//
+// 线上踩过的两个坑，都是"把 PowerShell 当 POSIX 写"：
+//   1. 沿用 POSIX 的 `{ cmd; }`：PowerShell 里 `{ ... }` 是 ScriptBlock 字面量，
+//      `;` 后直接跟 `{` 是语法错误，命令**从未执行**，退出码旁路文件也从未写出。
+//   2. 改成裸语句序列、`*>> file` 用分号贴在后面：重定向是**语句级操作符**，
+//      被分号切开后 PowerShell 去把 `*>>` 当命令名找，报
+//      "The term '*>>' is not recognized"。
+// 两者都比报错更难查——第一种看起来像"命令跑了但失败了"。
+void TestAgentRuntime::backgroundWrapperSyntaxMatchesShell()
+{
+  const toolutil::ShellSpec spec = toolutil::shellSpec();
+
+  // 用测试目录当路径：顺带钉住"路径不含需要转义的字符"，否则整个包装的
+  // 引号假设都不成立（PowerShell 单引号里不能再出现单引号）。
+  const QString tempRoot = QDir::tempPath();
+  QVERIFY2(!tempRoot.contains(QLatin1Char('\'')), "临时目录不应含单引号");
+  const QString outputPath = tempRoot + QStringLiteral("/lycode-wrap-probe.log");
+  const QString exitPath = outputPath + QStringLiteral(".exit");
+
+  // 还原真实调用形态：ShellSpec 后台调用方会用花括号把命令包起来当"一个整体"。
+  // 这是 POSIX 的写法习惯，包装层必须负责把它翻译成目标 shell 能执行的形式。
+  const QString command = QStringLiteral("echo lycode-wrap-ok");
+  const QString bracedCommand = QStringLiteral("{ %1; }").arg(command);
+  const QString wrapped = toolutil::shellBackgroundWrapper(
+                            spec, bracedCommand, outputPath, exitPath);
+  QVERIFY2(!wrapped.isEmpty(), "包装结果不能为空");
+
+  // 无论哪个平台，三要素缺一不可：命令本体、输出落盘、退出码落盘。
+  QVERIFY2(wrapped.contains(command), qPrintable(wrapped));
+  QVERIFY2(wrapped.contains(outputPath), qPrintable(wrapped));
+  QVERIFY2(wrapped.contains(exitPath), qPrintable(wrapped));
+
+  // ★ 关键回归点：包装里不能再出现原样的 POSIX 块括号形态。
+  // 与平台无关地表达"花括号已经被处理掉"——POSIX 分支会保留（那是合法写法），
+  // 所以两种写法都构造一遍，比较包装结果是否相同。
+  const QString bareWrapped = toolutil::shellBackgroundWrapper(
+                                spec, command, outputPath, exitPath);
+  if(!spec.posix) {
+    QVERIFY2(wrapped == bareWrapped,
+             qPrintable(QStringLiteral("Windows 包装必须与命令有无花括号无关：\n带括号=%1\n不带=%2")
+                        .arg(wrapped, bareWrapped)));
+  }
+
+  if(spec.posix) {
+    // POSIX：`{ cmd; } >> log 2>&1; echo $? > exit` 是合法写法，保留。
+    QVERIFY2(wrapped.contains(QStringLiteral("echo $?")), qPrintable(wrapped));
+  }
+  else {
+    if(spec.label == QLatin1String("cmd")) {
+      // cmd：退出码是 errorlevel。
+      QVERIFY2(wrapped.contains(QStringLiteral("%errorlevel%")), qPrintable(wrapped));
+    }
+    else {
+      // PowerShell。
+      //
+      // 注意**不要**断言"包装里不出现 `$?`"：PowerShell 的 `$?` 是正常的内置
+      // 布尔变量（上一条语句是否成功），退出码判定正需要它——原生命令看
+      // `$LASTEXITCODE`，纯 cmdlet 用 `$?` 落到 0/1。要禁的是 POSIX 的旁路
+      // **写法** `echo $? > exitfile`，不是 `$?` 这个符号。
+      QVERIFY2(!wrapped.contains(QStringLiteral("echo $?")),
+               qPrintable(QStringLiteral("PowerShell 不该用 POSIX 的 echo $? 旁路：%1")
+                          .arg(wrapped)));
+      QVERIFY2(wrapped.contains(QStringLiteral("$LASTEXITCODE")), qPrintable(wrapped));
+      QVERIFY2(wrapped.contains(QStringLiteral("Out-File")), qPrintable(wrapped));
+
+      // 重定向必须**紧跟**被重定向的语句，不能被分号切开。
+      // 合法形态：`& { ... } *>> 'file'`；非法形态：`...; *>> 'file'`。
+      QVERIFY2(!wrapped.contains(QStringLiteral("; *>>")),
+               qPrintable(QStringLiteral("`*>>` 被分号切成了独立语句：%1").arg(wrapped)));
+
+      // 整个包装必须是**一条**语句：结尾的重定向没有被换行/分号甩开。
+      QVERIFY2(wrapped.endsWith(QStringLiteral("'")),
+               qPrintable(QStringLiteral("包装应以重定向目标结尾：%1").arg(wrapped)));
+      QVERIFY2(!wrapped.contains(QLatin1Char('\n')),
+               qPrintable(QStringLiteral("包装不该含换行：%1").arg(wrapped)));
+
+      // 剥掉外层花括号后不该留下空语句（`;;`）——虽然 PowerShell 容忍它，
+      // 但那是拼装逻辑没收敛的信号。
+      QVERIFY2(!wrapped.contains(QStringLiteral(";;")),
+               qPrintable(QStringLiteral("包装出现空语句：%1").arg(wrapped)));
+
+      // 包装本身也要能通过 shell 参数拼装（编码后是纯 Base64）。
+      const QStringList arguments = toolutil::shellArgumentsFor(spec, wrapped);
+      QCOMPARE(arguments.last(), arguments.last().trimmed());
+      QVERIFY2(!arguments.last().contains(QLatin1Char(' ')),
+               "编码后的命令不应含空格");
+    }
+  }
 }
 
 void TestAgentRuntime::deniedToolFeedsErrorBackToModel()
@@ -1233,7 +1423,7 @@ void TestAgentRuntime::backgroundBashSurvivesTheToolCall()
 
 
   // 命令跑 2 秒，远长于工具调用本身：这正是后台任务要解决的问题。
-  gateway_->enqueue(multiToolCallResponse( {
+  gateway_->enqueue(multiToolCallResponse({
     {
       QStringLiteral("Bash"),
       backgroundBashArgs(QStringLiteral("sleep 2; echo bg-done"),
@@ -1297,7 +1487,7 @@ void TestAgentRuntime::taskOutputBlocksUntilFinished()
   });
 
 
-  gateway_->enqueue(multiToolCallResponse( {
+  gateway_->enqueue(multiToolCallResponse({
     {
       QStringLiteral("Bash"),
       backgroundBashArgs(QStringLiteral("sleep 0.4; echo bg-finished"),
@@ -1364,7 +1554,7 @@ void TestAgentRuntime::taskStopKillsTheTask()
   });
 
 
-  gateway_->enqueue(multiToolCallResponse( {
+  gateway_->enqueue(multiToolCallResponse({
     {
       QStringLiteral("Bash"),
       backgroundBashArgs(QStringLiteral("sleep 30"), QStringLiteral("long sleep"))
@@ -1434,7 +1624,7 @@ void TestAgentRuntime::backgroundNotificationIsInjected()
   });
 
 
-  gateway_->enqueue(multiToolCallResponse( {
+  gateway_->enqueue(multiToolCallResponse({
     {
       QStringLiteral("Bash"),
       backgroundBashArgs(QStringLiteral("sleep 0.2; echo notify-me"),
@@ -1529,7 +1719,7 @@ void TestAgentRuntime::autoBackgroundsOnTimeout()
   });
 
   // 前台命令 + 500ms 超时，但命令要跑 5 秒：应当自动转入后台而不是被杀。
-  gateway_->enqueue(multiToolCallResponse( {
+  gateway_->enqueue(multiToolCallResponse({
     {
       QStringLiteral("Bash"),
       bashArgs(QStringLiteral("sleep 5; echo late-result"), 500, false,
@@ -1586,14 +1776,17 @@ void TestAgentRuntime::detachedTaskSurvivesRegistryRestart()
 
     // 与生产路径完全一致：startDetached + shell 重定向到文件。
     // 关键在于**不持有 QProcess**——~QProcess 会杀掉仍在运行的进程。
-    const QString wrapped =
-      QStringLiteral("exec sh -c ") +
-      toolutil::shellSingleQuote(QStringLiteral("sleep 2; echo survived-restart")) +
-      QStringLiteral(" >> ") + toolutil::shellSingleQuote(outputPath) +
-      QStringLiteral(" 2>&1");
+    // shell 必须走生产同一份探测：这里原先是写死的 `/bin/sh` + `exec sh -c`，
+    // 在 Windows 上根本起不来（没有 /bin/sh，也没有 exec），于是这个测试
+    // 被 CI 的 -E 排除掉了——恰恰是能验证平台差异的那条路径没被验证。
+    const toolutil::ShellSpec spec = toolutil::shellSpec();
+    const QString wrapped = toolutil::shellBackgroundWrapper(
+                              spec, QStringLiteral("sleep 2; echo survived-restart"),
+                              outputPath, BackgroundTaskRegistry::exitCodePathFor(outputPath));
     qint64 launchedPid = 0;
-    QVERIFY(QProcess::startDetached(QStringLiteral("/bin/sh"),
-    {QStringLiteral("-lc"), wrapped}, QString(), &launchedPid));
+    QVERIFY(QProcess::startDetached(spec.program,
+                                    toolutil::shellArgumentsFor(spec, wrapped),
+                                    QString(), &launchedPid));
     QVERIFY(launchedPid > 0);
     pid = static_cast<int>(launchedPid);
 
@@ -1622,12 +1815,14 @@ void TestAgentRuntime::detachedTaskSurvivesRegistryRestart()
   QVERIFY2(recovered.isRunning(), "认领时进程还活着，状态应当是 running");
   QCOMPARE(recovered.pid, pid);
 
-  // 等它跑完：轮询会发现进程消失。退出码不可知（孤儿进程没人 wait），
-  // 所以必须如实记 -1，而不是猜一个 0 让模型以为成功。
+  // 等它跑完：轮询会发现进程消失。
+  // 退出码来自 shell 写的旁路文件（shellBackgroundWrapper 的 `echo $? > exitPath`）——
+  // 这正是那个包装存在的理由：分离式任务没人 wait()，不落盘就只能记 -1，
+  // 一个正常退出的任务会被误报成失败。所以这里必须断言 0（而不是旧版的 -1）。
   QTRY_VERIFY_WITH_TIMEOUT(!second.task(taskId).isRunning(), 10000);
   const BackgroundTask ended = second.task(taskId);
-  QCOMPARE(ended.status, QStringLiteral("failed"));
-  QCOMPARE(ended.exitCode, -1);
+  QCOMPARE(ended.status, QStringLiteral("completed"));
+  QCOMPARE(ended.exitCode, 0);
 
   // 输出与宿主生死无关：进程直接写的文件。
   QFile log(outputPath);
@@ -1638,7 +1833,7 @@ void TestAgentRuntime::detachedTaskSurvivesRegistryRestart()
   // 结束通知也要生成，且带上 recovered 标记。
   QVERIFY(second.hasPendingNotification());
   const QString notification = second.takeNotification(taskId);
-  QVERIFY(notification.contains(QStringLiteral("<status>failed</status>")));
+  QVERIFY(notification.contains(QStringLiteral("<status>completed</status>")));
   QVERIFY(notification.contains(QStringLiteral("<recovered>true</recovered>")));
 
   QFile::remove(outputPath);

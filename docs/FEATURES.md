@@ -23,6 +23,29 @@
 | `edit` | 文件写入自动放行，执行命令仍需确认 |
 | `yolo` | 全部放行。请自行判断风险 |
 
+## 平台差异：shell
+
+`Bash` 工具名与权限能力名（`bash`）在两端保持一致，但**执行的 shell 按平台不同**，而且给模型的工具说明会如实声明实际用的是哪一个：
+
+| 平台 | shell | 启动方式 |
+| --- | --- | --- |
+| Linux / macOS | `/bin/bash`，不存在则 `/bin/sh` | `-lc`（`-l` 让登录 shell 的 PATH 生效，否则从 Dock/Finder 启动时 `node`、`cargo` 会"找不到命令"） |
+| Windows | `pwsh.exe`（PowerShell 7）优先 → `powershell.exe` → `cmd.exe` 兜底 | `-NoProfile -NonInteractive`；cmd 用 `/d /s /c` |
+
+Windows 上**刻意不用 bash**：原生环境没有 POSIX shell，硬塞一个就会让模型写出解析不了的命令。这是踩过的坑——工具说明曾写死"命令通过 `bash -lc` 执行"，而执行走的是 `cmd.exe`，于是模型写的 `for c in gcc; do command -v $c; done` 在 cmd 下必然失败，而且 cmd 的报错走 stderr，最后只剩一句光秃秃的"命令以退出码 1 结束"。契约必须随执行方式走。
+
+Windows 上还做了三件必须的事：
+
+| 事项 | 原因 |
+| --- | --- |
+| `-EncodedCommand`（UTF-16LE + Base64）传命令 | 命令里的引号、`$`、中文、换行要经过 QProcess → CreateProcess → PowerShell 三层转义，任何一层出错都是静默变形；编码后只剩 `[A-Za-z0-9+/=]` |
+| 前缀强制 UTF-8 输出 | 否则中文 Windows 上按控制台代码页（936）输出，而调用方按 UTF-8 解码，中文变乱码 |
+| 注入 `sleep` 垫片 | PowerShell 的 `Start-Sleep 2` 按**毫秒**解释位置参数（2ms 而不是 2 秒），而 `sleep 2` 恰恰是最常见的等待写法。没有垫片，命令会"成功"但等待时间差三个数量级——比直接报错更危险 |
+
+环境变量 `LYCODE_SHELL` 可以显式指定，例如 `LYCODE_SHELL=pwsh.exe`。
+
+`src/tools/ToolUtils.h` 的 `ShellSpec` 是这一层的唯一事实来源：`metadata()`（拼给模型的说明）和 `execute()`（真正启动进程）必须拿到同一个结果，且探测结果进程内缓存一次——两次探测结果分叉正是上面那个故障的本质。
+
 ## 后台任务
 
 `Bash(run_in_background: true)` 让命令在工具返回之后继续跑（起 dev server、跑耗时测试）。这带来三个必须解决的问题，也正是这一节的全部内容：
@@ -72,12 +95,19 @@
 | 机制 | 做法 |
 | --- | --- |
 | 启动方式 | `QProcess::startDetached`，**不持有** `QProcess`。这是硬要求：`~QProcess` 会杀掉仍在运行的进程，"活过宿主"就无从谈起 |
-| 输出 | 由 shell 自己重定向到日志文件，全程没有管道 |
-| 退出码 | 分离式任务没有 `wait()` 可取退出码，所以让 shell 把 `$?` 写到 `<log>.exit` 旁路文件 |
+| 输出 | 由 shell 自己重定向到日志文件，全程没有管道。POSIX 用 `{ …; } >> log 2>&1`；PowerShell 用 `*>> log`（一条重定向覆盖所有流）；cmd 用 `>> log 2>&1` |
+| 退出码 | 分离式任务没有 `wait()` 可取退出码，所以让 shell 把退出码写到 `<log>.exit` 旁路文件。POSIX 是 `echo $?`；PowerShell 取 `$LASTEXITCODE`（纯 cmdlet 失败时落到 1）；cmd 是 `%errorlevel%` |
 | 账本 | `<数据目录>/tasks/ledger.json` 原子写入，记录 id/pid/启动指纹/输出路径/状态 |
-| 重启对账 | 启动时按 `pid` + **启动时间指纹**（`/proc/<pid>/stat` 的 starttime）判断是否还活着：活着则认领并轮询其输出文件；已结束则标记 `lost`，退出码如实记 -1，**不猜一个 0 让模型以为成功** |
+| 重启对账 | 启动时按 `pid` + **启动时间指纹**判断是否还活着：活着则认领并轮询其输出文件；已结束则标记 `lost`，退出码如实记 -1，**不猜一个 0 让模型以为成功** |
 
-启动指纹是必要的：pid 会被复用，只靠 `kill(pid, 0)` 会把一个恰好复用了该 pid 的无关进程当成我们的任务。
+存活判定与终止按平台实现：
+
+| 平台 | 存活判定 | 终止整棵进程树 |
+| --- | --- | --- |
+| Unix | `kill(pid, 0)`，`EPERM` 视为存活 | `kill(-pid)` 杀进程组 + `kill(pid)` |
+| Windows | `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `GetExitCodeProcess`，`STILL_ACTIVE` 即存活 | `taskkill /PID <pid> /T /F` |
+
+Windows 的启动指纹取不到（只有 Linux 实现读 `/proc/<pid>/stat`），所以 pid 复用校验在 Windows 上不生效——这是**已知边界**，不是疏漏。
 
 ### 两种后台任务
 
@@ -93,7 +123,7 @@
 
 ### 已知限制
 
-`TaskStop` 对分离式任务按 pid 发信号，因此**只能终止仍然存活的进程**；如果进程已自行退出而 pid 又被复用，指纹校验会拦住误杀（记 `lost` 而不是杀掉无关进程）。此外，分离式任务不会继承宿主的环境变更，输出也不区分 stdout/stderr（合并写同一份日志，因为 QProcess 无法把两条流落到同一句柄）。
+`TaskStop` 对分离式任务按 pid 终止整棵进程树（Unix 发进程组信号，Windows 走 `taskkill /T`），因此**只能终止仍然存活的进程**；进程已自行退出时按 `lost` 收尾。Unix 上还有启动指纹校验，pid 被复用时能拦住误杀；Windows 没有指纹（见上一节），这是当前的边界。此外，分离式任务不会继承宿主的环境变更，输出也不区分 stdout/stderr（合并写同一份日志，因为 QProcess 无法把两条流落到同一句柄）。
 
 ## 子 Agent
 

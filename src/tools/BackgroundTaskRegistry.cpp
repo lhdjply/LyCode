@@ -17,6 +17,8 @@
 #ifdef Q_OS_UNIX
   #include <csignal>
   #include <unistd.h>
+#else
+  #include <windows.h>
 #endif
 
 namespace lycode
@@ -25,6 +27,33 @@ namespace
 {
 
 Q_LOGGING_CATEGORY(log, "lycode.tools.background")
+
+/// 按 pid 终止一整棵进程树。用于**没有活着的 QProcess 可以代劳**的场景：
+/// 分离式任务的进程可能是上次宿主启动的，进程句柄早就没了，只能按 pid 找。
+///
+/// Unix：先杀进程组（命令可能自己 fork 过，只杀组长会留孤儿），再杀进程本身。
+/// Windows：taskkill /T 是 `kill(-pid)` 的等价物，连同子进程一起终止。
+/// 注意 Windows 上**不能**省掉这一步去调 QProcess::kill()——分离式任务根本没有
+/// QProcess 对象，那条路是空的。
+void killProcessTreeByPid(int pid)
+{
+  if(pid <= 0) {
+    return;
+  }
+#ifdef Q_OS_UNIX
+  ::kill(-static_cast<pid_t>(pid), SIGKILL);
+  ::kill(static_cast<pid_t>(pid), SIGKILL);
+#else
+  QProcess taskkill;
+  taskkill.start(QStringLiteral("taskkill"), {
+    QStringLiteral("/PID"), QString::number(pid),
+    QStringLiteral("/T"), QStringLiteral("/F")
+  });
+  // 有界等待：taskkill 正常是毫秒级返回，卡住说明系统状态异常，
+  // 不能让它把 stop() 拖住。
+  taskkill.waitForFinished(5000);
+#endif
+}
 
 }  // namespace
 
@@ -83,8 +112,25 @@ bool processAlive(int pid, qint64 startTicks)
   }
   return true;
 #else
-  Q_UNUSED(startTicks)
-  return false;
+  // Windows 原先是 `return false`，那不是"保守"而是**错**：调用方把 false 理解成
+  // "进程已经结束"，于是 TaskStop 会跳过杀进程直接报成功（留下孤儿），
+  // 跨重启对账也会把还活着的任务判成 lost。用 OpenProcess 如实回答。
+  //
+  // PROCESS_QUERY_LIMITED_INFORMATION 而不是 PROCESS_QUERY_INFORMATION：
+  // 前者对所有进程都适用（含以其他身份运行的），后者在某些进程上会被拒绝。
+  const HANDLE handle =
+    ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+  if(handle == nullptr) {
+    // 打不开通常意味着进程已不存在；也可能是权限不足。
+    // 权限不足时保守地当作"还活着"，避免误杀/误判（对齐 Unix 分支的 EPERM 处理）。
+    return ::GetLastError() == ERROR_ACCESS_DENIED;
+  }
+  DWORD exitCode = 0;
+  const bool alive = ::GetExitCodeProcess(handle, &exitCode) != 0 &&
+                     exitCode == STILL_ACTIVE;
+  ::CloseHandle(handle);
+  Q_UNUSED(startTicks)  // Windows 上没有启动时间指纹，见 processStartTicks 的说明
+  return alive;
 #endif
 }
 
@@ -742,16 +788,12 @@ bool BackgroundTaskRegistry::stop(const QString & taskId)
 
   if(entry->detached) {
     // 分离式任务的进程可能还是上次宿主启动的，QProcess 那边不会有
-    // finished 信号可等，所以直接按 pid 发信号并立即收尾。
+    // finished 信号可等，所以直接按 pid 杀掉整棵树并立即收尾。
     if(!processAlive(entry->task.pid, entry->pidStartTicks)) {
       handleFinished(*entry, -1, true);
       return true;
     }
-#ifdef Q_OS_UNIX
-    // 进程组也发一次：命令可能自己 fork 过，只杀组长会留孤儿。
-    ::kill(-static_cast<pid_t>(entry->task.pid), SIGKILL);
-    ::kill(static_cast<pid_t>(entry->task.pid), SIGKILL);
-#endif
+    killProcessTreeByPid(entry->task.pid);
     handleFinished(*entry, -1, true);
     return true;
   }

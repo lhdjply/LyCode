@@ -74,6 +74,42 @@ void killProcessGroup(QProcess * process);
 /// 用于把路径安全地拼进 shell 重定向表达式，避免空格或特殊字符改变语义。
 QString shellSingleQuote(const QString & value);
 
+/// 本次实际使用的 shell：程序路径 + 固定的启动参数（命令本体**不**包含在内）。
+struct ShellSpec {
+  /// 可执行文件（Windows 下是解析出的绝对路径）。
+  QString program;
+  /// 启动参数；真实命令由调用方追加在末尾。
+  QStringList arguments;
+  /// 人类可读名称（`bash` / `PowerShell` / `cmd`），用于 metadata 与提示词。
+  QString label;
+  /// 命令是否按 POSIX shell 语义解析。false 表示 Windows 原生 shell：
+  /// 重定向、变量、for 循环的写法都与 bash 不同，包装后台任务时必须分流。
+  bool posix = true;
+};
+
+/// 探测本次运行应使用的 shell。
+///
+/// Unix 走 `/bin/bash`（不存在则 `/bin/sh`）。
+/// Windows **不用 bash**：原生环境里没有 POSIX shell，硬塞 bash 会让模型写出
+/// 解析不了的命令（`for c in x; do command -v $c; done` 在 cmd 下必然失败），
+/// 所以按 `LYCODE_SHELL` 覆盖 → `pwsh.exe` → `powershell.exe` → `cmd.exe` 的顺序解析。
+///
+/// Windows 上用**绝对路径**而不是裸程序名：仅靠 PATH 搜索时，`pwsh.exe` 可能落在
+/// WindowsApps 的应用执行别名上，那个存根会拉起商店而不是执行命令。
+ShellSpec shellSpec();
+
+/// 给定命令全文，按平台拼出要交给 QProcess 的完整参数列表。
+///
+/// PowerShell 分支用 `-EncodedCommand`（UTF-16LE + Base64）：命令里常带引号、
+/// `$`、中文和换行，走命令行参数要靠一层层引号转义，任何一层出错都会静默变形；
+/// 编码命令传的是纯 ASCII，绕开全部转义问题。
+QStringList shellArgumentsFor(const ShellSpec & spec, const QString & command);
+
+/// 把命令包成"跑完把退出码写进 exitPath"的形式，用于分离式后台任务。
+/// POSIX 与 Windows 原生 shell 的写法完全不同，所以按 spec.posix 分流。
+QString shellBackgroundWrapper(const ShellSpec & spec, const QString & command,
+                               const QString & outputPath, const QString & exitPath);
+
 /// 参数日志用：把敏感/超长内容截断到 200 字符，避免把整篇文件写进日志。
 QString redactForLog(const QString & value, int maxChars = 200);
 
