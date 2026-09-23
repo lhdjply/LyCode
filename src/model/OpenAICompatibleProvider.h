@@ -11,30 +11,32 @@
 
 class QNetworkAccessManager;
 
-namespace lycode {
+namespace lycode
+{
 
-class OpenAICompatibleProvider : public ModelProvider {
+class OpenAICompatibleProvider : public ModelProvider
+{
     Q_OBJECT
 
-public:
-    explicit OpenAICompatibleProvider(QObject *parent = nullptr);
+  public:
+    explicit OpenAICompatibleProvider(QObject * parent = nullptr);
     ~OpenAICompatibleProvider() override;
 
     QString providerId() const override;
     ProviderKind kind() const override;
     QStringList modelIds() const override;
 
-    ModelStream *stream(const ModelRequest &request) override;
+    ModelStream * stream(const ModelRequest & request) override;
 
-    bool configure(const ProviderConfig &config) override;
+    bool configure(const ProviderConfig & config) override;
     ProviderConfig configuration() const override;
 
-    ModelInfo modelInfo(const QString &modelId) const override;
+    ModelInfo modelInfo(const QString & modelId) const override;
 
-private:
+  private:
     ProviderConfig config_;
     /// 每个 Provider 实例独占一个网络管理器，生命周期跟随本对象。
-    QNetworkAccessManager *network_ = nullptr;
+    QNetworkAccessManager * network_ = nullptr;
 };
 
 }  // namespace lycode

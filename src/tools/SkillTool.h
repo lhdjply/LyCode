@@ -11,15 +11,17 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
-class SkillTool : public Tool {
-public:
+class SkillTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
-    QString title(const QJsonObject &input) const override;
+    QString title(const QJsonObject & input) const override;
 
-    void execute(const QJsonObject &input, const ToolContext &context,
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

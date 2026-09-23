@@ -6,16 +6,18 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 读取文本/图片文件。只读工具，不产生任何副作用。
-class ReadTool : public Tool {
-public:
+class ReadTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
     QString permissionCapability() const override;
-    QString title(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

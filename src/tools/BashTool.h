@@ -6,17 +6,19 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 执行 shell 命令。异步实现（QProcess + 事件循环），绝不阻塞 GUI 线程。
-class BashTool : public Tool {
-public:
+class BashTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
     QString permissionCapability() const override;
-    QString title(const QJsonObject &input) const override;
-    QString validateInput(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    QString validateInput(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

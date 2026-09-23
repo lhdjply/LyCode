@@ -24,26 +24,46 @@
 
 class QProcess;
 
-namespace lycode::mcp {
+namespace lycode::mcp
+{
 
-class Client : public QObject {
+class Client : public QObject
+{
     Q_OBJECT
 
-public:
+  public:
     /// 单次请求的超时。服务器卡死时不能让工具调用永远挂着。
     static constexpr int kRequestTimeoutMs = 20000;
     /// 握手（initialize + tools/list）的整体超时。
     static constexpr int kHandshakeTimeoutMs = 30000;
 
-    explicit Client(ServerConfig config, QObject *parent = nullptr);
+    explicit Client(ServerConfig config, QObject * parent = nullptr);
     ~Client() override;
 
-    const ServerConfig &config() const { return config_; }
-    ServerState state() const { return state_; }
-    QString lastError() const { return lastError_; }
-    QList<ToolInfo> tools() const { return tools_; }
-    QString serverName() const { return serverName_; }
-    QString serverVersion() const { return serverVersion_; }
+    const ServerConfig & config() const
+    {
+      return config_;
+    }
+    ServerState state() const
+    {
+      return state_;
+    }
+    QString lastError() const
+    {
+      return lastError_;
+    }
+    QList<ToolInfo> tools() const
+    {
+      return tools_;
+    }
+    QString serverName() const
+    {
+      return serverName_;
+    }
+    QString serverVersion() const
+    {
+      return serverVersion_;
+    }
 
     /// 失败排查用的只读诊断快照：子进程状态/错误/退出码、stderr 尾部、
     /// 以及从 stdout 收到了多少字节、跳过多少非 JSON 行。
@@ -60,33 +80,33 @@ public:
     void stop();
 
     /// 调用一个工具。回调**恰好一次**；成功时 `ok` 为真、`text` 为内容。
-    using Callback = std::function<void(bool ok, const QString &text,
-                                        const QJsonObject &rawResult)>;
-    void callTool(const QString &toolName, const QJsonObject &arguments, Callback done);
+    using Callback = std::function<void(bool ok, const QString & text,
+                                        const QJsonObject & rawResult)>;
+    void callTool(const QString & toolName, const QJsonObject & arguments, Callback done);
 
-signals:
+  signals:
     /// 握手完成、工具清单可用。
     void ready();
     /// 启动或握手失败（含超时、进程退出）。
-    void failed(const QString &reason);
+    void failed(const QString & reason);
     /// 进程结束。
     void closed();
 
-private:
+  private:
     void handleStdout();
     void handleStderr();
     void handleProcessError();
     void handleFinished(int exitCode);
-    void dispatch(const QJsonObject &message);
-    void sendRequest(const QString &method, const QJsonObject &params,
-                     std::function<void(const QJsonObject &result, const QString &error)> done,
+    void dispatch(const QJsonObject & message);
+    void sendRequest(const QString & method, const QJsonObject & params,
+                     std::function<void(const QJsonObject & result, const QString & error)> done,
                      int timeoutMs = kRequestTimeoutMs);
-    void sendNotification(const QString &method, const QJsonObject &params = {});
-    void writeMessage(const QJsonObject &message);
-    void setFailed(const QString &reason);
+    void sendNotification(const QString & method, const QJsonObject & params = {});
+    void writeMessage(const QJsonObject & message);
+    void setFailed(const QString & reason);
     void timeoutHandshake();
     /// 追加一段子进程 stderr（保留尾部，避免长日志把内存吃光）。
-    void appendStderr(const QString &text);
+    void appendStderr(const QString & text);
 
     ServerConfig config_;
     ServerState state_ = ServerState::Disabled;
@@ -95,7 +115,7 @@ private:
     QString serverVersion_;
     QList<ToolInfo> tools_;
 
-    QProcess *process_ = nullptr;
+    QProcess * process_ = nullptr;
     /// stdout 的按行缓冲：TCP/管道不保证一次读到一个完整消息。
     QByteArray buffer_;
     int nextId_ = 1;

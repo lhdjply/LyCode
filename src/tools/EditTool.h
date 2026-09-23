@@ -6,17 +6,19 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 在文件内容中精确替换 `old_string`。生成统一 diff。
-class EditTool : public Tool {
-public:
+class EditTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
     QString permissionCapability() const override;
-    QString title(const QJsonObject &input) const override;
-    QString validateInput(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    QString validateInput(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

@@ -13,31 +13,32 @@
 #include <QString>
 #include <QStringList>
 
-namespace lycode::json {
+namespace lycode::json
+{
 
-QString str(const QJsonObject &obj, const QString &key, const QString &fallback = {});
-int integer(const QJsonObject &obj, const QString &key, int fallback = 0);
-qint64 integer64(const QJsonObject &obj, const QString &key, qint64 fallback = 0);
-double number(const QJsonObject &obj, const QString &key, double fallback = 0.0);
-bool boolean(const QJsonObject &obj, const QString &key, bool fallback = false);
+QString str(const QJsonObject & obj, const QString & key, const QString & fallback = {});
+int integer(const QJsonObject & obj, const QString & key, int fallback = 0);
+qint64 integer64(const QJsonObject & obj, const QString & key, qint64 fallback = 0);
+double number(const QJsonObject & obj, const QString & key, double fallback = 0.0);
+bool boolean(const QJsonObject & obj, const QString & key, bool fallback = false);
 
-QJsonObject object(const QJsonObject &obj, const QString &key);
-QJsonArray array(const QJsonObject &obj, const QString &key);
-QStringList stringList(const QJsonObject &obj, const QString &key);
+QJsonObject object(const QJsonObject & obj, const QString & key);
+QJsonArray array(const QJsonObject & obj, const QString & key);
+QStringList stringList(const QJsonObject & obj, const QString & key);
 
 /// 判断 key 存在且非 null。
-bool has(const QJsonObject &obj, const QString &key);
+bool has(const QJsonObject & obj, const QString & key);
 
 /// 安全的 JSON 文本解析，失败时返回空对象并记录原因。
-QJsonObject parseObject(const QByteArray &bytes, QString *errorOut = nullptr);
+QJsonObject parseObject(const QByteArray & bytes, QString * errorOut = nullptr);
 
 /// 紧凑序列化（单行），用于 wire 传输。
-QByteArray toBytes(const QJsonObject &obj);
+QByteArray toBytes(const QJsonObject & obj);
 
 /// 带缩进的序列化，用于持久化文件与调试。
-QByteArray toPrettyBytes(const QJsonObject &obj);
+QByteArray toPrettyBytes(const QJsonObject & obj);
 
 /// 按长度截断字符串，并在截断处追加标记，用于展示预算控制。
-QString truncate(const QString &value, int maxChars, const QString &marker = QStringLiteral("…[truncated]"));
+QString truncate(const QString & value, int maxChars, const QString & marker = QStringLiteral("…[truncated]"));
 
 }  // namespace lycode::json

@@ -14,19 +14,21 @@
 #include "tools/SubagentHost.h"
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
-class AgentTool : public Tool {
-public:
+class AgentTool : public Tool
+{
+  public:
     AgentTool() = default;
     ~AgentTool() override = default;
 
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
-    QString permissionDescription(const QJsonObject &input) const override;
-    QString title(const QJsonObject &input) const override;
+    QString permissionDescription(const QJsonObject & input) const override;
+    QString title(const QJsonObject & input) const override;
 
-    void execute(const QJsonObject &input, const ToolContext &context,
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 
     /// 把子代理结果渲染成回传给模型的内容。
@@ -34,7 +36,7 @@ public:
     /// 格式formatAgentOutputForModel 对齐：先正文，再一行用量摘要。
     /// 本实现还会附一句"用 SendMessage 继续这个 agent"，但本实现没有 SendMessage
     /// 工具，所以不写那句——不提示一个不存在的动作。
-    static QString formatResultForModel(const SubagentHost::LaunchResult &result);
+    static QString formatResultForModel(const SubagentHost::LaunchResult & result);
 };
 
 }  // namespace lycode

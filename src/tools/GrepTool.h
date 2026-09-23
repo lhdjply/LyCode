@@ -6,16 +6,18 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 按正则搜索文件内容。只读、可并发。
-class GrepTool : public Tool {
-public:
+class GrepTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
     QString permissionCapability() const override;
-    QString title(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

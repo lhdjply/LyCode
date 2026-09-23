@@ -18,55 +18,57 @@
 #include <QList>
 #include <QString>
 
-namespace lycode::ui {
+namespace lycode::ui
+{
 
 /// 渲染所需的样式令牌。全部来自 Theme，不在这里硬编码颜色。
 struct MarkdownStyle {
-    QColor foreground;
-    QColor foregroundSubtle;
-    QColor foregroundSubtlest;
-    QColor surface;
-    QColor border;
-    QColor codeBackground;
-    QColor link;
-    QColor quoteBar;
-    QColor tableHeader;
+  QColor foreground;
+  QColor foregroundSubtle;
+  QColor foregroundSubtlest;
+  QColor surface;
+  QColor border;
+  QColor codeBackground;
+  QColor link;
+  QColor quoteBar;
+  QColor tableHeader;
 
-    // 语法高亮。放在 MarkdownStyle 而不是 Theme 的控件样式表里：
-    // 富文本走的是 QTextDocument::setDefaultStyleSheet，控件样式表
-    // （QWidget::setStyleSheet）**不会**作用到文档内容上——加错地方
-    // 的结果是 token span 都生成了、却一个都没上色（实测踩到）。
-    QColor syntaxKeyword;
-    QColor syntaxString;
-    QColor syntaxComment;
-    QColor syntaxNumber;
-    QColor syntaxType;
-    QColor syntaxFunction;
-    QColor syntaxPreproc;
+  // 语法高亮。放在 MarkdownStyle 而不是 Theme 的控件样式表里：
+  // 富文本走的是 QTextDocument::setDefaultStyleSheet，控件样式表
+  // （QWidget::setStyleSheet）**不会**作用到文档内容上——加错地方
+  // 的结果是 token span 都生成了、却一个都没上色（实测踩到）。
+  QColor syntaxKeyword;
+  QColor syntaxString;
+  QColor syntaxComment;
+  QColor syntaxNumber;
+  QColor syntaxType;
+  QColor syntaxFunction;
+  QColor syntaxPreproc;
 
-    int baseFontPx = 14;
-    int codeFontPx = 14;
-    QString sansFamily;
-    QString monoFamily;
+  int baseFontPx = 14;
+  int codeFontPx = 14;
+  QString sansFamily;
+  QString monoFamily;
 };
 
-class Markdown {
-public:
+class Markdown
+{
+  public:
     /// Markdown → HTML 片段。输出已做 HTML 转义，可安全放进 QTextDocument。
-    static QString toHtml(const QString &markdown, const MarkdownStyle &style);
+    static QString toHtml(const QString & markdown, const MarkdownStyle & style);
 
     /// QTextDocument 的默认样式表。设置后 `<pre class="code">` 等 class 才会生效。
-    static QString styleSheet(const MarkdownStyle &style);
+    static QString styleSheet(const MarkdownStyle & style);
 
     /// 纯文本预览：去掉 Markdown 标记，用于会话列表的一行摘要。
-    static QString toPlainPreview(const QString &markdown, int maxChars = 120);
+    static QString toPlainPreview(const QString & markdown, int maxChars = 120);
 
     /// 一个可点选的选项。
     struct Choice {
-        /// 按钮上显示的短标签。
-        QString label;
-        /// 点选后填进输入框的文本（通常就是选项原文）。
-        QString text;
+      /// 按钮上显示的短标签。
+      QString label;
+      /// 点选后填进输入框的文本（通常就是选项原文）。
+      QString text;
     };
 
     /// 从 markdown **尾部**识别"让用户在若干选项里选一个"的列表。
@@ -77,7 +79,7 @@ public:
     ///   * 每项只有一行、且不超过 80 字符
     ///   * 列表**前面紧邻**一行是提问（以 ? / ？ 结尾，或含"选择/哪种/哪个/which/choose"）
     /// 不满足时返回空列表，调用方据此不显示任何按钮。
-    static QList<Choice> detectChoices(const QString &markdown);
+    static QList<Choice> detectChoices(const QString & markdown);
 };
 
 }  // namespace lycode::ui

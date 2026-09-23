@@ -24,7 +24,8 @@
 #include <QString>
 #include <QStringList>
 
-namespace lycode::ui {
+namespace lycode::ui
+{
 
 /// 语法高亮分词器。
 /// 着色用的颜色。由调用方（Markdown / 代码视图）从主题取，
@@ -37,59 +38,60 @@ namespace lycode::ui {
 /// 与其继续试探选择器形状，不如把颜色写进 span 的内联 style，行为确定。
 /// class 仍然保留，供测试与将来的样式化使用。
 struct SyntaxColors {
-    QColor keyword;
-    QColor string;
-    QColor comment;
-    QColor number;
-    QColor type;
-    QColor function;
-    QColor preprocessor;
+  QColor keyword;
+  QColor string;
+  QColor comment;
+  QColor number;
+  QColor type;
+  QColor function;
+  QColor preprocessor;
 };
 
 /// token 类别。渲染端据此挑颜色与字形。
 enum class TokenKind {
-    Plain,
-    Keyword,
-    String,
-    Comment,
-    Number,
-    Type,
-    Function,
-    Preprocessor,
+  Plain,
+  Keyword,
+  String,
+  Comment,
+  Number,
+  Type,
+  Function,
+  Preprocessor,
 };
 
 /// 一段被识别出来的 token（区间为**字符偏移**，不是字节）。
 struct Token {
-    int start = 0;
-    int length = 0;
-    TokenKind kind = TokenKind::Plain;
+  int start = 0;
+  int length = 0;
+  TokenKind kind = TokenKind::Plain;
 };
 
-class SyntaxHighlighter {
-public:
+class SyntaxHighlighter
+{
+  public:
     /// 把代码切成 token 区间。**两个渲染端共用它**：
     /// 富文本走 HTML，QPlainTextEdit 走 QTextCharFormat。
     /// 共用同一份规则是刻意的——各写一份分词早晚会漂移。
     /// 只返回非 Plain 的区间（Plain 就是区间之间的空隙）。
-    static QList<Token> tokenize(const QString &code, const QString &language);
+    static QList<Token> tokenize(const QString & code, const QString & language);
 
     /// 按文件扩展名猜语言（`main.cpp` → `cpp`）。
     /// 猜不出时返回空串，调用方按通用规则处理。
-    static QString languageForFile(const QString &path);
+    static QString languageForFile(const QString & path);
 
     /// 把 `code` 渲染成 HTML 片段（不含 <pre> 包裹）。
     /// 所有文本都会被 HTML 转义；`language` 为空或未知时用通用规则。
-    static QString highlight(const QString &code, const QString &language,
-                             const SyntaxColors &colors);
+    static QString highlight(const QString & code, const QString & language,
+                             const SyntaxColors & colors);
     /// 只要 token 结构、不要颜色时用（返回的 span 不带内联样式）。
-    static QString highlight(const QString &code, const QString &language);
+    static QString highlight(const QString & code, const QString & language);
 
     /// 语言是否被专门支持（供 UI 决定要不要显示语言标签）。
-    static bool isKnownLanguage(const QString &language);
+    static bool isKnownLanguage(const QString & language);
 
     /// 把语言标识归一化到内部表（`c++`/`cpp`/`cc` → `cpp` 等）。
     /// 未知语言原样返回（小写、去空白）。
-    static QString normalizeLanguage(const QString &language);
+    static QString normalizeLanguage(const QString & language);
 
     /// 已知语言的列表（用于测试与文档）。
     static QStringList knownLanguages();

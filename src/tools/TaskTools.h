@@ -12,28 +12,31 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 读取后台任务的输出。
 ///
 /// 存在两个工具而不是让 Bash 自己返回，是为了让"启动"与"查看"解耦：
 /// 模型可以先启动一个长任务、去做别的事，稍后再回来读结果。
-class TaskOutputTool : public Tool {
-public:
+class TaskOutputTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
-    QString title(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 
 /// 终止后台任务。
-class TaskStopTool : public Tool {
-public:
+class TaskStopTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
-    QString title(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

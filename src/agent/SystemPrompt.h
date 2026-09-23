@@ -22,7 +22,8 @@
 #include "core/Types.h"
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 项目说明文件的候选名，按优先级排列。
 extern const QStringList kProjectInstructionFileNames;
@@ -31,61 +32,62 @@ extern const QStringList kProjectInstructionFileNames;
 constexpr int kProjectInstructionMaxBytes = 100 * 1024;
 
 struct SystemPromptInput {
-    Workspace workspace;
-    QString cwd;
-    SessionMode mode = SessionMode::Build;
-    PermissionMode permissionMode = PermissionMode::Default;
-    /// 已注册的工具声明。仅用于判断"有哪些能力"，不用于生成 schema 说明。
-    QList<ToolSpec> tools;
-    /// 应用版本，用于环境信息。
-    QString appVersion;
-    /// 覆盖"今天日期"，便于测试稳定输出。
-    QString todayOverride;
-    /// 已知的项目上下文（语言、包管理器、构建文件），由 detectProjectContext 得到。
-    QStringList projectLanguages;
-    QString projectPackageManager;
-    QStringList projectBuildFiles;
-    /// 关闭项目说明文件读取（测试用）。
-    bool skipProjectInstructions = false;
+  Workspace workspace;
+  QString cwd;
+  SessionMode mode = SessionMode::Build;
+  PermissionMode permissionMode = PermissionMode::Default;
+  /// 已注册的工具声明。仅用于判断"有哪些能力"，不用于生成 schema 说明。
+  QList<ToolSpec> tools;
+  /// 应用版本，用于环境信息。
+  QString appVersion;
+  /// 覆盖"今天日期"，便于测试稳定输出。
+  QString todayOverride;
+  /// 已知的项目上下文（语言、包管理器、构建文件），由 detectProjectContext 得到。
+  QStringList projectLanguages;
+  QString projectPackageManager;
+  QStringList projectBuildFiles;
+  /// 关闭项目说明文件读取（测试用）。
+  bool skipProjectInstructions = false;
 
-    /// 非空表示这是子代理运行时：使用子代理身份与说明，
-    /// 而不是主代理身份。取值来自 SubagentProfile::id。
-    QString subagentType;
-    /// 派生子代理时给出的任务描述，用于让子代理确认自己的职责边界。
-    QString subagentDescription;
+  /// 非空表示这是子代理运行时：使用子代理身份与说明，
+  /// 而不是主代理身份。取值来自 SubagentProfile::id。
+  QString subagentType;
+  /// 派生子代理时给出的任务描述，用于让子代理确认自己的职责边界。
+  QString subagentDescription;
 
-    /// Skills 清单片段（名字 + 描述）。由 SkillLibrary 生成，这里只负责插入——
-    /// 让提示词层依赖一个字符串而不是 skills 库，避免 agent/ → skills/ 的耦合。
-    /// 为空表示没有可用技能。
-    QString skillsSection;
+  /// Skills 清单片段（名字 + 描述）。由 SkillLibrary 生成，这里只负责插入——
+  /// 让提示词层依赖一个字符串而不是 skills 库，避免 agent/ → skills/ 的耦合。
+  /// 为空表示没有可用技能。
+  QString skillsSection;
 };
 
-class SystemPromptBuilder {
-public:
+class SystemPromptBuilder
+{
+  public:
     /// 生成完整系统提示词。
-    static QString build(const SystemPromptInput &input);
+    static QString build(const SystemPromptInput & input);
 
     /// 从用户级目录与工作区逐层向上收集项目说明文件内容。
     ///
     /// 候选来源最多两个：`<数据目录>/AGENTS.md`（用户级）与从 cwd 向上到
     /// 项目根（第一个含 `.git` 的目录）找到的**第一个** `AGENTS.md`（工作区级）。
     /// 用户级在前、工作区级在后，用空行拼接。两者都缺失时返回空字符串。
-    static QString loadProjectInstructions(const QString &workspacePath, const QString &cwd,
+    static QString loadProjectInstructions(const QString & workspacePath, const QString & cwd,
                                            int maxBytesPerFile = kProjectInstructionMaxBytes);
 
     /// 环境信息片段（工作区、cwd、平台、日期、项目上下文）。
-    static QString environmentSection(const SystemPromptInput &input);
+    static QString environmentSection(const SystemPromptInput & input);
 
     /// 工具使用通用规范片段。**不列举工具名与参数**，只写跨工具的行为准则。
-    static QString toolingNormsSection(const QList<ToolSpec> &tools);
+    static QString toolingNormsSection(const QList<ToolSpec> & tools);
 
     /// 会话模式约束片段。
     static QString modeSection(SessionMode mode, PermissionMode permissionMode);
 
     /// 子代理身份片段。取代主代理身份：子代理的职责边界与主代理不同
     /// （无人对话、只看结论、不得再派生子代理）。
-    static QString subagentIdentitySection(const QString &subagentType,
-                                           const QString &description);
+    static QString subagentIdentitySection(const QString & subagentType,
+                                           const QString & description);
 
     /// 子代理的模式约束。与 modeSection 分开：主代理的 plan 模式要求
     /// "产出一份计划供用户批准"，而只读子代理要的是"把结论讲清楚"。
@@ -93,13 +95,13 @@ public:
     static QString subagentModeSection(SessionMode mode);
 
     /// 探测项目上下文：语言、包管理器、构建文件。
-    static void detectProjectContext(const QString &workingDirectory,
-                                     QStringList *languagesOut,
-                                     QString *packageManagerOut,
-                                     QStringList *buildFilesOut);
+    static void detectProjectContext(const QString & workingDirectory,
+                                     QStringList * languagesOut,
+                                     QString * packageManagerOut,
+                                     QStringList * buildFilesOut);
 
     /// 项目根：自 startDirectory 向上找到的第一个含 `.git` 的目录；找不到返回空。
-    static QString findProjectRoot(const QString &startDirectory);
+    static QString findProjectRoot(const QString & startDirectory);
 };
 
 }  // namespace lycode

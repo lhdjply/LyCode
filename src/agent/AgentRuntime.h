@@ -40,23 +40,24 @@
 #include "tools/SubagentHost.h"
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 class ProviderRegistry;
 class ModelStream;
 
 /// turn 相位。取值turn-state.ts 对齐。
 enum class TurnPhase {
-    Idle,
-    ProcessingInput,
-    AwaitingModelResponse,
-    Streaming,
-    SchedulingTools,
-    ExecutingTools,
-    AggregatingResults,
-    AwaitingPermission,
-    Completing,
-    Error,
+  Idle,
+  ProcessingInput,
+  AwaitingModelResponse,
+  Streaming,
+  SchedulingTools,
+  ExecutingTools,
+  AggregatingResults,
+  AwaitingPermission,
+  Completing,
+  Error,
 };
 
 QString toToken(TurnPhase phase);
@@ -64,97 +65,122 @@ QString toToken(TurnPhase phase);
 /// 运行时状态（面向 UI）。由 TurnPhase 推导，不独立维护，
 /// 避免"两个状态各说各话"。
 enum class RunState {
-    Idle,
-    Streaming,          ///< 模型正在产出
-    ExecutingTools,     ///< 工具正在执行
-    WaitingPermission,  ///< 等待用户裁决
-    Cancelling,         ///< 收到取消，正在收尾
-    Failed,
+  Idle,
+  Streaming,          ///< 模型正在产出
+  ExecutingTools,     ///< 工具正在执行
+  WaitingPermission,  ///< 等待用户裁决
+  Cancelling,         ///< 收到取消，正在收尾
+  Failed,
 };
 
 QString toToken(RunState state);
 
 /// 一次运行的结果。
 enum class TurnResult {
-    None,
-    Success,
-    Interrupted,
-    Failed,
-    Skipped,  ///< 因容量或模式限制未执行
+  None,
+  Success,
+  Interrupted,
+  Failed,
+  Skipped,  ///< 因容量或模式限制未执行
 };
 
-class AgentRuntime : public QObject, public SubagentHost {
+class AgentRuntime : public QObject, public SubagentHost
+{
     Q_OBJECT
 
-public:
-    explicit AgentRuntime(QObject *parent = nullptr);
+  public:
+    explicit AgentRuntime(QObject * parent = nullptr);
     ~AgentRuntime() override;
 
     // ── 依赖注入 ────────────────────────────────────────────────────────────
     // 全部为借用指针，生命周期由调用方（Application）保证。
-    void setProviderRegistry(ProviderRegistry *registry);
-    void setToolRegistry(ToolRegistry *registry);
-    void setSessionStore(SessionStore *store);
-    void setTodoStore(TodoStore *store);
+    void setProviderRegistry(ProviderRegistry * registry);
+    void setToolRegistry(ToolRegistry * registry);
+    void setSessionStore(SessionStore * store);
+    void setTodoStore(TodoStore * store);
 
     // ── 会话生命周期 ────────────────────────────────────────────────────────
     /// 新建会话。失败时通过 errorOut 返回原因。
-    bool startSession(const Workspace &workspace, SessionMode mode,
-                      const ModelSelection &model, QString *errorOut = nullptr);
+    bool startSession(const Workspace & workspace, SessionMode mode,
+                      const ModelSelection & model, QString * errorOut = nullptr);
     /// 从存储载入已有会话及其消息。
-    bool loadSession(const Id &sessionId, QString *errorOut = nullptr);
+    bool loadSession(const Id & sessionId, QString * errorOut = nullptr);
     /// 关闭当前会话（取消运行、清空内存状态）。
     void closeSession();
 
-    const Session &session() const { return session_; }
-    QList<Message> messages() const { return messages_; }
-    bool hasSession() const { return !session_.id.isEmpty(); }
+    const Session & session() const
+    {
+      return session_;
+    }
+    QList<Message> messages() const
+    {
+      return messages_;
+    }
+    bool hasSession() const
+    {
+      return !session_.id.isEmpty();
+    }
 
     // ── 用户输入 ────────────────────────────────────────────────────────────
     /// 提交一条用户消息并启动 turn。
     /// 运行中提交会被拒绝（返回 false）——输入排队属于 UI 层职责，
     /// 运行时只保证"一次只有一个 turn"。
-    bool submitText(const QString &text, QString *errorOut = nullptr);
+    bool submitText(const QString & text, QString * errorOut = nullptr);
     /// 带附件的提交。`attachments` 里的每个 FilePart 会作为独立的 Part
     /// 追加到用户消息上（图片走 base64 内联，见各 provider 的序列化）。
-    bool submitMessage(const QString &text, const QList<FilePart> &attachments,
-                       QString *errorOut = nullptr);
+    bool submitMessage(const QString & text, const QList<FilePart> & attachments,
+                       QString * errorOut = nullptr);
     /// 提交权限裁决。
-    bool resolvePermission(const Id &requestId, const PermissionResponse &response);
+    bool resolvePermission(const Id & requestId, const PermissionResponse & response);
     /// 请求中断当前 turn。幂等。
     void abort();
 
     // ── 会话配置 ────────────────────────────────────────────────────────────
     void setMode(SessionMode mode);
-    void setModel(const ModelSelection &model);
+    void setModel(const ModelSelection & model);
 
     /// 工具白名单。非空时只声明与执行这些工具（子代理的只读 profile 用它收窄工具面）。
-    void setToolAllowlist(const QStringList &names);
-    QStringList toolAllowlist() const { return toolAllowlist_; }
+    void setToolAllowlist(const QStringList & names);
+    QStringList toolAllowlist() const
+    {
+      return toolAllowlist_;
+    }
 
     /// 单个 turn 允许的模型步数上限。
     void setMaxModelStepsPerTurn(int steps);
-    int maxModelStepsPerTurn() const { return maxModelStepsPerTurn_; }
+    int maxModelStepsPerTurn() const
+    {
+      return maxModelStepsPerTurn_;
+    }
 
     /// 当前运行时是否是子代理（子代理不能再派生子代理）。
-    bool isSubagent() const { return subagentDepth_ > 0; }
+    bool isSubagent() const
+    {
+      return subagentDepth_ > 0;
+    }
 
     /// 把本会话登记为某个父会话的子会话，并落盘。
-    void adoptAsChild(const Id &parentSessionId, SessionKind kind, const QString &title);
+    void adoptAsChild(const Id & parentSessionId, SessionKind kind, const QString & title);
 
     /// 设置子代理身份，用于生成子代理专属的系统提示词。
-    void setSubagentIdentity(const QString &subagentType, const QString &description);
+    void setSubagentIdentity(const QString & subagentType, const QString & description);
 
     // ── SubagentHost ────────────────────────────────────────────────────────
-    void launchSubagent(const LaunchRequest &request, Completion done) override;
+    void launchSubagent(const LaunchRequest & request, Completion done) override;
     bool subagentsEnabled() const override;
 
     /// 后台任务注册表。Bash 的 run_in_background 与 TaskOutput/TaskStop 共用它。
-    BackgroundTaskRegistry *backgroundTasks() const { return backgroundTasks_; }
+    BackgroundTaskRegistry * backgroundTasks() const
+    {
+      return backgroundTasks_;
+    }
 
     /// 注入 skills 库（不接管所有权）。传 nullptr 表示没有技能目录。
-    void setSkillLibrary(const skills::Library *library);
-    const skills::Library *skillLibrary() const { return skills_; }
+    void setSkillLibrary(const skills::Library * library);
+    const skills::Library * skillLibrary() const
+    {
+      return skills_;
+    }
 
     /// 用模型为当前会话生成标题。
     ///
@@ -174,18 +200,30 @@ public:
     /// （否则子代理弹出的确认框会把裁决提交到父会话的权限门上）。
     /// const 版本返回非 const 指针：权限门本身不是本对象状态的一部分，
     /// 在 const 方法里也需要读它的模式（buildModelRequest 就是 const）。
-    PermissionGate *permissionGate() const { return permissionGate_; }
+    PermissionGate * permissionGate() const
+    {
+      return permissionGate_;
+    }
     /// 注入共享的权限门（子代理用）。传 nullptr 无效。
-    void setPermissionGate(PermissionGate *gate);
+    void setPermissionGate(PermissionGate * gate);
 
     // ── 状态查询 ────────────────────────────────────────────────────────────
     RunState runState() const;
-    TurnPhase phase() const { return phase_; }
+    TurnPhase phase() const
+    {
+      return phase_;
+    }
     bool isRunning() const;
     /// 本轮已执行的模型步数。
-    int modelStepCount() const { return modelStepCount_; }
+    int modelStepCount() const
+    {
+      return modelStepCount_;
+    }
     /// 本轮已执行的工具调用数。
-    int toolCallCount() const { return toolCallCount_; }
+    int toolCallCount() const
+    {
+      return toolCallCount_;
+    }
     /// 估算的上下文 token 用量。
     int estimatedInputTokens() const;
 
@@ -208,38 +246,38 @@ public:
     /// 目的是给子代理一个明确的边界，避免它无限自我消耗。
     static constexpr int kDefaultSubagentMaxModelSteps = 12;
 
-signals:
-    void sessionChanged(const lycode::Session &session);
+  signals:
+    void sessionChanged(const lycode::Session & session);
     /// 子代理的会话状态变化。与 sessionChanged 刻意分开：
     /// 接收方对 sessionChanged 的反应是"切换到该会话"，
     /// 而子会话只应出现在列表里，绝不能抢走当前会话。
-    void subagentSessionChanged(const lycode::Session &session);
+    void subagentSessionChanged(const lycode::Session & session);
     /// 子代理结束（用于 UI 更新列表里的状态）。
-    void subagentFinished(const lycode::Id &childSessionId, bool ok);
+    void subagentFinished(const lycode::Id & childSessionId, bool ok);
     /// 后台任务集合发生变化（新增/结束/停止）。UI 据此刷新计数。
     void backgroundTasksChanged(int runningCount);
     /// 模型生成的标题已应用（成功时才发）。
-    void titleGenerated(const lycode::Id &sessionId, const QString &title);
-    void messageAdded(const lycode::Message &message);
-    void partAppended(const lycode::Id &messageId, const lycode::Part &part);
-    void partUpdated(const lycode::Id &messageId, const lycode::Part &part);
+    void titleGenerated(const lycode::Id & sessionId, const QString & title);
+    void messageAdded(const lycode::Message & message);
+    void partAppended(const lycode::Id & messageId, const lycode::Part & part);
+    void partUpdated(const lycode::Id & messageId, const lycode::Part & part);
     /// 流式文本增量。`reasoning` 为 true 表示这是思考内容。
-    void deltaAppended(const lycode::Id &messageId, const lycode::Id &partId,
-                       const QString &delta, bool reasoning);
-    void messageFinished(const lycode::Message &message);
-    void permissionRequested(const lycode::PermissionRequest &request);
-    void permissionResolved(const lycode::Id &requestId);
+    void deltaAppended(const lycode::Id & messageId, const lycode::Id & partId,
+                       const QString & delta, bool reasoning);
+    void messageFinished(const lycode::Message & message);
+    void permissionRequested(const lycode::PermissionRequest & request);
+    void permissionResolved(const lycode::Id & requestId);
     void runStateChanged(lycode::RunState state);
     void turnFinished(lycode::TurnResult result);
     /// 面向用户的失败提示（已本地化）。
-    void failed(const QString &message);
+    void failed(const QString & message);
 
-private:
+  private:
     // ── turn 流程 ───────────────────────────────────────────────────────────
-    void beginTurn(const QString &userText, const QList<FilePart> &attachments);
+    void beginTurn(const QString & userText, const QList<FilePart> & attachments);
     void runModelStep();
-    void handleStreamEvent(const StreamEvent &event);
-    void finishModelStep(const QString &finishReason);
+    void handleStreamEvent(const StreamEvent & event);
+    void finishModelStep(const QString & finishReason);
 
     // ── 工具调度 ────────────────────────────────────────────────────────────
     /// 把本轮的调用按并行安全性分组：组内可并行，组与组之间串行。
@@ -253,11 +291,11 @@ private:
     /// 单个调用终结（幂等）。本组全部终结后才推进下一组。
     /// 用 callId 而不是下标标识调用：异步回调可能在下一轮 turn 才到达，
     /// 下标那时可能已经指向新 turn 的另一个调用。
-    void finishToolCall(const QString &callId, const ToolResult &result);
+    void finishToolCall(const QString & callId, const ToolResult & result);
     /// 清洗模型返回的标题；不可用时返回空串。
-    static QString sanitizeTitle(const QString &raw);
+    static QString sanitizeTitle(const QString & raw);
     /// 应用生成的标题（落盘并通知 UI）。
-    void applyGeneratedTitle(const QString &raw);
+    void applyGeneratedTitle(const QString & raw);
 
     /// 把待投递的后台任务完成通知注入上下文。
     /// 在每次模型步开始前调用：这样任务结束时如果正在跑 turn，模型能在下一步
@@ -265,57 +303,57 @@ private:
     void drainBackgroundNotifications();
 
     /// 把尚未终结的调用标记为取消（中断或提前终止时）。
-    void cancelPendingToolCalls(const QString &reason);
+    void cancelPendingToolCalls(const QString & reason);
     /// 订阅权限门的信号。切换共享门之后必须重新订阅。
     void wirePermissionGate();
     void afterToolQueue();
-    void completeTurn(TurnResult result, const QString &errorMessage = {});
+    void completeTurn(TurnResult result, const QString & errorMessage = {});
 
     // ── 状态迁移 ────────────────────────────────────────────────────────────
     void setPhase(TurnPhase phase);
 
     // ── 辅助 ────────────────────────────────────────────────────────────────
     /// 当前正在接收增量的 assistant 消息（可能为空）。
-    Message *currentAssistantMessage();
+    Message * currentAssistantMessage();
     /// 在指定消息里追加一个 part，发信号并返回其 id。
-    Id appendPart(Message &message, const Part &part);
+    Id appendPart(Message & message, const Part & part);
     /// 更新指定消息里的 part，发信号。找不到返回 false。
-    bool updatePart(Message &message, const Part &part);
+    bool updatePart(Message & message, const Part & part);
     /// 本次 turn 的单个工具调用及其执行状态（按模型给出的顺序排列）。
     struct QueuedToolCall {
-        Id messageId;
-        Id partId;
-        QString callId;
-        QString name;
-        QJsonObject input;
-        /// 是否已派发（权限请求已发出）。未派发的在中断时直接记为取消。
-        bool started = false;
-        /// 是否已终结。用于保证 finishToolCall() 的幂等——
-        /// 参数校验失败、权限拒绝、工具回调都可能走到同一个收口点。
-        bool finished = false;
+      Id messageId;
+      Id partId;
+      QString callId;
+      QString name;
+      QJsonObject input;
+      /// 是否已派发（权限请求已发出）。未派发的在中断时直接记为取消。
+      bool started = false;
+      /// 是否已终结。用于保证 finishToolCall() 的幂等——
+      /// 参数校验失败、权限拒绝、工具回调都可能走到同一个收口点。
+      bool finished = false;
     };
 
     /// 一组可以并行执行的调用。`indices` 指向 toolQueue_。
     struct ToolBatch {
-        QList<int> indices;
-        /// false 表示独占组（只有一个元素）：不并行安全的工具要与前后形成串行屏障。
-        bool parallel = true;
+      QList<int> indices;
+      /// false 表示独占组（只有一个元素）：不并行安全的工具要与前后形成串行屏障。
+      bool parallel = true;
     };
 
     /// 构造模型请求。
     ModelRequest buildModelRequest() const;
     /// 把消息序列投影成 provider 可接受的形状（system 走独立字段）。
-    void persistMessage(const Message &message);
+    void persistMessage(const Message & message);
     void persistSession();
     void refreshContextUsage();
     /// 中断收尾：取消工具与权限请求，把未终态的 part 标记为已取消。
     void teardownAfterAbort();
 
     // ── 依赖 ────────────────────────────────────────────────────────────────
-    ProviderRegistry *providers_ = nullptr;
-    ToolRegistry *tools_ = nullptr;
-    SessionStore *store_ = nullptr;
-    TodoStore *todos_ = nullptr;
+    ProviderRegistry * providers_ = nullptr;
+    ToolRegistry * tools_ = nullptr;
+    SessionStore * store_ = nullptr;
+    TodoStore * todos_ = nullptr;
 
     // ── 会话状态 ────────────────────────────────────────────────────────────
     Session session_;
@@ -324,7 +362,7 @@ private:
     /// 默认权限门（本会话自有时使用）。
     std::unique_ptr<PermissionGate> ownedPermissionGate_;
     /// 生效的权限门；指向 ownedPermissionGate_ 或外部注入的实例。
-    PermissionGate *permissionGate_ = nullptr;
+    PermissionGate * permissionGate_ = nullptr;
 
     // ── turn 状态 ───────────────────────────────────────────────────────────
     TurnPhase phase_ = TurnPhase::Idle;
@@ -343,7 +381,7 @@ private:
     bool toolStopRequested_ = false;
     StreamEvent pendingUsage_;
     Usage turnUsage_;
-    ModelStream *activeStream_ = nullptr;
+    ModelStream * activeStream_ = nullptr;
     TurnResult lastResult_ = TurnResult::None;
     /// 当前 turn 的标识，用于把工具执行与消息关联起来。
     Id currentTurnId_;
@@ -369,10 +407,10 @@ private:
     /// 后台任务注册表。每个运行时一套：子代理的后台任务是它自己的，
     /// 父代理不该看到、也不该被它的通知打扰。
     std::unique_ptr<BackgroundTaskRegistry> ownedBackgroundTasks_;
-    BackgroundTaskRegistry *backgroundTasks_ = nullptr;
+    BackgroundTaskRegistry * backgroundTasks_ = nullptr;
 
     /// Skills 库。由 MainWindow 持有，这里只借用。
-    const skills::Library *skills_ = nullptr;
+    const skills::Library * skills_ = nullptr;
 
     /// 传给工具与权限层的取消令牌。一个 turn 一个，abort() 时置位。
     /// 用 shared_ptr 是因为工具可能在异步回调里持有它，生命周期必须独立于 turn。

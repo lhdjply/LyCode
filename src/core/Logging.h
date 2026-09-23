@@ -15,7 +15,8 @@
 #include <QLoggingCategory>
 #include <QString>
 
-namespace lycode::logging {
+namespace lycode::logging
+{
 
 /// 初始化日志规则。默认放行 info 及以上；`--verbose` 打开 debug。
 /// 同时把日志写入 `<数据目录>/logs/lycode.log`。
@@ -25,6 +26,6 @@ void init(bool verbose);
 QString logDirectory();
 
 /// 对 API key 等敏感值做脱敏，仅保留首尾少量字符。
-QString redact(const QString &secret);
+QString redact(const QString & secret);
 
 }  // namespace lycode::logging

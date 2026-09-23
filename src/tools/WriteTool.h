@@ -5,17 +5,19 @@
 
 #include "tools/Tool.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 写入（覆盖）一个文件。必要时创建父目录。
-class WriteTool : public Tool {
-public:
+class WriteTool : public Tool
+{
+  public:
     ToolMetadata metadata() const override;
     QJsonObject inputSchema() const override;
     QString permissionCapability() const override;
-    QString title(const QJsonObject &input) const override;
-    QString validateInput(const QJsonObject &input) const override;
-    void execute(const QJsonObject &input, const ToolContext &context,
+    QString title(const QJsonObject & input) const override;
+    QString validateInput(const QJsonObject & input) const override;
+    void execute(const QJsonObject & input, const ToolContext & context,
                  ToolCallback done) override;
 };
 

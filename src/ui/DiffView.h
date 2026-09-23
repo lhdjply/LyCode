@@ -15,32 +15,49 @@
 #include <QJsonArray>
 #include <QTextBrowser>
 
-namespace lycode::ui {
+namespace lycode::ui
+{
 
-class DiffView : public QTextBrowser {
+class DiffView : public QTextBrowser
+{
     Q_OBJECT
 
-public:
+  public:
     /// 单次渲染的行数上限。超出时截断并明确告知剩余行数——
     /// 一个改动 5000 行的补丁不该把整条对话流撑爆。
     static constexpr int kMaxRenderedLines = 400;
 
-    explicit DiffView(QWidget *parent = nullptr);
+    explicit DiffView(QWidget * parent = nullptr);
 
     /// 渲染结构化补丁（Diff::unified 的输出格式）。
     /// hunks 为空或格式不对时清空自身。
-    void setHunks(const QJsonArray &hunks);
+    void setHunks(const QJsonArray & hunks);
 
     /// 是否有内容可显示。
-    bool isEmpty() const { return renderedLines_ == 0; }
-    int renderedLines() const { return renderedLines_; }
+    bool isEmpty() const
+    {
+      return renderedLines_ == 0;
+    }
+    int renderedLines() const
+    {
+      return renderedLines_;
+    }
     /// 被截断的行数；未截断为 0。
-    int truncatedLines() const { return truncatedLines_; }
+    int truncatedLines() const
+    {
+      return truncatedLines_;
+    }
     /// 本次补丁的新增/删除行数（用于卡片头部的 +N −M）。
-    int additions() const { return additions_; }
-    int deletions() const { return deletions_; }
+    int additions() const
+    {
+      return additions_;
+    }
+    int deletions() const
+    {
+      return deletions_;
+    }
 
-private:
+  private:
     /// 重新按主题生成 HTML。
     void rebuild();
 

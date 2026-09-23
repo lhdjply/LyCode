@@ -36,46 +36,48 @@
 
 #include <algorithm>
 
-namespace lycode::ui {
-namespace {
+namespace lycode::ui
+{
+namespace
+{
 
 // ── 色阶常量 ────────────────────────────────────────────────────────────────
 // Tailwind v4 neutral 色阶（oklch 值已换算成 sRGB）。
 // 所有 --color-neutral-* 都指向这组值。这里只保留被 zai 主题直接引用的两档
 // （zai-light 的 --color-foreground = neutral-800，zai-dark 的 = neutral-300），
 // 其余档位的换算结果记录在文件下方的「未使用色阶」注释里。
-constexpr const char *kNeutral300 = "#d4d4d4";
-constexpr const char *kNeutral800 = "#262626";
+constexpr const char * kNeutral300 = "#d4d4d4";
+constexpr const char * kNeutral800 = "#262626";
 
 // zai 主题里以字面量写死的品牌/语义色（不跟随 Tailwind 色阶）。
-constexpr const char *kZaiInk = "#0d0d0d";        // zai-light 的 brand / terminal-cursor
-constexpr const char *kZaiPaper = "#f8f8f8";      // zai-light 的 background
-constexpr const char *kZaiInk2 = "#000000";       // zai-light 的 primary
-constexpr const char *kZaiWhite = "#ffffff";      // zai-light 的 header/panel/card/menu/toast 底色
-constexpr const char *kZaiSidebarLight = "#f0f0f0";  // zai-light 的 sidebar/tab
-constexpr const char *kZaiBorderGray = "#e6e6e6";    // zai-light 的 secondary/tag
-constexpr const char *kZaiBlue = "#0b7fff";       // zai-light 的 icon-blue
-constexpr const char *kZaiGreen = "#1e8a3e";      // zai-light 的 success / diff-added
-constexpr const char *kZaiGreenDeep = "#166b32";  // zai-light 的 interaction-confirmation-foreground
-constexpr const char *kZaiGreenSoft = "#eaf7ee";  // zai-light 的 interaction-confirmation-surface
-constexpr const char *kZaiRed = "#e03131";        // zai-light 的 destructive / diff-removed
-constexpr const char *kZaiOrange = "#e07b00";     // zai-light 的 warning
-constexpr const char *kZaiViolet = "#9e77ed";     // zai-light 的 idle-task
-constexpr const char *kZaiVioletSurface = "#f5f3ff";  // zai-light 的 idle-task-surface
-constexpr const char *kZaiBlueSurface = "#ebf4ff";    // zai-light 的 accent / ask-surface
-constexpr const char *kZaiSkyDeep = "#001d3d";    // zai-dark 的 accent / ask-surface
-constexpr const char *kZaiDarkBg = "#161616";     // zai-dark 的 background
-constexpr const char *kZaiDarkHeader = "#202020"; // zai-dark 的 header/panel
-constexpr const char *kZaiDarkCard = "#2b2b2b";   // zai-dark 的 card/popover/menu/input
-constexpr const char *kZaiDarkHover = "#363636";  // zai-dark 的 menu-hover/secondary/tag
-constexpr const char *kZaiDarkFg = "#f8f8f8";     // zai-dark 的 tooltip-foreground / bright-white
-constexpr const char *kZaiDarkBlue = "#80beff";   // zai-dark 的 ask-foreground / bright-blue
-constexpr const char *kZaiDarkGreen = "#46bf72";  // zai-dark 的 success / diff-added
-constexpr const char *kZaiDarkGreenText = "#87d9a4";  // zai-dark 的 confirmation-foreground
-constexpr const char *kZaiDarkRed = "#ff5c5c";    // zai-dark 的 destructive / diff-removed
-constexpr const char *kZaiDarkOrange = "#ff8a30"; // zai-dark 的 warning
-constexpr const char *kZaiDarkViolet = "#7b5ce5";      // zai-dark 的 idle-task
-constexpr const char *kZaiDarkVioletSurface = "#160d38";  // zai-dark 的 idle-task-surface
+constexpr const char * kZaiInk = "#0d0d0d";       // zai-light 的 brand / terminal-cursor
+constexpr const char * kZaiPaper = "#f8f8f8";     // zai-light 的 background
+constexpr const char * kZaiInk2 = "#000000";      // zai-light 的 primary
+constexpr const char * kZaiWhite = "#ffffff";     // zai-light 的 header/panel/card/menu/toast 底色
+constexpr const char * kZaiSidebarLight = "#f0f0f0"; // zai-light 的 sidebar/tab
+constexpr const char * kZaiBorderGray = "#e6e6e6";   // zai-light 的 secondary/tag
+constexpr const char * kZaiBlue = "#0b7fff";      // zai-light 的 icon-blue
+constexpr const char * kZaiGreen = "#1e8a3e";     // zai-light 的 success / diff-added
+constexpr const char * kZaiGreenDeep = "#166b32"; // zai-light 的 interaction-confirmation-foreground
+constexpr const char * kZaiGreenSoft = "#eaf7ee"; // zai-light 的 interaction-confirmation-surface
+constexpr const char * kZaiRed = "#e03131";       // zai-light 的 destructive / diff-removed
+constexpr const char * kZaiOrange = "#e07b00";    // zai-light 的 warning
+constexpr const char * kZaiViolet = "#9e77ed";    // zai-light 的 idle-task
+constexpr const char * kZaiVioletSurface = "#f5f3ff"; // zai-light 的 idle-task-surface
+constexpr const char * kZaiBlueSurface = "#ebf4ff";   // zai-light 的 accent / ask-surface
+constexpr const char * kZaiSkyDeep = "#001d3d";   // zai-dark 的 accent / ask-surface
+constexpr const char * kZaiDarkBg = "#161616";    // zai-dark 的 background
+constexpr const char * kZaiDarkHeader = "#202020"; // zai-dark 的 header/panel
+constexpr const char * kZaiDarkCard = "#2b2b2b";  // zai-dark 的 card/popover/menu/input
+constexpr const char * kZaiDarkHover = "#363636"; // zai-dark 的 menu-hover/secondary/tag
+constexpr const char * kZaiDarkFg = "#f8f8f8";    // zai-dark 的 tooltip-foreground / bright-white
+constexpr const char * kZaiDarkBlue = "#80beff";  // zai-dark 的 ask-foreground / bright-blue
+constexpr const char * kZaiDarkGreen = "#46bf72"; // zai-dark 的 success / diff-added
+constexpr const char * kZaiDarkGreenText = "#87d9a4"; // zai-dark 的 confirmation-foreground
+constexpr const char * kZaiDarkRed = "#ff5c5c";   // zai-dark 的 destructive / diff-removed
+constexpr const char * kZaiDarkOrange = "#ff8a30"; // zai-dark 的 warning
+constexpr const char * kZaiDarkViolet = "#7b5ce5";     // zai-dark 的 idle-task
+constexpr const char * kZaiDarkVioletSurface = "#160d38"; // zai-dark 的 idle-task-surface
 
 // 下面这组色阶被 --color-* 引用过，但当前 Palette 字段集没有对应语义位置，
 // 因此只在此记录换算结果，不定义常量（避免未使用变量告警）：
@@ -89,293 +91,309 @@ constexpr const char *kZaiDarkVioletSurface = "#160d38";  // zai-dark 的 idle-t
 //                          Palette 里没有 ask 专用字段，等待交互统一走 confirmation 绿色
 //                          （等待徽标只用一套绿色）。
 
-QColor make(const char *hex, int alpha = 255) {
-    QColor color{QString::fromLatin1(hex)};
-    if (alpha < 255) {
-        color.setAlpha(alpha);
-    }
-    return color;
+QColor make(const char * hex, int alpha = 255)
+{
+  QColor color{QString::fromLatin1(hex)};
+  if(alpha < 255) {
+    color.setAlpha(alpha);
+  }
+  return color;
 }
 
 }  // namespace
 
 // ── 字体族 ──────────────────────────────────────────────────────────────────
 
-QString sansFamily() {
-    // 结果缓存：QFontDatabase::families() 会遍历整个字体库，构造期与每次主题刷新都调用代价过高。
-    static const QString cached = [] {
-        const QStringList candidates = {
-            // Linux 优先：先保证 CJK 字形覆盖，再退到通用西文无衬线。
-            QStringLiteral("Noto Sans CJK SC"),
-            QStringLiteral("Source Han Sans SC"),
-            QStringLiteral("WenQuanYi Micro Hei"),
-            QStringLiteral("DejaVu Sans"),
-            QStringLiteral("Noto Sans"),
-            // 其它平台（桌面版本要跨 macOS / Windows）。
-            QStringLiteral("Microsoft YaHei UI"),
-            QStringLiteral("PingFang SC"),
-            QStringLiteral("Segoe UI"),
-            QStringLiteral("Helvetica Neue"),
-        };
-        const QStringList installed = QFontDatabase::families();
-        for (const QString &candidate : candidates) {
-            if (installed.contains(candidate, Qt::CaseInsensitive)) {
-                return candidate;
-            }
-        }
-        // 兜底：交给 Qt 选系统通用无衬线族。
-        return QFontDatabase::systemFont(QFontDatabase::GeneralFont).family();
-    }();
-    return cached;
+QString sansFamily()
+{
+  // 结果缓存：QFontDatabase::families() 会遍历整个字体库，构造期与每次主题刷新都调用代价过高。
+  static const QString cached = [] {
+    const QStringList candidates = {
+      // Linux 优先：先保证 CJK 字形覆盖，再退到通用西文无衬线。
+      QStringLiteral("Noto Sans CJK SC"),
+      QStringLiteral("Source Han Sans SC"),
+      QStringLiteral("WenQuanYi Micro Hei"),
+      QStringLiteral("DejaVu Sans"),
+      QStringLiteral("Noto Sans"),
+      // 其它平台（桌面版本要跨 macOS / Windows）。
+      QStringLiteral("Microsoft YaHei UI"),
+      QStringLiteral("PingFang SC"),
+      QStringLiteral("Segoe UI"),
+      QStringLiteral("Helvetica Neue"),
+    };
+    const QStringList installed = QFontDatabase::families();
+    for(const QString & candidate : candidates)
+    {
+      if(installed.contains(candidate, Qt::CaseInsensitive)) {
+        return candidate;
+      }
+    }
+    // 兜底：交给 Qt 选系统通用无衬线族。
+    return QFontDatabase::systemFont(QFontDatabase::GeneralFont).family();
+  }();
+  return cached;
 }
 
-QString monospaceFamily() {
-    static const QString cached = [] {
-        const QStringList candidates = {
-            QStringLiteral("JetBrains Mono"),
-            QStringLiteral("Cascadia Code"),
-            QStringLiteral("Fira Code"),
-            QStringLiteral("Source Code Pro"),
-            //  --font-mono 在通用 monospace 之前显式插入了各平台 CJK 无衬线字体，
-            // 免得 Windows 的 Consolas 缺中文字形后落回宋体。
-            QStringLiteral("Noto Sans Mono CJK SC"),
-            QStringLiteral("DejaVu Sans Mono"),
-            QStringLiteral("monospace"),
-        };
-        const QStringList installed = QFontDatabase::families();
-        for (const QString &candidate : candidates) {
-            if (installed.contains(candidate, Qt::CaseInsensitive)) {
-                return candidate;
-            }
-        }
-        return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
-    }();
-    return cached;
+QString monospaceFamily()
+{
+  static const QString cached = [] {
+    const QStringList candidates = {
+      QStringLiteral("JetBrains Mono"),
+      QStringLiteral("Cascadia Code"),
+      QStringLiteral("Fira Code"),
+      QStringLiteral("Source Code Pro"),
+      //  --font-mono 在通用 monospace 之前显式插入了各平台 CJK 无衬线字体，
+      // 免得 Windows 的 Consolas 缺中文字形后落回宋体。
+      QStringLiteral("Noto Sans Mono CJK SC"),
+      QStringLiteral("DejaVu Sans Mono"),
+      QStringLiteral("monospace"),
+    };
+    const QStringList installed = QFontDatabase::families();
+    for(const QString & candidate : candidates)
+    {
+      if(installed.contains(candidate, Qt::CaseInsensitive)) {
+        return candidate;
+      }
+    }
+    return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
+  }();
+  return cached;
 }
 
 // ── 模式 token ──────────────────────────────────────────────────────────────
 
-QString toToken(ThemeMode mode) {
-    switch (mode) {
-        case ThemeMode::Light:
-            return QStringLiteral("light");
-        case ThemeMode::Dark:
-            return QStringLiteral("dark");
-        case ThemeMode::System:
-            break;
-    }
-    return QStringLiteral("system");
+QString toToken(ThemeMode mode)
+{
+  switch(mode) {
+    case ThemeMode::Light:
+      return QStringLiteral("light");
+    case ThemeMode::Dark:
+      return QStringLiteral("dark");
+    case ThemeMode::System:
+      break;
+  }
+  return QStringLiteral("system");
 }
 
-ThemeMode themeModeFromToken(const QString &value) {
-    const QString normalized = value.trimmed().toLower();
-    if (normalized == QStringLiteral("light")) {
-        return ThemeMode::Light;
-    }
-    if (normalized == QStringLiteral("dark")) {
-        return ThemeMode::Dark;
-    }
-    return ThemeMode::System;
+ThemeMode themeModeFromToken(const QString & value)
+{
+  const QString normalized = value.trimmed().toLower();
+  if(normalized == QStringLiteral("light")) {
+    return ThemeMode::Light;
+  }
+  if(normalized == QStringLiteral("dark")) {
+    return ThemeMode::Dark;
+  }
+  return ThemeMode::System;
 }
 
 // ── 调色板 ──────────────────────────────────────────────────────────────────
 
-namespace {
+namespace
+{
 
 /// Zai Light 调色板。（Light 归一化为 zai-light，见文件头说明。）
-Palette zaiLight() {
-    Palette p;
+Palette zaiLight()
+{
+  Palette p;
 
-    // 结构表面
-    p.background = make(kZaiPaper);                      // --color-background: #f8f8f8
-    p.backgroundAlt = make(kZaiPaper, 179);              // --color-background-alt: color-mix(background 70%, transparent) [466]
-    p.header = make(kZaiWhite);                          // --color-header: #ffffff [483]
-    p.panel = make(kZaiWhite);                           // --color-panel: #ffffff [484]
-    p.sidebar = make(kZaiSidebarLight);                  // --color-sidebar: #f0f0f0 [485]
-    p.surface = make(kZaiInk, 8);                        // --color-surface: rgba(13,13,13,0.03) [486]
-    p.surfaceHover = make(kZaiInk, 13);                  // --color-surface-hover: rgba(13,13,13,0.05) [487]
-    p.card = make(kZaiWhite);                            // --color-card: #ffffff [488]
-    p.cardSelected = make(kZaiWhite);                    // --color-card-selected: var(--color-input) = #ffffff [489 -> 495]
-    p.popover = make(kZaiWhite);                         // --color-popover: #ffffff [491]
-    p.popoverBorder = make(kZaiInk, 26);                 // --color-popover-border: var(--color-border) [494 -> 479]
-    p.menu = make(kZaiWhite);                            // --color-menu: #ffffff [543]
-    p.menuHover = make(kZaiSidebarLight);                // --color-menu-hover: #f0f0f0 [544]
+  // 结构表面
+  p.background = make(kZaiPaper);                      // --color-background: #f8f8f8
+  p.backgroundAlt = make(kZaiPaper,
+                         179);              // --color-background-alt: color-mix(background 70%, transparent) [466]
+  p.header = make(kZaiWhite);                          // --color-header: #ffffff [483]
+  p.panel = make(kZaiWhite);                           // --color-panel: #ffffff [484]
+  p.sidebar = make(kZaiSidebarLight);                  // --color-sidebar: #f0f0f0 [485]
+  p.surface = make(kZaiInk, 8);                        // --color-surface: rgba(13,13,13,0.03) [486]
+  p.surfaceHover = make(kZaiInk, 13);                  // --color-surface-hover: rgba(13,13,13,0.05) [487]
+  p.card = make(kZaiWhite);                            // --color-card: #ffffff [488]
+  p.cardSelected = make(kZaiWhite);                    // --color-card-selected: var(--color-input) = #ffffff [489 -> 495]
+  p.popover = make(kZaiWhite);                         // --color-popover: #ffffff [491]
+  p.popoverBorder = make(kZaiInk, 26);                 // --color-popover-border: var(--color-border) [494 -> 479]
+  p.menu = make(kZaiWhite);                            // --color-menu: #ffffff [543]
+  p.menuHover = make(kZaiSidebarLight);                // --color-menu-hover: #f0f0f0 [544]
 
-    // 输入
-    p.input = make(kZaiWhite);                           // --color-input: #ffffff [495]
-    p.inputFocused = make(kZaiWhite);                    // --color-input-focused: var(--color-input) [496]
-    p.inputBorder = make(kZaiInk, 26);                   // --color-input-border: var(--color-border) [497]
-    p.inputBorderHover = make(kZaiInk, 38);              // --color-input-border-hover: var(--color-border-hover) [498 -> 480: rgba(13,13,13,0.15)]
-    // zai 主题刻意不用品牌蓝做聚焦边框，而是用 border-hover 的 15% 墨色（focus 更「安静」）。
-    p.inputBorderFocused = make(kZaiInk, 38);            // --color-input-border-focused: var(--color-border-hover) [499]
+  // 输入
+  p.input = make(kZaiWhite);                           // --color-input: #ffffff [495]
+  p.inputFocused = make(kZaiWhite);                    // --color-input-focused: var(--color-input) [496]
+  p.inputBorder = make(kZaiInk, 26);                   // --color-input-border: var(--color-border) [497]
+  p.inputBorderHover = make(kZaiInk,
+                            38);              // --color-input-border-hover: var(--color-border-hover) [498 -> 480: rgba(13,13,13,0.15)]
+  // zai 主题刻意不用品牌蓝做聚焦边框，而是用 border-hover 的 15% 墨色（focus 更「安静」）。
+  p.inputBorderFocused = make(kZaiInk, 38);            // --color-input-border-focused: var(--color-border-hover) [499]
 
-    // 边框
-    p.border = make(kZaiInk, 26);                        // --color-border: rgba(13,13,13,0.1) [479]
-    p.borderHover = make(kZaiInk, 38);                   // --color-border-hover: rgba(13,13,13,0.15) [480]
-    p.cardBorder = make(kZaiInk, 26);                    // --color-card-border: var(--color-border) [490]
+  // 边框
+  p.border = make(kZaiInk, 26);                        // --color-border: rgba(13,13,13,0.1) [479]
+  p.borderHover = make(kZaiInk, 38);                   // --color-border-hover: rgba(13,13,13,0.15) [480]
+  p.cardBorder = make(kZaiInk, 26);                    // --color-card-border: var(--color-border) [490]
 
-    // 文本
-    p.foreground = make(kNeutral800);                    // --color-foreground: var(--color-neutral-800) = #262626 [553]
-    p.foregroundSubtle = make(kNeutral800, 153);         // color-mix(neutral-800 60%, transparent) [554]
-    p.foregroundSubtlest = make(kNeutral800, 102);       // color-mix(neutral-800 40%, transparent) [555]
-    p.foregroundInverse = make(kZaiWhite);               // --color-foreground-inverse: #ffffff [556]
+  // 文本
+  p.foreground = make(kNeutral800);                    // --color-foreground: var(--color-neutral-800) = #262626 [553]
+  p.foregroundSubtle = make(kNeutral800, 153);         // color-mix(neutral-800 60%, transparent) [554]
+  p.foregroundSubtlest = make(kNeutral800, 102);       // color-mix(neutral-800 40%, transparent) [555]
+  p.foregroundInverse = make(kZaiWhite);               // --color-foreground-inverse: #ffffff [556]
 
-    // 品牌与交互
-    p.brand = make(kZaiInk2);                            // --color-brand: #000000 [467]
-    p.accent = make(kZaiBlueSurface);                    // --color-accent: #ebf4ff [476]
-    p.iconBlue = make(kZaiBlue);                         // --color-icon-blue: var(--color-terminal-bright-blue) = #0b7fff [510]
-    p.primary = make(kZaiInk2);                          // --color-primary: #000000 [545]
-    p.primaryForeground = make(kZaiWhite);               // --color-primary-foreground: #ffffff [546]
-    p.secondary = make(kZaiBorderGray);                  // --color-secondary: #e6e6e6 [547]
-    p.hover = make(kZaiInk, 13);                         // --color-hover: rgba(13,13,13,0.05) [481]
-    p.selected = make(kZaiInk, 13);                      // --color-selected: rgba(13,13,13,0.05) [482]
+  // 品牌与交互
+  p.brand = make(kZaiInk2);                            // --color-brand: #000000 [467]
+  p.accent = make(kZaiBlueSurface);                    // --color-accent: #ebf4ff [476]
+  p.iconBlue = make(
+                 kZaiBlue);                         // --color-icon-blue: var(--color-terminal-bright-blue) = #0b7fff [510]
+  p.primary = make(kZaiInk2);                          // --color-primary: #000000 [545]
+  p.primaryForeground = make(kZaiWhite);               // --color-primary-foreground: #ffffff [546]
+  p.secondary = make(kZaiBorderGray);                  // --color-secondary: #e6e6e6 [547]
+  p.hover = make(kZaiInk, 13);                         // --color-hover: rgba(13,13,13,0.05) [481]
+  p.selected = make(kZaiInk, 13);                      // --color-selected: rgba(13,13,13,0.05) [482]
 
-    // 语义反馈
-    p.success = make(kZaiGreen);                         // --color-success: #1e8a3e [557]
-    p.successForeground = make(kZaiWhite);               // --color-success-foreground: #ffffff [558]
-    p.warning = make(kZaiOrange);                        // --color-warning: #e07b00 [563]
-    p.warningForeground = make(kZaiWhite);               // --color-warning-foreground: #ffffff [565]
-    p.destructive = make(kZaiRed);                       // --color-destructive: #e03131 [561]
-    p.destructiveForeground = make(kZaiWhite);           // --color-destructive-foreground: #ffffff [562]
-    p.idleTask = make(kZaiViolet);                       // --color-idle-task: #9e77ed [559]
-    p.idleTaskSurface = make(kZaiVioletSurface);         // --color-idle-task-surface: #f5f3ff [560]
+  // 语义反馈
+  p.success = make(kZaiGreen);                         // --color-success: #1e8a3e [557]
+  p.successForeground = make(kZaiWhite);               // --color-success-foreground: #ffffff [558]
+  p.warning = make(kZaiOrange);                        // --color-warning: #e07b00 [563]
+  p.warningForeground = make(kZaiWhite);               // --color-warning-foreground: #ffffff [565]
+  p.destructive = make(kZaiRed);                       // --color-destructive: #e03131 [561]
+  p.destructiveForeground = make(kZaiWhite);           // --color-destructive-foreground: #ffffff [562]
+  p.idleTask = make(kZaiViolet);                       // --color-idle-task: #9e77ed [559]
+  p.idleTaskSurface = make(kZaiVioletSurface);         // --color-idle-task-surface: #f5f3ff [560]
 
-    // Diff
-    p.diffAdded = make(kZaiGreen);                       // --color-diff-added: #1e8a3e [566]
-    p.diffAddedForeground = make(kZaiWhite);             // --color-diff-added-foreground: #ffffff [567]
-    p.diffRemoved = make(kZaiRed);                       // --color-diff-removed: #e03131 [568]
-    p.diffRemovedForeground = make(kZaiWhite);           // --color-diff-removed-foreground: #ffffff [569]
+  // Diff
+  p.diffAdded = make(kZaiGreen);                       // --color-diff-added: #1e8a3e [566]
+  p.diffAddedForeground = make(kZaiWhite);             // --color-diff-added-foreground: #ffffff [567]
+  p.diffRemoved = make(kZaiRed);                       // --color-diff-removed: #e03131 [568]
+  p.diffRemovedForeground = make(kZaiWhite);           // --color-diff-removed-foreground: #ffffff [569]
 
-    // 语法高亮（浅色）。见 Theme.h 的说明：非 本实现 令牌，是编辑器风格取值。
-    p.syntaxKeyword = make("#a626a4");
-    p.syntaxString = make("#50a14f");
-    p.syntaxComment = make("#a0a1a7");
-    p.syntaxNumber = make("#986801");
-    p.syntaxType = make("#c18401");
-    p.syntaxFunction = make("#4078f2");
-    p.syntaxPreproc = make("#e45649");
+  // 语法高亮（浅色）。见 Theme.h 的说明：非 本实现 令牌，是编辑器风格取值。
+  p.syntaxKeyword = make("#a626a4");
+  p.syntaxString = make("#50a14f");
+  p.syntaxComment = make("#a0a1a7");
+  p.syntaxNumber = make("#986801");
+  p.syntaxType = make("#c18401");
+  p.syntaxFunction = make("#4078f2");
+  p.syntaxPreproc = make("#e45649");
 
-    // 浮层
-    p.toast = make(kZaiWhite);                           // --color-toast: #ffffff [578]
-    p.tooltip = make(kZaiSidebarLight);                  // --color-tooltip: #f0f0f0 [579]
-    p.tooltipForeground = make(kZaiInk);                 // --color-tooltip-foreground: #0d0d0d [580]
-    p.tag = make(kZaiBorderGray);                        // --color-tag: #e6e6e6 [583]
+  // 浮层
+  p.toast = make(kZaiWhite);                           // --color-toast: #ffffff [578]
+  p.tooltip = make(kZaiSidebarLight);                  // --color-tooltip: #f0f0f0 [579]
+  p.tooltipForeground = make(kZaiInk);                 // --color-tooltip-foreground: #0d0d0d [580]
+  p.tag = make(kZaiBorderGray);                        // --color-tag: #e6e6e6 [583]
 
-    // 等待交互（权限 / 提问 / 计划确认共用同一套绿色）
-    p.interactionConfirmationSurface = make(kZaiGreenSoft);    // #eaf7ee [551]
-    p.interactionConfirmationForeground = make(kZaiGreenDeep); // #166b32 [552]
+  // 等待交互（权限 / 提问 / 计划确认共用同一套绿色）
+  p.interactionConfirmationSurface = make(kZaiGreenSoft);    // #eaf7ee [551]
+  p.interactionConfirmationForeground = make(kZaiGreenDeep); // #166b32 [552]
 
-    p.isDark = false;
-    return p;
+  p.isDark = false;
+  return p;
 }
 
 /// Zai Dark 调色板。
-Palette zaiDark() {
-    Palette p;
+Palette zaiDark()
+{
+  Palette p;
 
-    // 结构表面
-    p.background = make(kZaiDarkBg);                     // --color-background: #161616
-    p.backgroundAlt = make(kZaiDarkCard, 153);           // color-mix(background-win-alt #2b2b2b 60%, transparent) [611]
-    p.header = make(kZaiDarkHeader);                     // --color-header: #202020 [628]
-    p.panel = make(kZaiDarkHeader);                      // --color-panel: #202020 [629]
-    p.sidebar = make(kZaiDarkBg);                        // --color-sidebar: #161616 [630]
-    p.surface = make(kZaiWhite, 13);                     // rgba(255,255,255,0.05) [631]
-    p.surfaceHover = make(kZaiWhite, 26);                // rgba(255,255,255,0.1) [632]
-    p.card = make(kZaiDarkCard);                         // --color-card: #2b2b2b [633]
-    p.cardSelected = make(kZaiDarkCard);                 // --color-card-selected: var(--color-input) = #2b2b2b [634 -> 640]
-    p.popover = make(kZaiDarkCard);                      // --color-popover: #2b2b2b [636]
-    p.popoverBorder = make(kZaiWhite, 26);               // --color-popover-border: var(--color-border) [639 -> 624]
-    p.menu = make(kZaiDarkCard);                         // --color-menu: #2b2b2b [688]
-    p.menuHover = make(kZaiDarkHover);                   // --color-menu-hover: #363636 [689]
+  // 结构表面
+  p.background = make(kZaiDarkBg);                     // --color-background: #161616
+  p.backgroundAlt = make(kZaiDarkCard, 153);           // color-mix(background-win-alt #2b2b2b 60%, transparent) [611]
+  p.header = make(kZaiDarkHeader);                     // --color-header: #202020 [628]
+  p.panel = make(kZaiDarkHeader);                      // --color-panel: #202020 [629]
+  p.sidebar = make(kZaiDarkBg);                        // --color-sidebar: #161616 [630]
+  p.surface = make(kZaiWhite, 13);                     // rgba(255,255,255,0.05) [631]
+  p.surfaceHover = make(kZaiWhite, 26);                // rgba(255,255,255,0.1) [632]
+  p.card = make(kZaiDarkCard);                         // --color-card: #2b2b2b [633]
+  p.cardSelected = make(kZaiDarkCard);                 // --color-card-selected: var(--color-input) = #2b2b2b [634 -> 640]
+  p.popover = make(kZaiDarkCard);                      // --color-popover: #2b2b2b [636]
+  p.popoverBorder = make(kZaiWhite, 26);               // --color-popover-border: var(--color-border) [639 -> 624]
+  p.menu = make(kZaiDarkCard);                         // --color-menu: #2b2b2b [688]
+  p.menuHover = make(kZaiDarkHover);                   // --color-menu-hover: #363636 [689]
 
-    // 输入
-    p.input = make(kZaiDarkCard);                        // --color-input: #2b2b2b [640]
-    p.inputFocused = make(kZaiDarkCard);                 // --color-input-focused: var(--color-input) [641]
-    p.inputBorder = make(kZaiWhite, 26);                 // --color-input-border: var(--color-border) [642]
-    p.inputBorderHover = make(kZaiWhite, 38);            // --color-input-border-hover: rgba(255,255,255,0.15) [643 -> 625]
-    p.inputBorderFocused = make(kZaiWhite, 38);          // --color-input-border-focused: var(--color-border-hover) [644]
+  // 输入
+  p.input = make(kZaiDarkCard);                        // --color-input: #2b2b2b [640]
+  p.inputFocused = make(kZaiDarkCard);                 // --color-input-focused: var(--color-input) [641]
+  p.inputBorder = make(kZaiWhite, 26);                 // --color-input-border: var(--color-border) [642]
+  p.inputBorderHover = make(kZaiWhite, 38);            // --color-input-border-hover: rgba(255,255,255,0.15) [643 -> 625]
+  p.inputBorderFocused = make(kZaiWhite, 38);          // --color-input-border-focused: var(--color-border-hover) [644]
 
-    // 边框
-    p.border = make(kZaiWhite, 26);                      // --color-border: rgba(255,255,255,0.1) [624]
-    p.borderHover = make(kZaiWhite, 38);                 // --color-border-hover: rgba(255,255,255,0.15) [625]
-    p.cardBorder = make(kZaiWhite, 26);                  // --color-card-border: var(--color-border) [635]
+  // 边框
+  p.border = make(kZaiWhite, 26);                      // --color-border: rgba(255,255,255,0.1) [624]
+  p.borderHover = make(kZaiWhite, 38);                 // --color-border-hover: rgba(255,255,255,0.15) [625]
+  p.cardBorder = make(kZaiWhite, 26);                  // --color-card-border: var(--color-border) [635]
 
-    // 文本
-    p.foreground = make(kNeutral300);                    // --color-foreground: var(--color-neutral-300) = #d4d4d4 [698]
-    p.foregroundSubtle = make(kNeutral300, 153);         // color-mix(neutral-300 60%, transparent) [699]
-    p.foregroundSubtlest = make(kNeutral300, 77);        // color-mix(neutral-300 30%, transparent) [700]
-    p.foregroundInverse = make(kZaiInk2);                // --color-foreground-inverse: #000000 [701]
+  // 文本
+  p.foreground = make(kNeutral300);                    // --color-foreground: var(--color-neutral-300) = #d4d4d4 [698]
+  p.foregroundSubtle = make(kNeutral300, 153);         // color-mix(neutral-300 60%, transparent) [699]
+  p.foregroundSubtlest = make(kNeutral300, 77);        // color-mix(neutral-300 30%, transparent) [700]
+  p.foregroundInverse = make(kZaiInk2);                // --color-foreground-inverse: #000000 [701]
 
-    // 品牌与交互
-    p.brand = make(kZaiWhite);                           // --color-brand: #ffffff [612]
-    p.accent = make(kZaiSkyDeep);                        // --color-accent: #001d3d [621]
-    p.iconBlue = make(kZaiDarkBlue);                     // --color-icon-blue: var(--color-terminal-bright-blue) = #80beff [663]
-    p.primary = make(kZaiWhite);                         // --color-primary: #ffffff [690]
-    p.primaryForeground = make(kZaiInk2);                // --color-primary-foreground: #000000 [691]
-    p.secondary = make(kZaiDarkHover);                   // --color-secondary: #363636 [692]
-    p.hover = make(kZaiWhite, 13);                       // --color-hover: rgba(255,255,255,0.05) [626]
-    p.selected = make(kZaiWhite, 26);                    // --color-selected: rgba(255,255,255,0.1) [627]
+  // 品牌与交互
+  p.brand = make(kZaiWhite);                           // --color-brand: #ffffff [612]
+  p.accent = make(kZaiSkyDeep);                        // --color-accent: #001d3d [621]
+  p.iconBlue = make(
+                 kZaiDarkBlue);                     // --color-icon-blue: var(--color-terminal-bright-blue) = #80beff [663]
+  p.primary = make(kZaiWhite);                         // --color-primary: #ffffff [690]
+  p.primaryForeground = make(kZaiInk2);                // --color-primary-foreground: #000000 [691]
+  p.secondary = make(kZaiDarkHover);                   // --color-secondary: #363636 [692]
+  p.hover = make(kZaiWhite, 13);                       // --color-hover: rgba(255,255,255,0.05) [626]
+  p.selected = make(kZaiWhite, 26);                    // --color-selected: rgba(255,255,255,0.1) [627]
 
-    // 语义反馈
-    p.success = make(kZaiDarkGreen);                     // --color-success: #46bf72 [702]
-    p.successForeground = make(kZaiInk2);                // --color-success-foreground: #000000 [703]
-    p.warning = make(kZaiDarkOrange);                    // --color-warning: #ff8a30 [709]
-    p.warningForeground = make(kZaiInk2);                // --color-warning-foreground: #000000 [711]
-    p.destructive = make(kZaiDarkRed);                   // --color-destructive: #ff5c5c [706]
-    // 明确修过这里：zai-dark 的 destructive-foreground 固定为白字，不用 inverse 黑
-    // 。
-    p.destructiveForeground = make(kZaiWhite);           // #ffffff [708]
-    p.idleTask = make(kZaiDarkViolet);                   // --color-idle-task: #7b5ce5 [704]
-    p.idleTaskSurface = make(kZaiDarkVioletSurface);     // #160d38 [705]
+  // 语义反馈
+  p.success = make(kZaiDarkGreen);                     // --color-success: #46bf72 [702]
+  p.successForeground = make(kZaiInk2);                // --color-success-foreground: #000000 [703]
+  p.warning = make(kZaiDarkOrange);                    // --color-warning: #ff8a30 [709]
+  p.warningForeground = make(kZaiInk2);                // --color-warning-foreground: #000000 [711]
+  p.destructive = make(kZaiDarkRed);                   // --color-destructive: #ff5c5c [706]
+  // 明确修过这里：zai-dark 的 destructive-foreground 固定为白字，不用 inverse 黑
+  // 。
+  p.destructiveForeground = make(kZaiWhite);           // #ffffff [708]
+  p.idleTask = make(kZaiDarkViolet);                   // --color-idle-task: #7b5ce5 [704]
+  p.idleTaskSurface = make(kZaiDarkVioletSurface);     // #160d38 [705]
 
-    // Diff
-    p.diffAdded = make(kZaiDarkGreen);                   // --color-diff-added: #46bf72 [712]
-    p.diffAddedForeground = make(kZaiInk2);              // #000000 [713]
-    p.diffRemoved = make(kZaiDarkRed);                   // --color-diff-removed: #ff5c5c [714]
-    p.diffRemovedForeground = make(kZaiInk2);            // #000000 [715]
+  // Diff
+  p.diffAdded = make(kZaiDarkGreen);                   // --color-diff-added: #46bf72 [712]
+  p.diffAddedForeground = make(kZaiInk2);              // #000000 [713]
+  p.diffRemoved = make(kZaiDarkRed);                   // --color-diff-removed: #ff5c5c [714]
+  p.diffRemovedForeground = make(kZaiInk2);            // #000000 [715]
 
-    // 语法高亮（深色）。底色是 #161616/#2b2b2b，所以整体提亮一档，
-    // 保证在深背景上的对比度。
-    p.syntaxKeyword = make("#c678dd");
-    p.syntaxString = make("#98c379");
-    p.syntaxComment = make("#7f848e");
-    p.syntaxNumber = make("#d19a66");
-    p.syntaxType = make("#e5c07b");
-    p.syntaxFunction = make("#61afef");
-    p.syntaxPreproc = make("#e06c75");
+  // 语法高亮（深色）。底色是 #161616/#2b2b2b，所以整体提亮一档，
+  // 保证在深背景上的对比度。
+  p.syntaxKeyword = make("#c678dd");
+  p.syntaxString = make("#98c379");
+  p.syntaxComment = make("#7f848e");
+  p.syntaxNumber = make("#d19a66");
+  p.syntaxType = make("#e5c07b");
+  p.syntaxFunction = make("#61afef");
+  p.syntaxPreproc = make("#e06c75");
 
-    // 浮层
-    p.toast = make(kZaiDarkCard);                        // --color-toast: #2b2b2b [724]
-    p.tooltip = make(kZaiDarkCard);                      // --color-tooltip: #2b2b2b [725]
-    p.tooltipForeground = make(kZaiDarkFg);              // --color-tooltip-foreground: #f8f8f8 [726]
-    p.tag = make(kZaiDarkHover);                         // --color-tag: #363636 [729]
+  // 浮层
+  p.toast = make(kZaiDarkCard);                        // --color-toast: #2b2b2b [724]
+  p.tooltip = make(kZaiDarkCard);                      // --color-tooltip: #2b2b2b [725]
+  p.tooltipForeground = make(kZaiDarkFg);              // --color-tooltip-foreground: #f8f8f8 [726]
+  p.tag = make(kZaiDarkHover);                         // --color-tag: #363636 [729]
 
-    // 等待交互
-    p.interactionConfirmationSurface = make(kZaiDarkGreen, 41);   // rgba(70,191,114,0.16) [696]
-    p.interactionConfirmationForeground = make(kZaiDarkGreenText); // #87d9a4 [697]
+  // 等待交互
+  p.interactionConfirmationSurface = make(kZaiDarkGreen, 41);   // rgba(70,191,114,0.16) [696]
+  p.interactionConfirmationForeground = make(kZaiDarkGreenText); // #87d9a4 [697]
 
-    p.isDark = true;
-    return p;
+  p.isDark = true;
+  return p;
 }
 
 }  // namespace
 
-namespace {
+namespace
+{
 
 /// 系统当前是否使用深色配色。
 ///
 /// Qt 6.5 起有 `QStyleHints::colorScheme()`；在那之前没有这个 API，
 /// 只能用调色板亮度近似判断（不如前者可靠，但能让项目在 Qt 6.4 的发行版上
 /// 也能编出来——Ubuntu 24.04 / Debian 12 的 apt 里就是 6.4）。
-bool systemPrefersDark() {
+bool systemPrefersDark()
+{
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    if (auto *hints = QGuiApplication::styleHints()) {
-        return hints->colorScheme() == Qt::ColorScheme::Dark;
-    }
-    return false;
+  if(auto * hints = QGuiApplication::styleHints()) {
+    return hints->colorScheme() == Qt::ColorScheme::Dark;
+  }
+  return false;
 #else
-    // 回退：窗口底色偏暗即认为是深色主题。
-    return QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
+  // 回退：窗口底色偏暗即认为是深色主题。
+  return QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
 #endif
 }
 
@@ -383,212 +401,226 @@ bool systemPrefersDark() {
 
 // ── Theme 单例 ──────────────────────────────────────────────────────────────
 
-Theme::Theme() {
-    // 构造时解析一次系统配色。QStyleHints 只在 GUI 线程可用，单例首次使用时
-    // QApplication 必然已存在（风格表/字体库同理），这里不需要额外保护。
-    systemDark_ = systemPrefersDark();
+Theme::Theme()
+{
+  // 构造时解析一次系统配色。QStyleHints 只在 GUI 线程可用，单例首次使用时
+  // QApplication 必然已存在（风格表/字体库同理），这里不需要额外保护。
+  systemDark_ = systemPrefersDark();
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    if (auto *hints = QGuiApplication::styleHints()) {
-        // colorSchemeChanged 只在 mode_ == System 时影响调色板；refreshFromSystem 内部会判断。
-        // 用 AutoConnection：若 styleHints 将来在别的线程发信号，会排队回本对象线程执行。
-        connect(hints, &QStyleHints::colorSchemeChanged, this,
-                [this](Qt::ColorScheme) { refreshFromSystem(); });
-    }
+  if(auto * hints = QGuiApplication::styleHints()) {
+    // colorSchemeChanged 只在 mode_ == System 时影响调色板；refreshFromSystem 内部会判断。
+    // 用 AutoConnection：若 styleHints 将来在别的线程发信号，会排队回本对象线程执行。
+    connect(hints, &QStyleHints::colorSchemeChanged, this,
+    [this](Qt::ColorScheme) {
+      refreshFromSystem();
+    });
+  }
 #endif
-    resolvePalette();
+  resolvePalette();
 }
 
-Theme &Theme::instance() {
-    // 函数内静态：C++11 起保证线程安全的一次性初始化。
-    static Theme theme;
-    return theme;
+Theme & Theme::instance()
+{
+  // 函数内静态：C++11 起保证线程安全的一次性初始化。
+  static Theme theme;
+  return theme;
 }
 
-void Theme::resolvePalette() {
-    // System 走系统明暗；Light/Dark 是显式选择，不理会系统。
-    const bool dark = mode_ == ThemeMode::Dark || (mode_ == ThemeMode::System && systemDark_);
-    palette_ = dark ? zaiDark() : zaiLight();
+void Theme::resolvePalette()
+{
+  // System 走系统明暗；Light/Dark 是显式选择，不理会系统。
+  const bool dark = mode_ == ThemeMode::Dark || (mode_ == ThemeMode::System && systemDark_);
+  palette_ = dark ? zaiDark() : zaiLight();
 }
 
-void Theme::setMode(ThemeMode mode) {
-    if (mode_ == mode) {
-        return;
-    }
-    mode_ = mode;
-    resolvePalette();
+void Theme::setMode(ThemeMode mode)
+{
+  if(mode_ == mode) {
+    return;
+  }
+  mode_ = mode;
+  resolvePalette();
+  emit changed();
+}
+
+void Theme::refreshFromSystem()
+{
+  if(mode_ != ThemeMode::System) {
+    // 用户显式选了 Light/Dark：系统配色变化不影响任何令牌，不该发 changed()。
+    return;
+  }
+  systemDark_ = systemPrefersDark();
+  const bool wasDark = palette_.isDark;
+  resolvePalette();
+  if(wasDark != palette_.isDark) {
     emit changed();
+  }
 }
 
-void Theme::refreshFromSystem() {
-    if (mode_ != ThemeMode::System) {
-        // 用户显式选了 Light/Dark：系统配色变化不影响任何令牌，不该发 changed()。
-        return;
-    }
-    systemDark_ = systemPrefersDark();
-    const bool wasDark = palette_.isDark;
-    resolvePalette();
-    if (wasDark != palette_.isDark) {
-        emit changed();
-    }
+void Theme::setUiFontSize(int pixels)
+{
+  const int clamped = std::clamp(pixels, 10, 24);
+  if(clamped == uiFontSize_) {
+    return;
+  }
+  uiFontSize_ = clamped;
+  emit changed();
 }
 
-void Theme::setUiFontSize(int pixels) {
-    const int clamped = std::clamp(pixels, 10, 24);
-    if (clamped == uiFontSize_) {
-        return;
-    }
-    uiFontSize_ = clamped;
-    emit changed();
+void Theme::setCodeFontSize(int pixels)
+{
+  const int clamped = std::clamp(pixels, 8, 32);
+  if(clamped == codeFontSize_) {
+    return;
+  }
+  codeFontSize_ = clamped;
+  emit changed();
 }
 
-void Theme::setCodeFontSize(int pixels) {
-    const int clamped = std::clamp(pixels, 8, 32);
-    if (clamped == codeFontSize_) {
-        return;
-    }
-    codeFontSize_ = clamped;
-    emit changed();
+int Theme::fontPixelSize(FontRole role) const
+{
+  // 阶梯公式：由 base 字号按固定比例推出各级。
+  switch(role) {
+    case FontRole::UiXl:
+      return uiFontSize_ + 4;
+    case FontRole::UiLg:
+      return uiFontSize_ + 2;
+    case FontRole::UiBase:
+      return uiFontSize_;
+    case FontRole::UiCaption:
+      return uiFontSize_ - 1;
+    case FontRole::UiSm:
+      return uiFontSize_ - 2;
+    case FontRole::UiXs:
+      return uiFontSize_ - 4;
+    case FontRole::Mono:
+      return codeFontSize_;
+    case FontRole::MonoSm:
+      return codeFontSize_ - 2;
+  }
+  return uiFontSize_;
 }
 
-int Theme::fontPixelSize(FontRole role) const {
-    // 阶梯公式：由 base 字号按固定比例推出各级。
-    switch (role) {
-        case FontRole::UiXl:
-            return uiFontSize_ + 4;
-        case FontRole::UiLg:
-            return uiFontSize_ + 2;
-        case FontRole::UiBase:
-            return uiFontSize_;
-        case FontRole::UiCaption:
-            return uiFontSize_ - 1;
-        case FontRole::UiSm:
-            return uiFontSize_ - 2;
-        case FontRole::UiXs:
-            return uiFontSize_ - 4;
-        case FontRole::Mono:
-            return codeFontSize_;
-        case FontRole::MonoSm:
-            return codeFontSize_ - 2;
-    }
-    return uiFontSize_;
+QFont Theme::font(FontRole role) const
+{
+  const bool monospace = role == FontRole::Mono || role == FontRole::MonoSm;
+  QFont f{monospace ? monospaceFamily() : sansFamily()};
+  f.setPixelSize(fontPixelSize(role));
+  // 界面字号变化不应该改变字重层级；字重由控件自己按语义设。
+  f.setStyleStrategy(QFont::PreferAntialias);
+  return f;
 }
 
-QFont Theme::font(FontRole role) const {
-    const bool monospace = role == FontRole::Mono || role == FontRole::MonoSm;
-    QFont f{monospace ? monospaceFamily() : sansFamily()};
-    f.setPixelSize(fontPixelSize(role));
-    // 界面字号变化不应该改变字重层级；字重由控件自己按语义设。
-    f.setStyleStrategy(QFont::PreferAntialias);
-    return f;
+QString Theme::css(const QColor & color)
+{
+  if(!color.isValid()) {
+    return QStringLiteral("transparent");
+  }
+  if(color.alpha() == 255) {
+    return color.name(QColor::HexRgb);  // #rrggbb
+  }
+  // 半透明一律走 rgba()：Qt 的 QCssParser 支持 rgba(r,g,b,a)，且 a 是 0-255 整数。
+  return QStringLiteral("rgba(%1,%2,%3,%4)")
+         .arg(color.red())
+         .arg(color.green())
+         .arg(color.blue())
+         .arg(color.alpha());
 }
 
-QString Theme::css(const QColor &color) {
-    if (!color.isValid()) {
-        return QStringLiteral("transparent");
-    }
-    if (color.alpha() == 255) {
-        return color.name(QColor::HexRgb);  // #rrggbb
-    }
-    // 半透明一律走 rgba()：Qt 的 QCssParser 支持 rgba(r,g,b,a)，且 a 是 0-255 整数。
-    return QStringLiteral("rgba(%1,%2,%3,%4)")
-        .arg(color.red())
-        .arg(color.green())
-        .arg(color.blue())
-        .arg(color.alpha());
-}
-
-QString Theme::css(const QColor &color, double alpha) {
-    if (!color.isValid()) {
-        return QStringLiteral("transparent");
-    }
-    // alpha 取值 0.0-1.0，钳位后换算成 0-255 整数交给 QSS。
-    const double clamped = std::clamp(alpha, 0.0, 1.0);
-    QColor copy = color;
-    copy.setAlpha(static_cast<int>(clamped * 255.0 + 0.5));
-    return css(copy);
+QString Theme::css(const QColor & color, double alpha)
+{
+  if(!color.isValid()) {
+    return QStringLiteral("transparent");
+  }
+  // alpha 取值 0.0-1.0，钳位后换算成 0-255 整数交给 QSS。
+  const double clamped = std::clamp(alpha, 0.0, 1.0);
+  QColor copy = color;
+  copy.setAlpha(static_cast<int>(clamped * 255.0 + 0.5));
+  return css(copy);
 }
 
 // ── 全局样式表 ──────────────────────────────────────────────────────────────
 
-QString Theme::styleSheet() const {
-    const Palette &p = palette_;
+QString Theme::styleSheet() const
+{
+  const Palette & p = palette_;
 
-    // 局部别名，让下面的模板只出现令牌名，避免任何硬编码颜色。
-    const QString background = css(p.background);
-    const QString backgroundAlt = css(p.backgroundAlt);
-    const QString header = css(p.header);
-    const QString panel = css(p.panel);
-    const QString sidebar = css(p.sidebar);
-    const QString surface = css(p.surface);
-    const QString surfaceHover = css(p.surfaceHover);
-    const QString card = css(p.card);
-    const QString cardSelected = css(p.cardSelected);
-    const QString popover = css(p.popover);
-    const QString popoverBorder = css(p.popoverBorder);
-    const QString menu = css(p.menu);
-    const QString menuHover = css(p.menuHover);
+  // 局部别名，让下面的模板只出现令牌名，避免任何硬编码颜色。
+  const QString background = css(p.background);
+  const QString backgroundAlt = css(p.backgroundAlt);
+  const QString header = css(p.header);
+  const QString panel = css(p.panel);
+  const QString sidebar = css(p.sidebar);
+  const QString surface = css(p.surface);
+  const QString surfaceHover = css(p.surfaceHover);
+  const QString card = css(p.card);
+  const QString cardSelected = css(p.cardSelected);
+  const QString popover = css(p.popover);
+  const QString popoverBorder = css(p.popoverBorder);
+  const QString menu = css(p.menu);
+  const QString menuHover = css(p.menuHover);
 
-    const QString input = css(p.input);
-    const QString inputFocused = css(p.inputFocused);
-    const QString inputBorder = css(p.inputBorder);
-    const QString inputBorderHover = css(p.inputBorderHover);
-    const QString inputBorderFocused = css(p.inputBorderFocused);
+  const QString input = css(p.input);
+  const QString inputFocused = css(p.inputFocused);
+  const QString inputBorder = css(p.inputBorder);
+  const QString inputBorderHover = css(p.inputBorderHover);
+  const QString inputBorderFocused = css(p.inputBorderFocused);
 
-    const QString border = css(p.border);
-    const QString borderHover = css(p.borderHover);
-    const QString cardBorder = css(p.cardBorder);
+  const QString border = css(p.border);
+  const QString borderHover = css(p.borderHover);
+  const QString cardBorder = css(p.cardBorder);
 
-    const QString foreground = css(p.foreground);
-    const QString foregroundSubtle = css(p.foregroundSubtle);
-    const QString foregroundSubtlest = css(p.foregroundSubtlest);
-    const QString foregroundInverse = css(p.foregroundInverse);
+  const QString foreground = css(p.foreground);
+  const QString foregroundSubtle = css(p.foregroundSubtle);
+  const QString foregroundSubtlest = css(p.foregroundSubtlest);
+  const QString foregroundInverse = css(p.foregroundInverse);
 
-    const QString brand = css(p.brand);
-    const QString accent = css(p.accent);
-    const QString primary = css(p.primary);
-    const QString primaryForeground = css(p.primaryForeground);
-    const QString secondary = css(p.secondary);
-    const QString hover = css(p.hover);
-    const QString selected = css(p.selected);
+  const QString brand = css(p.brand);
+  const QString accent = css(p.accent);
+  const QString primary = css(p.primary);
+  const QString primaryForeground = css(p.primaryForeground);
+  const QString secondary = css(p.secondary);
+  const QString hover = css(p.hover);
+  const QString selected = css(p.selected);
 
-    const QString success = css(p.success);
-    const QString successForeground = css(p.successForeground);
-    const QString warning = css(p.warning);
-    const QString warningForeground = css(p.warningForeground);
-    const QString destructive = css(p.destructive);
-    const QString destructiveForeground = css(p.destructiveForeground);
-    const QString idleTask = css(p.idleTask);
+  const QString success = css(p.success);
+  const QString successForeground = css(p.successForeground);
+  const QString warning = css(p.warning);
+  const QString warningForeground = css(p.warningForeground);
+  const QString destructive = css(p.destructive);
+  const QString destructiveForeground = css(p.destructiveForeground);
+  const QString idleTask = css(p.idleTask);
 
-    const QString diffAdded = css(p.diffAdded);
-    const QString diffRemoved = css(p.diffRemoved);
+  const QString diffAdded = css(p.diffAdded);
+  const QString diffRemoved = css(p.diffRemoved);
 
-    const QString tooltip = css(p.tooltip);
-    const QString tooltipForeground = css(p.tooltipForeground);
-    const QString tag = css(p.tag);
+  const QString tooltip = css(p.tooltip);
+  const QString tooltipForeground = css(p.tooltipForeground);
+  const QString tag = css(p.tag);
 
-    const QString interactionConfirmationSurface = css(p.interactionConfirmationSurface);
-    const QString interactionConfirmationForeground = css(p.interactionConfirmationForeground);
+  const QString interactionConfirmationSurface = css(p.interactionConfirmationSurface);
+  const QString interactionConfirmationForeground = css(p.interactionConfirmationForeground);
 
-    // 分隔线把手：4px 透明命中区，hover 时显示
-    // 2px foreground-subtlest/50 的线。
-    const QString splitterHover = css(p.foregroundSubtlest, 0.5);
+  // 分隔线把手：4px 透明命中区，hover 时显示
+  // 2px foreground-subtlest/50 的线。
+  const QString splitterHover = css(p.foregroundSubtlest, 0.5);
 
-    const QString uiFamily = sansFamily();
-    const QString monoFamily = monospaceFamily();
-    const QString uiBase = QString::number(fontPixelSize(FontRole::UiBase));
-    const QString uiXl = QString::number(fontPixelSize(FontRole::UiXl));
-    const QString uiLg = QString::number(fontPixelSize(FontRole::UiLg));
-    const QString uiCaption = QString::number(fontPixelSize(FontRole::UiCaption));
-    const QString uiSm = QString::number(fontPixelSize(FontRole::UiSm));
-    const QString uiXs = QString::number(fontPixelSize(FontRole::UiXs));
+  const QString uiFamily = sansFamily();
+  const QString monoFamily = monospaceFamily();
+  const QString uiBase = QString::number(fontPixelSize(FontRole::UiBase));
+  const QString uiXl = QString::number(fontPixelSize(FontRole::UiXl));
+  const QString uiLg = QString::number(fontPixelSize(FontRole::UiLg));
+  const QString uiCaption = QString::number(fontPixelSize(FontRole::UiCaption));
+  const QString uiSm = QString::number(fontPixelSize(FontRole::UiSm));
+  const QString uiXs = QString::number(fontPixelSize(FontRole::UiXs));
 
-    // 圆角层级：一级容器 rounded-xl=12px，嵌套降级 lg=10 / md=8 / sm=6；
-    // 菜单与选项浮层 8px（rounded-lg 壳 + rounded-md 选项）；对话框语义用 16px。
-    // 间距照 4px 基准：紧凑 8px、标准 12px / 16px。
-    //
-    // 注意：下面的模板里没有 QSS 注释（/* */）。Qt 的样式表解析器对注释支持不稳定，
-    // 且注释会干扰「样式表不得残留占位符」的自检，因此说明性注释全部留在 C++ 这一层。
-    static const char *kTemplate = R"QSS(
+  // 圆角层级：一级容器 rounded-xl=12px，嵌套降级 lg=10 / md=8 / sm=6；
+  // 菜单与选项浮层 8px（rounded-lg 壳 + rounded-md 选项）；对话框语义用 16px。
+  // 间距照 4px 基准：紧凑 8px、标准 12px / 16px。
+  //
+  // 注意：下面的模板里没有 QSS 注释（/* */）。Qt 的样式表解析器对注释支持不稳定，
+  // 且注释会干扰「样式表不得残留占位符」的自检，因此说明性注释全部留在 C++ 这一层。
+  static const char * kTemplate = R"QSS(
 QWidget {
     background: transparent;
     color: %FOREGROUND%;
@@ -1269,80 +1301,80 @@ QSizeGrip {
 }
 )QSS";
 
-    // 单次顺序替换，避免链式 replace 产生二次替换（例如某令牌值里出现 `%` 之外的标记）。
-    QString sheet = QString::fromUtf8(kTemplate);
-    const struct {
-        const char *token;
-        const QString &value;
-    } replacements[] = {
-        {"%BACKGROUND%", background},
-        {"%BACKGROUND_ALT%", backgroundAlt},
-        {"%HEADER%", header},
-        {"%PANEL%", panel},
-        {"%SIDEBAR%", sidebar},
-        {"%SURFACE%", surface},
-        {"%SURFACE_HOVER%", surfaceHover},
-        {"%CARD%", card},
-        {"%CARD_SELECTED%", cardSelected},
-        {"%POPOVER%", popover},
-        {"%POPOVER_BORDER%", popoverBorder},
-        {"%MENU%", menu},
-        {"%MENU_HOVER%", menuHover},
-        {"%INPUT%", input},
-        {"%INPUT_FOCUSED%", inputFocused},
-        {"%INPUT_BORDER%", inputBorder},
-        {"%INPUT_BORDER_HOVER%", inputBorderHover},
-        {"%INPUT_BORDER_FOCUSED%", inputBorderFocused},
-        {"%BORDER%", border},
-        {"%BORDER_HOVER%", borderHover},
-        {"%CARD_BORDER%", cardBorder},
-        {"%FOREGROUND%", foreground},
-        {"%FOREGROUND_SUBTLE%", foregroundSubtle},
-        {"%FOREGROUND_SUBTLEST%", foregroundSubtlest},
-        {"%FOREGROUND_INVERSE%", foregroundInverse},
-        {"%BRAND%", brand},
-        {"%ACCENT%", accent},
-        {"%PRIMARY%", primary},
-        {"%PRIMARY_FOREGROUND%", primaryForeground},
-        {"%SECONDARY%", secondary},
-        {"%HOVER%", hover},
-        {"%SELECTED%", selected},
-        {"%SUCCESS%", success},
-        {"%SUCCESS_FOREGROUND%", successForeground},
-        {"%WARNING%", warning},
-        {"%WARNING_FOREGROUND%", warningForeground},
-        {"%DESTRUCTIVE%", destructive},
-        {"%DESTRUCTIVE_FOREGROUND%", destructiveForeground},
-        {"%IDLE_TASK%", idleTask},
-        {"%DIFF_ADDED%", diffAdded},
-        {"%DIFF_REMOVED%", diffRemoved},
-        {"%SYNTAX_KEYWORD%", css(p.syntaxKeyword)},
-        {"%SYNTAX_STRING%", css(p.syntaxString)},
-        {"%SYNTAX_COMMENT%", css(p.syntaxComment)},
-        {"%SYNTAX_NUMBER%", css(p.syntaxNumber)},
-        {"%SYNTAX_TYPE%", css(p.syntaxType)},
-        {"%SYNTAX_FUNCTION%", css(p.syntaxFunction)},
-        {"%SYNTAX_PREPROC%", css(p.syntaxPreproc)},
-        {"%TOOLTIP%", tooltip},
-        {"%TOOLTIP_FOREGROUND%", tooltipForeground},
-        {"%TOAST%", css(p.toast)},
-        {"%TAG%", tag},
-        {"%INTERACTION_CONFIRMATION_SURFACE%", interactionConfirmationSurface},
-        {"%INTERACTION_CONFIRMATION_FOREGROUND%", interactionConfirmationForeground},
-        {"%SPLITTER_HOVER%", splitterHover},
-        {"%UI_FAMILY%", uiFamily},
-        {"%MONO_FAMILY%", monoFamily},
-        {"%UI_XL%", uiXl},
-        {"%UI_LG%", uiLg},
-        {"%UI_BASE%", uiBase},
-        {"%UI_CAPTION%", uiCaption},
-        {"%UI_SM%", uiSm},
-        {"%UI_XS%", uiXs},
-    };
-    for (const auto &item : replacements) {
-        sheet.replace(QLatin1String(item.token), item.value);
-    }
-    return sheet;
+  // 单次顺序替换，避免链式 replace 产生二次替换（例如某令牌值里出现 `%` 之外的标记）。
+  QString sheet = QString::fromUtf8(kTemplate);
+  const struct {
+    const char *token;
+    const QString &value;
+  } replacements[] = {
+                       {"%BACKGROUND%", background},
+                       {"%BACKGROUND_ALT%", backgroundAlt},
+                       {"%HEADER%", header},
+                       {"%PANEL%", panel},
+                       {"%SIDEBAR%", sidebar},
+                       {"%SURFACE%", surface},
+                       {"%SURFACE_HOVER%", surfaceHover},
+                       {"%CARD%", card},
+                       {"%CARD_SELECTED%", cardSelected},
+                       {"%POPOVER%", popover},
+                       {"%POPOVER_BORDER%", popoverBorder},
+                       {"%MENU%", menu},
+                       {"%MENU_HOVER%", menuHover},
+                       {"%INPUT%", input},
+                       {"%INPUT_FOCUSED%", inputFocused},
+                       {"%INPUT_BORDER%", inputBorder},
+                       {"%INPUT_BORDER_HOVER%", inputBorderHover},
+                       {"%INPUT_BORDER_FOCUSED%", inputBorderFocused},
+                       {"%BORDER%", border},
+                       {"%BORDER_HOVER%", borderHover},
+                       {"%CARD_BORDER%", cardBorder},
+                       {"%FOREGROUND%", foreground},
+                       {"%FOREGROUND_SUBTLE%", foregroundSubtle},
+                       {"%FOREGROUND_SUBTLEST%", foregroundSubtlest},
+                       {"%FOREGROUND_INVERSE%", foregroundInverse},
+                       {"%BRAND%", brand},
+                       {"%ACCENT%", accent},
+                       {"%PRIMARY%", primary},
+                       {"%PRIMARY_FOREGROUND%", primaryForeground},
+                       {"%SECONDARY%", secondary},
+                       {"%HOVER%", hover},
+                       {"%SELECTED%", selected},
+                       {"%SUCCESS%", success},
+                       {"%SUCCESS_FOREGROUND%", successForeground},
+                       {"%WARNING%", warning},
+                       {"%WARNING_FOREGROUND%", warningForeground},
+                       {"%DESTRUCTIVE%", destructive},
+                       {"%DESTRUCTIVE_FOREGROUND%", destructiveForeground},
+                       {"%IDLE_TASK%", idleTask},
+                       {"%DIFF_ADDED%", diffAdded},
+                       {"%DIFF_REMOVED%", diffRemoved},
+                       {"%SYNTAX_KEYWORD%", css(p.syntaxKeyword)},
+                       {"%SYNTAX_STRING%", css(p.syntaxString)},
+                       {"%SYNTAX_COMMENT%", css(p.syntaxComment)},
+                       {"%SYNTAX_NUMBER%", css(p.syntaxNumber)},
+                       {"%SYNTAX_TYPE%", css(p.syntaxType)},
+                       {"%SYNTAX_FUNCTION%", css(p.syntaxFunction)},
+                       {"%SYNTAX_PREPROC%", css(p.syntaxPreproc)},
+                       {"%TOOLTIP%", tooltip},
+                       {"%TOOLTIP_FOREGROUND%", tooltipForeground},
+                       {"%TOAST%", css(p.toast)},
+                       {"%TAG%", tag},
+                       {"%INTERACTION_CONFIRMATION_SURFACE%", interactionConfirmationSurface},
+                       {"%INTERACTION_CONFIRMATION_FOREGROUND%", interactionConfirmationForeground},
+                       {"%SPLITTER_HOVER%", splitterHover},
+                       {"%UI_FAMILY%", uiFamily},
+                       {"%MONO_FAMILY%", monoFamily},
+                       {"%UI_XL%", uiXl},
+                       {"%UI_LG%", uiLg},
+                       {"%UI_BASE%", uiBase},
+                       {"%UI_CAPTION%", uiCaption},
+                       {"%UI_SM%", uiSm},
+                       {"%UI_XS%", uiXs},
+                     };
+  for (const auto &item : replacements) {
+    sheet.replace(QLatin1String(item.token), item.value);
+  }
+  return sheet;
 }
 
 }  // namespace lycode::ui

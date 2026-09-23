@@ -33,34 +33,39 @@ class QTabWidget;
 class QVBoxLayout;
 class QWidget;
 
-namespace lycode::ui {
+namespace lycode::ui
+{
 
-class SettingsDialog : public QDialog {
+class SettingsDialog : public QDialog
+{
     Q_OBJECT
 
-public:
-    explicit SettingsDialog(const AppSettings &settings, QWidget *parent = nullptr);
+  public:
+    explicit SettingsDialog(const AppSettings & settings, QWidget * parent = nullptr);
     ~SettingsDialog() override;
 
     /// exec() 返回 Accepted 后取回编辑结果（整份替换语义）。
-    AppSettings settings() const { return settings_; }
+    AppSettings settings() const
+    {
+      return settings_;
+    }
 
     /// 确定：先校验，不通过则保持打开。
     void accept() override;
     /// 取消：把构造时记录的主题/字号恢复回去（实时预览必须能回滚）。
     void reject() override;
 
-signals:
+  signals:
     /// 设置变化时发出，供调用方实时预览主题（在 accept 之前）。
-    void settingsPreviewChanged(const lycode::ui::AppSettings &settings);
+    void settingsPreviewChanged(const lycode::ui::AppSettings & settings);
 
-private:
+  private:
     // ── 页面构建 ────────────────────────────────────────────────────────────
-    QWidget *buildAppearancePage();
-    QWidget *buildProviderPage();
-    QWidget *buildSessionPage();
+    QWidget * buildAppearancePage();
+    QWidget * buildProviderPage();
+    QWidget * buildSessionPage();
     /// MCP 服务器与 Skills 目录。两者都是"外部能力接入"，放在同一页。
-    QWidget *buildIntegrationsPage();
+    QWidget * buildIntegrationsPage();
 
     /// 用当前表格内容重建 MCP 表格。
     void refreshMcpTable();
@@ -70,7 +75,7 @@ private:
     void refreshSkillDirectories();
     void addSkillDirectory();
     void removeSelectedSkillDirectory();
-    void buildButtonBox(QVBoxLayout *root);
+    void buildButtonBox(QVBoxLayout * root);
 
     // ── 外观页 ──────────────────────────────────────────────────────────────
     void applyAppearancePreview();
@@ -99,15 +104,15 @@ private:
     void pickModelsFromCatalog();
     void reloadModelCapabilityTable();
     /// 创建一个模型行（模型 / 上下文窗口 / 最大输出 / 思考档位 / 默认档位）。
-    void addCapabilityRow(int row, const QString &modelId, const ModelOptionOverride &override);
+    void addCapabilityRow(int row, const QString & modelId, const ModelOptionOverride & override);
     /// 读该行控件 → 写回 settings_.modelOverrides → 刷新非法态与确定按钮。
     void applyCapabilityRow(int row);
     /// 「思考档位」文本变化：重建该行「默认档位」下拉（保留仍合法的选择）后写回。
     void onCapabilityReasoningTextChanged(int row);
     /// 用该行「思考档位」里解析出的合法 id 重建下拉；preferredDefault 仍合法则保留。
-    void rebuildDefaultReasoningCombo(int row, const QString &preferredDefault);
+    void rebuildDefaultReasoningCombo(int row, const QString & preferredDefault);
     /// 解析该行「思考档位」文本：返回合法 id（去重保序），非法 id 追加到 unknownOut。
-    QStringList validReasoningIdsForRow(int row, QStringList *unknownOut) const;
+    QStringList validReasoningIdsForRow(int row, QStringList * unknownOut) const;
     /// 汇总所有行的非法档位提示（destructive 文案），无错误时隐藏。
     void refreshCapabilityValidation();
     /// 是否存在非法档位 id；用于禁用「确定」。
@@ -140,55 +145,55 @@ private:
     int originalCodeFontSize_ = 14;
 
     // 外观
-    QComboBox *themeCombo_ = nullptr;
-    QSpinBox *uiFontSpin_ = nullptr;
-    QSpinBox *codeFontSpin_ = nullptr;
-    QComboBox *languageCombo_ = nullptr;
+    QComboBox * themeCombo_ = nullptr;
+    QSpinBox * uiFontSpin_ = nullptr;
+    QSpinBox * codeFontSpin_ = nullptr;
+    QComboBox * languageCombo_ = nullptr;
 
     // Provider
-    QTabWidget *tabs_ = nullptr;
-    QListWidget *providerList_ = nullptr;
-    QWidget *providerForm_ = nullptr;
-    QLineEdit *providerNameEdit_ = nullptr;
-    QComboBox *providerKindCombo_ = nullptr;
-    QLineEdit *providerBaseUrlEdit_ = nullptr;
-    QLineEdit *providerApiKeyEdit_ = nullptr;
-    QCheckBox *providerShowKeyCheck_ = nullptr;
-    QPlainTextEdit *providerModelsEdit_ = nullptr;
-    QCheckBox *providerEnabledCheck_ = nullptr;
-    QLabel *providerAvailabilityLabel_ = nullptr;
-    QLabel *providerReasonLabel_ = nullptr;
-    QLabel *providerNameErrorLabel_ = nullptr;
-    QLabel *providerBaseUrlErrorLabel_ = nullptr;
-    QLabel *providerEmptyHintLabel_ = nullptr;
-    QLabel *providerModelsHintLabel_ = nullptr;
-    QLabel *providerAccountCaptionLabel_ = nullptr;
-    QPushButton *removeProviderButton_ = nullptr;
-    QPushButton *moveUpButton_ = nullptr;
-    QPushButton *moveDownButton_ = nullptr;
+    QTabWidget * tabs_ = nullptr;
+    QListWidget * providerList_ = nullptr;
+    QWidget * providerForm_ = nullptr;
+    QLineEdit * providerNameEdit_ = nullptr;
+    QComboBox * providerKindCombo_ = nullptr;
+    QLineEdit * providerBaseUrlEdit_ = nullptr;
+    QLineEdit * providerApiKeyEdit_ = nullptr;
+    QCheckBox * providerShowKeyCheck_ = nullptr;
+    QPlainTextEdit * providerModelsEdit_ = nullptr;
+    QCheckBox * providerEnabledCheck_ = nullptr;
+    QLabel * providerAvailabilityLabel_ = nullptr;
+    QLabel * providerReasonLabel_ = nullptr;
+    QLabel * providerNameErrorLabel_ = nullptr;
+    QLabel * providerBaseUrlErrorLabel_ = nullptr;
+    QLabel * providerEmptyHintLabel_ = nullptr;
+    QLabel * providerModelsHintLabel_ = nullptr;
+    QLabel * providerAccountCaptionLabel_ = nullptr;
+    QPushButton * removeProviderButton_ = nullptr;
+    QPushButton * moveUpButton_ = nullptr;
+    QPushButton * moveDownButton_ = nullptr;
 
     // Provider · 模型能力
-    QGroupBox *modelCapabilityGroup_ = nullptr;
-    QTableWidget *modelCapabilityTable_ = nullptr;
-    QLabel *modelCapabilityEmptyHint_ = nullptr;
-    QLabel *modelCapabilityErrorLabel_ = nullptr;
+    QGroupBox * modelCapabilityGroup_ = nullptr;
+    QTableWidget * modelCapabilityTable_ = nullptr;
+    QLabel * modelCapabilityEmptyHint_ = nullptr;
+    QLabel * modelCapabilityErrorLabel_ = nullptr;
     /// 表格当前展示的模型 id 顺序（含所属 Provider id）：模型列表变化时用它判断是否重建。
     QStringList capabilityModelIds_;
     QString capabilityProviderId_;
 
     // 会话
-    QComboBox *sessionModeCombo_ = nullptr;
-    QCheckBox *persistSessionsCheck_ = nullptr;
-    QCheckBox *titleGenerationCheck_ = nullptr;
+    QComboBox * sessionModeCombo_ = nullptr;
+    QCheckBox * persistSessionsCheck_ = nullptr;
+    QCheckBox * titleGenerationCheck_ = nullptr;
 
-    QTableWidget *mcpTable_ = nullptr;
-    QListWidget *skillDirList_ = nullptr;
-    QLabel *skillPreview_ = nullptr;
-    QListWidget *recentList_ = nullptr;
-    QLabel *recentEmptyLabel_ = nullptr;
-    QPushButton *clearRecentButton_ = nullptr;
+    QTableWidget * mcpTable_ = nullptr;
+    QListWidget * skillDirList_ = nullptr;
+    QLabel * skillPreview_ = nullptr;
+    QListWidget * recentList_ = nullptr;
+    QLabel * recentEmptyLabel_ = nullptr;
+    QPushButton * clearRecentButton_ = nullptr;
 
-    QPushButton *okButton_ = nullptr;
+    QPushButton * okButton_ = nullptr;
 
     /// 当前正在编辑的 provider 下标；-1 表示列表为空或无选中。
     int currentProvider_ = -1;

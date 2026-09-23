@@ -23,27 +23,29 @@
 
 #include "core/Types.h"
 
-namespace lycode::model {
+namespace lycode::model
+{
 
 /// 目录里的一个模型。
 struct CatalogModel {
-    QString id;
-    /// 该模型可用的思考档位 id。来自提供商的 thinking 字段。
-    QStringList reasoningLevels;
-    /// 上下文窗口；0 表示"未指定，用内置默认"。
-    int contextWindow = 0;
+  QString id;
+  /// 该模型可用的思考档位 id。来自提供商的 thinking 字段。
+  QStringList reasoningLevels;
+  /// 上下文窗口；0 表示"未指定，用内置默认"。
+  int contextWindow = 0;
 };
 
 /// 目录里的一个提供商。
 struct CatalogProvider {
-    QString name;
-    ProviderKind kind = ProviderKind::OpenAICompatible;
-    QString baseUrl;
-    QList<CatalogModel> models;
+  QString name;
+  ProviderKind kind = ProviderKind::OpenAICompatible;
+  QString baseUrl;
+  QList<CatalogModel> models;
 };
 
-class ModelCatalog {
-public:
+class ModelCatalog
+{
+  public:
     /// 仓库内随二进制一起分发的目录文件（编译进资源）。
     static QString bundledResourcePath();
     /// 用户可覆盖的目录文件：`<数据目录>/model_list.txt`。
@@ -52,17 +54,17 @@ public:
 
     /// 载入目录：优先用磁盘上的覆盖文件，否则用内嵌的。
     /// 解析失败时返回空列表并填 `errorOut`。
-    static QList<CatalogProvider> load(QString *errorOut = nullptr);
+    static QList<CatalogProvider> load(QString * errorOut = nullptr);
 
     /// 解析目录文本。**空白与空行都会被忽略**，`#` 开头的行视为注释。
     /// 不认识的键会被跳过（便于以后加字段而不破坏旧版本）。
-    static QList<CatalogProvider> parse(const QString &text, QString *errorOut = nullptr);
+    static QList<CatalogProvider> parse(const QString & text, QString * errorOut = nullptr);
 
     /// 该模型在目录里的能力覆盖。找不到时返回空的 override（`isEmpty()` 为真）。
     /// `providerId` 用调用方自己的 provider id（目录里的名字只是展示名）。
-    static ModelOptionOverride overrideFor(const CatalogProvider &provider,
-                                           const QString &modelId,
-                                           const QString &providerId);
+    static ModelOptionOverride overrideFor(const CatalogProvider & provider,
+                                           const QString & modelId,
+                                           const QString & providerId);
 };
 
 }  // namespace lycode::model

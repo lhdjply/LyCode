@@ -12,19 +12,23 @@
 #include <QString>
 #include <QStringList>
 
-namespace lycode {
+namespace lycode
+{
 
 /// 一个 SSE 事件：event 名 + 拼接后的 data 负载。
 struct SseEvent {
-    /// `event:` 字段；缺省为 "message"。
-    QString event;
-    /// 多行 `data:` 用 \n 拼接后的结果。
-    QString data;
-    QString id;
-    /// `retry:` 字段，未知为 -1。
-    int retryMs = -1;
+  /// `event:` 字段；缺省为 "message"。
+  QString event;
+  /// 多行 `data:` 用 \n 拼接后的结果。
+  QString data;
+  QString id;
+  /// `retry:` 字段，未知为 -1。
+  int retryMs = -1;
 
-    bool isValid() const { return !data.isEmpty() || !event.isEmpty(); }
+  bool isValid() const
+  {
+    return !data.isEmpty() || !event.isEmpty();
+  }
 };
 
 /// 增量式 SSE 解析器。
@@ -33,15 +37,19 @@ struct SseEvent {
 ///     SseParser parser;
 ///     parser.feed(reply->readAll());
 ///     while (parser.hasNext()) { const SseEvent e = parser.next(); ... }
-class SseParser {
-public:
+class SseParser
+{
+  public:
     SseParser() = default;
 
     /// 追加一段原始字节。可被任意次数、任意边界调用。
-    void feed(const QByteArray &chunk);
+    void feed(const QByteArray & chunk);
 
     /// 是否已有完整事件可取出。
-    bool hasNext() const { return !readyEvents_.isEmpty(); }
+    bool hasNext() const
+    {
+      return !readyEvents_.isEmpty();
+    }
 
     /// 取出下一个完整事件。调用前必须确认 hasNext()。
     SseEvent next();
@@ -54,14 +62,17 @@ public:
     void reset();
 
     /// 当前未被消费的原始缓冲字节数（用于诊断）。
-    int pendingBytes() const { return buffer_.size(); }
+    int pendingBytes() const
+    {
+      return buffer_.size();
+    }
 
-private:
+  private:
     /// 从缓冲区头部尽可能多地切出完整事件。
     void drainCompleteEvents();
 
     /// 解析单个原始事件块（不含分隔空行），追加到 readyEvents_。
-    void parseBlock(const QByteArray &block);
+    void parseBlock(const QByteArray & block);
 
     QByteArray buffer_;
     QList<SseEvent> readyEvents_;

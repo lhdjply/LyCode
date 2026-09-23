@@ -8,32 +8,35 @@
 
 using namespace lycode::ui;
 
-namespace {
+namespace
+{
 
-MarkdownStyle testStyle() {
-    MarkdownStyle style;
-    style.foreground = QColor(QStringLiteral("#262626"));
-    style.foregroundSubtle = QColor(QStringLiteral("#737373"));
-    style.foregroundSubtlest = QColor(QStringLiteral("#a3a3a3"));
-    style.surface = QColor(QStringLiteral("#f5f5f5"));
-    style.border = QColor(QStringLiteral("#e5e5e5"));
-    style.codeBackground = QColor(QStringLiteral("#f5f5f5"));
-    style.link = QColor(QStringLiteral("#001d3d"));
-    style.quoteBar = QColor(QStringLiteral("#d4d4d4"));
-    style.tableHeader = QColor(QStringLiteral("#f5f5f5"));
-    style.baseFontPx = 14;
-    style.codeFontPx = 14;
-    style.sansFamily = QStringLiteral("Noto Sans CJK SC");
-    style.monoFamily = QStringLiteral("Noto Sans Mono CJK SC");
-    return style;
+MarkdownStyle testStyle()
+{
+  MarkdownStyle style;
+  style.foreground = QColor(QStringLiteral("#262626"));
+  style.foregroundSubtle = QColor(QStringLiteral("#737373"));
+  style.foregroundSubtlest = QColor(QStringLiteral("#a3a3a3"));
+  style.surface = QColor(QStringLiteral("#f5f5f5"));
+  style.border = QColor(QStringLiteral("#e5e5e5"));
+  style.codeBackground = QColor(QStringLiteral("#f5f5f5"));
+  style.link = QColor(QStringLiteral("#001d3d"));
+  style.quoteBar = QColor(QStringLiteral("#d4d4d4"));
+  style.tableHeader = QColor(QStringLiteral("#f5f5f5"));
+  style.baseFontPx = 14;
+  style.codeFontPx = 14;
+  style.sansFamily = QStringLiteral("Noto Sans CJK SC");
+  style.monoFamily = QStringLiteral("Noto Sans Mono CJK SC");
+  return style;
 }
 
 }  // namespace
 
-class TestMarkdown : public QObject {
+class TestMarkdown : public QObject
+{
     Q_OBJECT
 
-private slots:
+  private slots:
     void escapesHtmlInText();
     void escapesHtmlInsideCodeBlock();
     void rejectsUnsafeLinkSchemes();
@@ -54,253 +57,271 @@ private slots:
     void plainPreviewStripsMarkup();
 };
 
-void TestMarkdown::escapesHtmlInText() {
-    // 模型输出不可信：标签必须被转义而不是直通。
-    const QString html = Markdown::toHtml(
-        QStringLiteral("hello <script>alert(1)</script> & \"quoted\""), testStyle());
+void TestMarkdown::escapesHtmlInText()
+{
+  // 模型输出不可信：标签必须被转义而不是直通。
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("hello <script>alert(1)</script> & \"quoted\""), testStyle());
 
-    QVERIFY(!html.contains(QStringLiteral("<script>")));
-    QVERIFY(html.contains(QStringLiteral("&lt;script&gt;")));
-    QVERIFY(html.contains(QStringLiteral("&amp;")));
-    QVERIFY(html.contains(QStringLiteral("&quot;")));
+  QVERIFY(!html.contains(QStringLiteral("<script>")));
+  QVERIFY(html.contains(QStringLiteral("&lt;script&gt;")));
+  QVERIFY(html.contains(QStringLiteral("&amp;")));
+  QVERIFY(html.contains(QStringLiteral("&quot;")));
 }
 
-void TestMarkdown::escapesHtmlInsideCodeBlock() {
-    const QString html =
-        Markdown::toHtml(QStringLiteral("```html\n<b>bold</b>\n```"), testStyle());
+void TestMarkdown::escapesHtmlInsideCodeBlock()
+{
+  const QString html =
+    Markdown::toHtml(QStringLiteral("```html\n<b>bold</b>\n```"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("code-block")));
-    QVERIFY(html.contains(QStringLiteral("&lt;b&gt;bold&lt;/b&gt;")));
-    QVERIFY(!html.contains(QStringLiteral("<b>bold</b>")));
+  QVERIFY(html.contains(QStringLiteral("code-block")));
+  QVERIFY(html.contains(QStringLiteral("&lt;b&gt;bold&lt;/b&gt;")));
+  QVERIFY(!html.contains(QStringLiteral("<b>bold</b>")));
 }
 
-void TestMarkdown::rejectsUnsafeLinkSchemes() {
-    // javascript: 链接必须降级为纯文本。
-    const QString html =
-        Markdown::toHtml(QStringLiteral("[click](javascript:alert(1))"), testStyle());
+void TestMarkdown::rejectsUnsafeLinkSchemes()
+{
+  // javascript: 链接必须降级为纯文本。
+  const QString html =
+    Markdown::toHtml(QStringLiteral("[click](javascript:alert(1))"), testStyle());
 
-    QVERIFY(!html.contains(QStringLiteral("javascript:")));
-    QVERIFY(html.contains(QStringLiteral("click")));
+  QVERIFY(!html.contains(QStringLiteral("javascript:")));
+  QVERIFY(html.contains(QStringLiteral("click")));
 }
 
-void TestMarkdown::keepsSafeLinks() {
-    const QString html =
-        Markdown::toHtml(QStringLiteral("[docs](https://example.com/a)"), testStyle());
+void TestMarkdown::keepsSafeLinks()
+{
+  const QString html =
+    Markdown::toHtml(QStringLiteral("[docs](https://example.com/a)"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<a href=\"https://example.com/a\">docs</a>")));
+  QVERIFY(html.contains(QStringLiteral("<a href=\"https://example.com/a\">docs</a>")));
 }
 
-void TestMarkdown::rendersHeadings() {
-    const QString html = Markdown::toHtml(
-        QStringLiteral("# Title\n\n## Sub\n\n### Third\n"), testStyle());
+void TestMarkdown::rendersHeadings()
+{
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("# Title\n\n## Sub\n\n### Third\n"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<h1>Title</h1>")));
-    QVERIFY(html.contains(QStringLiteral("<h2>Sub</h2>")));
-    QVERIFY(html.contains(QStringLiteral("<h3>Third</h3>")));
+  QVERIFY(html.contains(QStringLiteral("<h1>Title</h1>")));
+  QVERIFY(html.contains(QStringLiteral("<h2>Sub</h2>")));
+  QVERIFY(html.contains(QStringLiteral("<h3>Third</h3>")));
 }
 
-void TestMarkdown::rendersFencedCodeBlockWithLanguage() {
-    const QString html = Markdown::toHtml(
-        QStringLiteral("before\n\n```cpp\nint main() {}\n```\n\nafter"), testStyle());
+void TestMarkdown::rendersFencedCodeBlockWithLanguage()
+{
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("before\n\n```cpp\nint main() {}\n```\n\nafter"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<div class=\"code-lang\">cpp</div>")));
-    QVERIFY(html.contains(QStringLiteral("<pre class=\"code\">")));
-    // 代码块现在带语法着色，所以正文不再以原始文本出现——断言的是
-    // "内容还在 + 着色生效"，而不是"一字不改地原样输出"。
-    QVERIFY2(html.contains(QStringLiteral("int")), "关键字/类型必须仍然可见");
-    QVERIFY(html.contains(QStringLiteral("main")));
-    QVERIFY(html.contains(QStringLiteral("{}")));
-    QVERIFY2(html.contains(QStringLiteral("class=\"tok-")),
-             "代码块必须产生至少一个着色 span");
-    // 代码块前后必须是独立段落，不能被并进代码块。
-    QVERIFY(html.contains(QStringLiteral("<p>before</p>")));
-    QVERIFY(html.contains(QStringLiteral("<p>after</p>")));
+  QVERIFY(html.contains(QStringLiteral("<div class=\"code-lang\">cpp</div>")));
+  QVERIFY(html.contains(QStringLiteral("<pre class=\"code\">")));
+  // 代码块现在带语法着色，所以正文不再以原始文本出现——断言的是
+  // "内容还在 + 着色生效"，而不是"一字不改地原样输出"。
+  QVERIFY2(html.contains(QStringLiteral("int")), "关键字/类型必须仍然可见");
+  QVERIFY(html.contains(QStringLiteral("main")));
+  QVERIFY(html.contains(QStringLiteral("{}")));
+  QVERIFY2(html.contains(QStringLiteral("class=\"tok-")),
+           "代码块必须产生至少一个着色 span");
+  // 代码块前后必须是独立段落，不能被并进代码块。
+  QVERIFY(html.contains(QStringLiteral("<p>before</p>")));
+  QVERIFY(html.contains(QStringLiteral("<p>after</p>")));
 }
 
-void TestMarkdown::rendersIndentedFenceWithTildes() {
-    const QString html =
-        Markdown::toHtml(QStringLiteral("  ~~~python\nprint(1)\n  ~~~\n"), testStyle());
+void TestMarkdown::rendersIndentedFenceWithTildes()
+{
+  const QString html =
+    Markdown::toHtml(QStringLiteral("  ~~~python\nprint(1)\n  ~~~\n"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<div class=\"code-lang\">python</div>")));
-    // print 是函数调用，会被包进 tok-function；参数保持可见。
-    QVERIFY2(html.contains(QStringLiteral("print")), qPrintable(html));
-    // 括号是普通文本、1 是数字 span，所以不连续——分别断言。
-    QVERIFY(html.contains(QStringLiteral("(")));
-    QVERIFY2(html.contains(QStringLiteral("<span class=\"tok-number\">1</span>")),
-             qPrintable(html));
-    QVERIFY2(html.contains(QStringLiteral("<span class=\"tok-function\">print</span>")),
-             qPrintable(html));
+  QVERIFY(html.contains(QStringLiteral("<div class=\"code-lang\">python</div>")));
+  // print 是函数调用，会被包进 tok-function；参数保持可见。
+  QVERIFY2(html.contains(QStringLiteral("print")), qPrintable(html));
+  // 括号是普通文本、1 是数字 span，所以不连续——分别断言。
+  QVERIFY(html.contains(QStringLiteral("(")));
+  QVERIFY2(html.contains(QStringLiteral("<span class=\"tok-number\">1</span>")),
+           qPrintable(html));
+  QVERIFY2(html.contains(QStringLiteral("<span class=\"tok-function\">print</span>")),
+           qPrintable(html));
 }
 
-void TestMarkdown::inlineCodeSurvivesEmphasisRules() {
-    // 行内代码里的 * 不能被当成强调标记——这是规则顺序的经典陷阱。
-    const QString html = Markdown::toHtml(
-        QStringLiteral("use `a * b * c` here"), testStyle());
+void TestMarkdown::inlineCodeSurvivesEmphasisRules()
+{
+  // 行内代码里的 * 不能被当成强调标记——这是规则顺序的经典陷阱。
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("use `a * b * c` here"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<code class=\"inline\">a * b * c</code>")));
-    QVERIFY(!html.contains(QStringLiteral("<i>")));
+  QVERIFY(html.contains(QStringLiteral("<code class=\"inline\">a * b * c</code>")));
+  QVERIFY(!html.contains(QStringLiteral("<i>")));
 }
 
-void TestMarkdown::rendersEmphasis() {
-    const QString html = Markdown::toHtml(
-        QStringLiteral("**bold** and *italic* and ~~gone~~ and __also bold__"), testStyle());
+void TestMarkdown::rendersEmphasis()
+{
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("**bold** and *italic* and ~~gone~~ and __also bold__"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<b>bold</b>")));
-    QVERIFY(html.contains(QStringLiteral("<i>italic</i>")));
-    QVERIFY(html.contains(QStringLiteral("<s>gone</s>")));
-    QVERIFY(html.contains(QStringLiteral("<b>also bold</b>")));
+  QVERIFY(html.contains(QStringLiteral("<b>bold</b>")));
+  QVERIFY(html.contains(QStringLiteral("<i>italic</i>")));
+  QVERIFY(html.contains(QStringLiteral("<s>gone</s>")));
+  QVERIFY(html.contains(QStringLiteral("<b>also bold</b>")));
 }
 
-void TestMarkdown::rendersLists() {
-    const QString html = Markdown::toHtml(
-        QStringLiteral("- one\n- two\n- three\n\n1. first\n2. second\n"), testStyle());
+void TestMarkdown::rendersLists()
+{
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("- one\n- two\n- three\n\n1. first\n2. second\n"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<ul>")));
-    QVERIFY(html.contains(QStringLiteral("<li>one</li>")));
-    QVERIFY(html.contains(QStringLiteral("<ol>")));
-    QVERIFY(html.contains(QStringLiteral("<li>first</li>")));
+  QVERIFY(html.contains(QStringLiteral("<ul>")));
+  QVERIFY(html.contains(QStringLiteral("<li>one</li>")));
+  QVERIFY(html.contains(QStringLiteral("<ol>")));
+  QVERIFY(html.contains(QStringLiteral("<li>first</li>")));
 }
 
-void TestMarkdown::rendersTaskList() {
-    const QString html =
-        Markdown::toHtml(QStringLiteral("- [x] done\n- [ ] todo\n"), testStyle());
+void TestMarkdown::rendersTaskList()
+{
+  const QString html =
+    Markdown::toHtml(QStringLiteral("- [x] done\n- [ ] todo\n"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("\u2611 done")));
-    QVERIFY(html.contains(QStringLiteral("\u2610 todo")));
+  QVERIFY(html.contains(QStringLiteral("\u2611 done")));
+  QVERIFY(html.contains(QStringLiteral("\u2610 todo")));
 }
 
-void TestMarkdown::rendersBlockquote() {
-    const QString html = Markdown::toHtml(QStringLiteral("> quoted line\n"), testStyle());
+void TestMarkdown::rendersBlockquote()
+{
+  const QString html = Markdown::toHtml(QStringLiteral("> quoted line\n"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<blockquote>")));
-    QVERIFY(html.contains(QStringLiteral("quoted line")));
-    QVERIFY(html.contains(QStringLiteral("</blockquote>")));
+  QVERIFY(html.contains(QStringLiteral("<blockquote>")));
+  QVERIFY(html.contains(QStringLiteral("quoted line")));
+  QVERIFY(html.contains(QStringLiteral("</blockquote>")));
 }
 
-void TestMarkdown::rendersHorizontalRule() {
-    const QString html = Markdown::toHtml(QStringLiteral("a\n\n---\n\nb"), testStyle());
+void TestMarkdown::rendersHorizontalRule()
+{
+  const QString html = Markdown::toHtml(QStringLiteral("a\n\n---\n\nb"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<hr/>")));
+  QVERIFY(html.contains(QStringLiteral("<hr/>")));
 }
 
-void TestMarkdown::rendersPipeTable() {
-    const QString markdown = QStringLiteral(
-        "| name | value |\n"
-        "| --- | --- |\n"
-        "| alpha | 1 |\n"
-        "| beta | 2 |\n"
-        "\n"
-        "after");
+void TestMarkdown::rendersPipeTable()
+{
+  const QString markdown = QStringLiteral(
+                             "| name | value |\n"
+                             "| --- | --- |\n"
+                             "| alpha | 1 |\n"
+                             "| beta | 2 |\n"
+                             "\n"
+                             "after");
 
-    const QString html = Markdown::toHtml(markdown, testStyle());
+  const QString html = Markdown::toHtml(markdown, testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<table class=\"md-table\">")));
-    QVERIFY(html.contains(QStringLiteral("<th>name</th>")));
-    QVERIFY(html.contains(QStringLiteral("<td>alpha</td>")));
-    QVERIFY(html.contains(QStringLiteral("<td>2</td>")));
-    // 表格之后的内容不能被吞进表格。
-    QVERIFY(html.contains(QStringLiteral("<p>after</p>")));
+  QVERIFY(html.contains(QStringLiteral("<table class=\"md-table\">")));
+  QVERIFY(html.contains(QStringLiteral("<th>name</th>")));
+  QVERIFY(html.contains(QStringLiteral("<td>alpha</td>")));
+  QVERIFY(html.contains(QStringLiteral("<td>2</td>")));
+  // 表格之后的内容不能被吞进表格。
+  QVERIFY(html.contains(QStringLiteral("<p>after</p>")));
 }
 
-void TestMarkdown::rendersNestedList() {
-    const QString html =
-        Markdown::toHtml(QStringLiteral("- outer\n  - inner\n"), testStyle());
+void TestMarkdown::rendersNestedList()
+{
+  const QString html =
+    Markdown::toHtml(QStringLiteral("- outer\n  - inner\n"), testStyle());
 
-    QVERIFY(html.contains(QStringLiteral("<li>outer</li>")));
-    QVERIFY(html.contains(QStringLiteral("<li class=\"nested\">inner</li>")));
+  QVERIFY(html.contains(QStringLiteral("<li>outer</li>")));
+  QVERIFY(html.contains(QStringLiteral("<li class=\"nested\">inner</li>")));
 }
 
-void TestMarkdown::styleSheetHasNoPlaceholders() {
-    const QString css = Markdown::styleSheet(testStyle());
+void TestMarkdown::styleSheetHasNoPlaceholders()
+{
+  const QString css = Markdown::styleSheet(testStyle());
 
-    QVERIFY(!css.isEmpty());
-    // .arg() 链漏掉一个就会留下 %1 之类的痕迹，必须显式检查。
-    QVERIFY(!css.contains(QStringLiteral("%1")));
-    QVERIFY(!css.contains(QStringLiteral("%2")));
-    QVERIFY(!css.contains(QStringLiteral("var(--")));
-    // 关键选择器必须在场，否则 class 规则不生效。
-    QVERIFY(css.contains(QStringLiteral("pre.code")));
-    QVERIFY(css.contains(QStringLiteral("code.inline")));
-    QVERIFY(css.contains(QStringLiteral("blockquote")));
-    QVERIFY(css.contains(QStringLiteral("table.md-table")));
-    // 字号阶梯：h1 应比正文大 4px，h2 大 2px（与设计规范一致）。
-    QVERIFY(css.contains(QStringLiteral("font-size: 18px")));
-    QVERIFY(css.contains(QStringLiteral("font-size: 16px")));
+  QVERIFY(!css.isEmpty());
+  // .arg() 链漏掉一个就会留下 %1 之类的痕迹，必须显式检查。
+  QVERIFY(!css.contains(QStringLiteral("%1")));
+  QVERIFY(!css.contains(QStringLiteral("%2")));
+  QVERIFY(!css.contains(QStringLiteral("var(--")));
+  // 关键选择器必须在场，否则 class 规则不生效。
+  QVERIFY(css.contains(QStringLiteral("pre.code")));
+  QVERIFY(css.contains(QStringLiteral("code.inline")));
+  QVERIFY(css.contains(QStringLiteral("blockquote")));
+  QVERIFY(css.contains(QStringLiteral("table.md-table")));
+  // 字号阶梯：h1 应比正文大 4px，h2 大 2px（与设计规范一致）。
+  QVERIFY(css.contains(QStringLiteral("font-size: 18px")));
+  QVERIFY(css.contains(QStringLiteral("font-size: 16px")));
 }
 
-void TestMarkdown::plainPreviewStripsMarkup() {
-    const QString markdown = QStringLiteral(
-        "# Heading\n\nSome **bold** and `code` and [link](https://x.y).\n\n"
-        "```cpp\nint x;\n```\n");
+void TestMarkdown::plainPreviewStripsMarkup()
+{
+  const QString markdown = QStringLiteral(
+                             "# Heading\n\nSome **bold** and `code` and [link](https://x.y).\n\n"
+                             "```cpp\nint x;\n```\n");
 
-    const QString preview = Markdown::toPlainPreview(markdown, 120);
+  const QString preview = Markdown::toPlainPreview(markdown, 120);
 
-    QVERIFY(!preview.contains(QLatin1Char('#')));
-    QVERIFY(!preview.contains(QStringLiteral("**")));
-    QVERIFY(!preview.contains(QLatin1Char('`')));
-    QVERIFY(!preview.contains(QStringLiteral("int x;")));
-    QVERIFY(preview.contains(QStringLiteral("Heading")));
-    QVERIFY(preview.contains(QStringLiteral("bold")));
-    QVERIFY(preview.contains(QStringLiteral("link")));
+  QVERIFY(!preview.contains(QLatin1Char('#')));
+  QVERIFY(!preview.contains(QStringLiteral("**")));
+  QVERIFY(!preview.contains(QLatin1Char('`')));
+  QVERIFY(!preview.contains(QStringLiteral("int x;")));
+  QVERIFY(preview.contains(QStringLiteral("Heading")));
+  QVERIFY(preview.contains(QStringLiteral("bold")));
+  QVERIFY(preview.contains(QStringLiteral("link")));
 
-    // 超长时必须截断并带省略标记。
-    const QString longPreview =
-        Markdown::toPlainPreview(QString(500, QLatin1Char('a')), 40);
-    QVERIFY(longPreview.size() <= 41);
-    QVERIFY(longPreview.endsWith(QStringLiteral("…")));
+  // 超长时必须截断并带省略标记。
+  const QString longPreview =
+    Markdown::toPlainPreview(QString(500, QLatin1Char('a')), 40);
+  QVERIFY(longPreview.size() <= 41);
+  QVERIFY(longPreview.endsWith(QStringLiteral("…")));
 }
 
-void TestMarkdown::detectsChoicesOnlyFromTheUnifiedFormat() {
-    // 只认统一的 `choices` 围栏。这是刻意的：去猜正文里的编号列表必然误判，
-    // 把"步骤如下：1. 2. 3."或目录变成一排按钮，正常的回答看起来像在逼用户选。
-    const QList<Markdown::Choice> fromFence = Markdown::detectChoices(
-        QStringLiteral("我看了两种改法：\n\n"
-                       "```choices\n"
-                       "- 只改 Read 工具，最小改动\n"
-                       "- 同时改 Read 与 Grep\n"
-                       "```\n"));
-    QCOMPARE(fromFence.size(), 2);
-    QCOMPARE(fromFence.at(0).label, QStringLiteral("只改 Read 工具，最小改动"));
-    // 点选后填进输入框的就是选项原文。
-    QCOMPARE(fromFence.at(1).text, QStringLiteral("同时改 Read 与 Grep"));
+void TestMarkdown::detectsChoicesOnlyFromTheUnifiedFormat()
+{
+  // 只认统一的 `choices` 围栏。这是刻意的：去猜正文里的编号列表必然误判，
+  // 把"步骤如下：1. 2. 3."或目录变成一排按钮，正常的回答看起来像在逼用户选。
+  const QList<Markdown::Choice> fromFence = Markdown::detectChoices(
+                                              QStringLiteral("我看了两种改法：\n\n"
+                                                             "```choices\n"
+                                                             "- 只改 Read 工具，最小改动\n"
+                                                             "- 同时改 Read 与 Grep\n"
+                                                             "```\n"));
+  QCOMPARE(fromFence.size(), 2);
+  QCOMPARE(fromFence.at(0).label, QStringLiteral("只改 Read 工具，最小改动"));
+  // 点选后填进输入框的就是选项原文。
+  QCOMPARE(fromFence.at(1).text, QStringLiteral("同时改 Read 与 Grep"));
 
-    // 有序列表写法的选项也要能认。
-    const QList<Markdown::Choice> ordered = Markdown::detectChoices(
-        QStringLiteral("```choices\n1. 方案甲\n2. 方案乙\n3. 方案丙\n```"));
-    QCOMPARE(ordered.size(), 3);
-    QCOMPARE(ordered.at(2).label, QStringLiteral("方案丙"));
+  // 有序列表写法的选项也要能认。
+  const QList<Markdown::Choice> ordered = Markdown::detectChoices(
+                                            QStringLiteral("```choices\n1. 方案甲\n2. 方案乙\n3. 方案丙\n```"));
+  QCOMPARE(ordered.size(), 3);
+  QCOMPARE(ordered.at(2).label, QStringLiteral("方案丙"));
 
-    // ★ 正文里的普通编号列表**不该**被当成选项——这正是放弃启发式识别的理由。
-    QVERIFY2(Markdown::detectChoices(QStringLiteral("步骤如下：\n\n"
-                                                    "1. 打开文件\n"
-                                                    "2. 修改配置\n"
-                                                    "3. 重启服务\n"))
-                 .isEmpty(),
-             "普通的编号步骤不该被当成选项");
+  // ★ 正文里的普通编号列表**不该**被当成选项——这正是放弃启发式识别的理由。
+  QVERIFY2(Markdown::detectChoices(QStringLiteral("步骤如下：\n\n"
+                                                  "1. 打开文件\n"
+                                                  "2. 修改配置\n"
+                                                  "3. 重启服务\n"))
+           .isEmpty(),
+           "普通的编号步骤不该被当成选项");
 
-    // 列表就该是列表，不能因为"看起来像选项"就变成按钮。
-    QVERIFY(Markdown::detectChoices(QStringLiteral("你可以选择：\n- 甲\n- 乙\n")).isEmpty());
+  // 列表就该是列表，不能因为"看起来像选项"就变成按钮。
+  QVERIFY(Markdown::detectChoices(QStringLiteral("你可以选择：\n- 甲\n- 乙\n")).isEmpty());
 
-    // 只有一个选项、或超过 6 项，都不算选择。
-    QVERIFY(Markdown::detectChoices(QStringLiteral("```choices\n- 只有一个\n```")).isEmpty());
-    QVERIFY(Markdown::detectChoices(QStringLiteral(
-                                        "```choices\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n```"))
-                .isEmpty());
+  // 只有一个选项、或超过 6 项，都不算选择。
+  QVERIFY(Markdown::detectChoices(QStringLiteral("```choices\n- 只有一个\n```")).isEmpty());
+  QVERIFY(Markdown::detectChoices(QStringLiteral(
+                                    "```choices\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n```"))
+          .isEmpty());
 
-    // 只认**最后**一个 choices 块：前一轮的选项不该再摆出来。
-    const QList<Markdown::Choice> last = Markdown::detectChoices(
-        QStringLiteral("```choices\n- 旧的甲\n- 旧的乙\n```\n\n中间说明\n\n"
-                       "```choices\n- 新的甲\n- 新的乙\n```\n"));
-    QCOMPARE(last.size(), 2);
-    QCOMPARE(last.at(0).label, QStringLiteral("新的甲"));
+  // 只认**最后**一个 choices 块：前一轮的选项不该再摆出来。
+  const QList<Markdown::Choice> last = Markdown::detectChoices(
+                                         QStringLiteral("```choices\n- 旧的甲\n- 旧的乙\n```\n\n中间说明\n\n"
+                                                        "```choices\n- 新的甲\n- 新的乙\n```\n"));
+  QCOMPARE(last.size(), 2);
+  QCOMPARE(last.at(0).label, QStringLiteral("新的甲"));
 
-    // 渲染成列表，而不是代码块（否则选项会在正文与按钮里各出现一次）。
-    const QString html = Markdown::toHtml(
-        QStringLiteral("```choices\n- 甲方案\n- 乙方案\n```"), testStyle());
-    QVERIFY2(html.contains(QStringLiteral("<ul class=\"choices\">")), qPrintable(html));
-    QVERIFY2(!html.contains(QStringLiteral("code-block")),
-             "choices 块不该渲染成代码块");
-    QVERIFY(html.contains(QStringLiteral("甲方案")));
+  // 渲染成列表，而不是代码块（否则选项会在正文与按钮里各出现一次）。
+  const QString html = Markdown::toHtml(
+                         QStringLiteral("```choices\n- 甲方案\n- 乙方案\n```"), testStyle());
+  QVERIFY2(html.contains(QStringLiteral("<ul class=\"choices\">")), qPrintable(html));
+  QVERIFY2(!html.contains(QStringLiteral("code-block")),
+           "choices 块不该渲染成代码块");
+  QVERIFY(html.contains(QStringLiteral("甲方案")));
 }
 
 QTEST_MAIN(TestMarkdown)

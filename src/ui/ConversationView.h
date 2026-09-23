@@ -25,46 +25,51 @@ class QScrollArea;
 class QTextBrowser;
 class QVBoxLayout;
 
-namespace lycode::ui {
+namespace lycode::ui
+{
 
 class ToolCallWidget;
 
 /// 单条消息的渲染单元。
-class MessageWidget : public QWidget {
+class MessageWidget : public QWidget
+{
     Q_OBJECT
 
-public:
-    explicit MessageWidget(const Message &message, QWidget *parent = nullptr);
+  public:
+    explicit MessageWidget(const Message & message, QWidget * parent = nullptr);
     ~MessageWidget() override;
 
-    QString messageId() const { return message_.id; }
+    QString messageId() const
+    {
+      return message_.id;
+    }
 
     /// 用完整消息刷新（终态渲染：Markdown 重新排版、工具卡片更新状态）。
-    void applyMessage(const Message &message);
+    void applyMessage(const Message & message);
     /// 追加流式增量。
-    void appendDelta(const Id &partId, const QString &delta, bool reasoning);
+    void appendDelta(const Id & partId, const QString & delta, bool reasoning);
     /// 更新单个 part（工具状态变化）。
-    void applyPart(const Part &part);
+    void applyPart(const Part & part);
     /// 新出现的 part 直接挂上去（工具调用在流式中途产生）。
-    void ensurePartWidget(const Part &part);
+    void ensurePartWidget(const Part & part);
 
-private:
+  private:
     void buildUi();
-    void buildPartWidget(const Part &part);
+    void buildPartWidget(const Part & part);
     void refreshHeader();
     void refreshTheme();
 
     /// 正文/思考用的富文本视图。
-    QTextBrowser *createRichTextView(bool reasoning);
+    QTextBrowser * createRichTextView(bool reasoning);
     /// 用累积的 Markdown 源做终态排版。
-    void renderRichText(const Id &partId);
+    void renderRichText(const Id & partId);
 
     Message message_;
 
-    QLabel *roleLabel_ = nullptr;
-    QLabel *metaLabel_ = nullptr;
-    QLabel *errorLabel_ = nullptr;
-    QVBoxLayout *contentLayout_ = nullptr;
+    QLabel * roleLabel_ = nullptr;
+    QLabel * metaLabel_ = nullptr;
+    QLabel * errorLabel_ = nullptr;
+    QVBoxLayout * contentLayout_ = nullptr;
 
     /// partId → 富文本视图（正文与思考共用这条路径）。
     QHash<Id, QTextBrowser *> richViews_;
@@ -77,37 +82,41 @@ private:
 };
 
 /// 对话流。负责消息顺序、滚动与空状态。
-class ConversationView : public QWidget {
+class ConversationView : public QWidget
+{
     Q_OBJECT
 
-public:
-    explicit ConversationView(QWidget *parent = nullptr);
+  public:
+    explicit ConversationView(QWidget * parent = nullptr);
     ~ConversationView() override;
 
     void clear();
-    void addMessage(const Message &message);
-    void applyMessage(const Message &message);
-    void appendDelta(const Id &messageId, const Id &partId, const QString &delta, bool reasoning);
-    void applyPart(const Id &messageId, const Part &part);
+    void addMessage(const Message & message);
+    void applyMessage(const Message & message);
+    void appendDelta(const Id & messageId, const Id & partId, const QString & delta, bool reasoning);
+    void applyPart(const Id & messageId, const Part & part);
 
     /// 是否应该自动跟随到底部（用户当前贴着底部）。
     bool shouldFollowBottom() const;
     void scrollToBottom();
 
-    int messageCount() const { return static_cast<int>(messages_.size()); }
+    int messageCount() const
+    {
+      return static_cast<int>(messages_.size());
+    }
 
-signals:
+  signals:
     /// 用户点击"重试"时发出（用于重新发起上一条输入）。
-    void retryRequested(const lycode::Id &messageId);
+    void retryRequested(const lycode::Id & messageId);
 
-private:
+  private:
     void refreshEmptyState();
     void applyTheme();
 
-    QScrollArea *scroll_ = nullptr;
-    QWidget *container_ = nullptr;
-    QVBoxLayout *containerLayout_ = nullptr;
-    QLabel *emptyState_ = nullptr;
+    QScrollArea * scroll_ = nullptr;
+    QWidget * container_ = nullptr;
+    QVBoxLayout * containerLayout_ = nullptr;
+    QLabel * emptyState_ = nullptr;
     QHash<Id, MessageWidget *> messages_;
     QStringList messageOrder_;
 };

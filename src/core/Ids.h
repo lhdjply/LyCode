@@ -6,16 +6,32 @@
 
 #include <QString>
 
-namespace lycode {
+namespace lycode
+{
 
 /// 生成 `<prefix>_<24位小写base32>` 形式的唯一 id。
 /// 使用 QRandomGenerator 的密码学安全源，避免会话 id 可预测。
-QString newId(const QString &prefix);
+QString newId(const QString & prefix);
 
-inline QString newSessionId() { return newId(QStringLiteral("session")); }
-inline QString newMessageId() { return newId(QStringLiteral("msg")); }
-inline QString newPartId() { return newId(QStringLiteral("part")); }
-inline QString newToolCallId() { return newId(QStringLiteral("call")); }
-inline QString newPermissionId() { return newId(QStringLiteral("perm")); }
+inline QString newSessionId()
+{
+  return newId(QStringLiteral("session"));
+}
+inline QString newMessageId()
+{
+  return newId(QStringLiteral("msg"));
+}
+inline QString newPartId()
+{
+  return newId(QStringLiteral("part"));
+}
+inline QString newToolCallId()
+{
+  return newId(QStringLiteral("call"));
+}
+inline QString newPermissionId()
+{
+  return newId(QStringLiteral("perm"));
+}
 
 }  // namespace lycode

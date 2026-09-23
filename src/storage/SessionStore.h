@@ -22,66 +22,74 @@
 
 #include "core/Types.h"
 
-namespace lycode {
+namespace lycode
+{
 
 /// 一次会话列表查询的结果行（不携带消息体，供列表展示）。
 struct SessionSummary {
-    Session session;
-    QString lastMessagePreview;
+  Session session;
+  QString lastMessagePreview;
 };
 
-class SessionStore {
-public:
+class SessionStore
+{
+  public:
     SessionStore();
     ~SessionStore();
 
     SessionStore(const SessionStore &) = delete;
-    SessionStore &operator=(const SessionStore &) = delete;
+    SessionStore & operator=(const SessionStore &) = delete;
 
     /// 打开（必要时创建）数据库。path 为空时使用默认数据目录。
-    bool open(const QString &path = {});
+    bool open(const QString & path = {});
     void close();
     bool isOpen() const;
     /// 最近一次失败原因。
-    QString lastError() const { return lastError_; }
+    QString lastError() const
+    {
+      return lastError_;
+    }
     /// 实际使用的数据库文件路径。
-    QString databasePath() const { return databasePath_; }
+    QString databasePath() const
+    {
+      return databasePath_;
+    }
 
     // ── 会话 ────────────────────────────────────────────────────────────────
-    bool saveSession(const Session &session);
-    bool deleteSession(const Id &sessionId);
+    bool saveSession(const Session & session);
+    bool deleteSession(const Id & sessionId);
     /// 按 workspace key 过滤；key 为空表示不过滤（全部工作区）。
-    QList<SessionSummary> listSessions(const QString &workspaceKey = {},
+    QList<SessionSummary> listSessions(const QString & workspaceKey = {},
                                        int limit = 200) const;
-    bool loadSession(const Id &sessionId, Session *sessionOut) const;
+    bool loadSession(const Id & sessionId, Session * sessionOut) const;
     /// 会话的总消息数（用于列表计数，避免加载全部消息）。
-    int messageCount(const Id &sessionId) const;
+    int messageCount(const Id & sessionId) const;
 
     // ── 消息 ────────────────────────────────────────────────────────────────
     /// 保存或整体替换一条消息（含全部 part）。
-    bool saveMessage(const Message &message);
+    bool saveMessage(const Message & message);
     /// 只更新消息头（状态 / 用量 / 错误），不动 parts。
     /// 流式过程中每个增量都调用它代价太高，仅供终态使用。
-    bool updateMessageStatus(const Id &messageId, MessageStatus status,
-                             const QJsonObject &usage, const QString &errorMessage);
-    bool deleteMessage(const Id &messageId);
-    QList<Message> loadMessages(const Id &sessionId) const;
+    bool updateMessageStatus(const Id & messageId, MessageStatus status,
+                             const QJsonObject & usage, const QString & errorMessage);
+    bool deleteMessage(const Id & messageId);
+    QList<Message> loadMessages(const Id & sessionId) const;
     /// 取最近 N 条消息，按时间正序返回。
-    QList<Message> loadRecentMessages(const Id &sessionId, int limit) const;
+    QList<Message> loadRecentMessages(const Id & sessionId, int limit) const;
 
     // ── 维护 ────────────────────────────────────────────────────────────────
     /// 删除指定工作区下的全部会话。
-    bool deleteSessionsForWorkspace(const QString &workspaceKey);
+    bool deleteSessionsForWorkspace(const QString & workspaceKey);
     /// 按标题 / 消息正文做模糊搜索，返回命中的会话摘要。
-    QList<SessionSummary> searchSessions(const QString &query, int limit = 50) const;
+    QList<SessionSummary> searchSessions(const QString & query, int limit = 50) const;
 
     /// 默认数据库文件路径：<数据目录>/sessions.db
     static QString defaultDatabasePath();
 
-private:
+  private:
     bool ensureSchema();
-    bool exec(const QString &sql, const QVariantList &bindings = {});
-    bool setError(const QString &context) const;
+    bool exec(const QString & sql, const QVariantList & bindings = {});
+    bool setError(const QString & context) const;
 
     mutable QSqlDatabase database_;
     mutable QString lastError_;

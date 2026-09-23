@@ -16,29 +16,32 @@
 
 #include "mcp/McpProtocol.h"
 
-namespace lycode {
+namespace lycode
+{
 class ToolRegistry;
 }
 
-namespace lycode::mcp {
+namespace lycode::mcp
+{
 
 class Client;
 
 /// MCP 服务器集合的管理者。
-class Manager : public QObject {
+class Manager : public QObject
+{
     Q_OBJECT
 
-public:
+  public:
     /// 工具名前缀，也用于从工具名反查服务器。
-    static QString toolNamePrefix(const QString &serverId);
+    static QString toolNamePrefix(const QString & serverId);
     /// 生成注册到工具表里的完整名字。
-    static QString qualifiedToolName(const QString &serverId, const QString &toolName);
+    static QString qualifiedToolName(const QString & serverId, const QString & toolName);
 
-    explicit Manager(QObject *parent = nullptr);
+    explicit Manager(QObject * parent = nullptr);
     ~Manager() override;
 
     /// 按配置启动全部启用的服务器。**异步**：立即返回，就绪后发 serverReady。
-    void startAll(const QList<ServerConfig> &configs);
+    void startAll(const QList<ServerConfig> & configs);
     /// 停止全部服务器（幂等）。
     void stopAll();
 
@@ -46,7 +49,7 @@ public:
     ///
     /// 必须在对应的 serverReady 之后调用——此时工具清单才拿到。
     /// 已注册过的工具会被跳过（同名覆盖由 ToolRegistry 处理）。
-    int registerToolsInto(ToolRegistry &registry);
+    int registerToolsInto(ToolRegistry & registry);
 
     /// 是否还有服务器在握手中（既没就绪也没失败）。
     /// 界面据此决定"要不要等 MCP 就绪再发第一次请求"。
@@ -54,25 +57,25 @@ public:
     /// 尚未就绪也未失败的服务器数量。
     int pendingCount() const;
 
-    ServerState state(const QString &serverId) const;
-    QString lastError(const QString &serverId) const;
+    ServerState state(const QString & serverId) const;
+    QString lastError(const QString & serverId) const;
     /// 多行的失败诊断（状态、子进程、stderr、stdout 计数）。
     /// 只用于日志/测试；查不到该 id 时返回一句说明而不是空串。
-    QString diagnostics(const QString &serverId) const;
+    QString diagnostics(const QString & serverId) const;
     int readyCount() const;
     /// 单个服务器的工具数量（未就绪为 0）。
-    int toolCount(const QString &serverId) const;
+    int toolCount(const QString & serverId) const;
 
-signals:
+  signals:
     /// 某个服务器握手完成、工具清单可用。
-    void serverReady(const QString &serverId, int toolCount);
+    void serverReady(const QString & serverId, int toolCount);
     /// 某个服务器启动或握手失败。
-    void serverFailed(const QString &serverId, const QString &reason);
+    void serverFailed(const QString & serverId, const QString & reason);
     /// 有服务器就绪或失败（供界面刷新状态）。
     void changed();
 
-private:
-    Client *client(const QString &serverId) const;
+  private:
+    Client * client(const QString & serverId) const;
 
     QList<Client *> clients_;
     /// 已经注册过工具的服务器，避免重复注册。

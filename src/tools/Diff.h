@@ -16,27 +16,29 @@
 #include <QJsonArray>
 #include <QString>
 
-namespace lycode {
+namespace lycode
+{
 
 /// 结构化补丁生成器。
-class Diff {
-public:
+class Diff
+{
+  public:
     /// 生成统一 diff 的 hunk 数组。
     /// 每个元素形如：
     ///   {"oldStart":1,"oldLines":3,"newStart":1,"newLines":4,
     ///    "lines":[{"type":"context"|"add"|"remove","text":"..."}]}
     /// 完全相同时返回空数组。`path` 仅用于日志。
-    static QJsonArray unified(const QString &oldText, const QString &newText, const QString &path);
+    static QJsonArray unified(const QString & oldText, const QString & newText, const QString & path);
 
     /// 统计新增/删除行数。指针可为 null；hunks 为空数组时置 0。
-    static void summary(const QJsonArray &hunks, int *additions, int *deletions);
+    static void summary(const QJsonArray & hunks, int * additions, int * deletions);
 
     /// 把 hunk 数组渲染成文本统一 diff（`--- a/x` / `+++ b/x` / `@@`）。
     /// 供"需要在 output 里给模型看补丁"的场景使用。
-    static QString render(const QJsonArray &hunks, const QString &path);
+    static QString render(const QJsonArray & hunks, const QString & path);
 
     /// 把文本按行切分（末尾换行不产生额外空行）。
-    static QStringList splitLines(const QString &text);
+    static QStringList splitLines(const QString & text);
 };
 
 }  // namespace lycode
