@@ -489,6 +489,7 @@ void MainWindow::buildMenus() {
 
     fileMenu->addSeparator();
     QAction *settings = fileMenu->addAction(QStringLiteral("设置…"));
+    settings->setObjectName(QStringLiteral("settingsAction"));
     settings->setShortcut(QKeySequence::Preferences);
     connect(settings, &QAction::triggered, this, &MainWindow::onSettingsRequested);
 

@@ -1,0 +1,12 @@
+1.DeepSeek
+model:deepseek-flash,deepseek-v4-pro
+base_url_type:Anthropic
+base_url:https://api.deepseek.com/anthropic
+thinking:off,low,medium,high,max
+maxcontextwindow:1000000,1000000
+2.Qwen
+model:qwen3.8-max,qwen3.8-flash,qwen3.7-plus,qwen3.7-max,qwen3.7-flash
+base_url_type:OpenAI
+base_url:https://maas.qianwenaiapi.com/compatible-mode/v1
+thinking:off,low,medium,high,max
+maxcontextwindow:1000000,1000000,1000000,1000000,1000000

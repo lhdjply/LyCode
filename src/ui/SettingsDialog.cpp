@@ -1,5 +1,7 @@
 #include "ui/SettingsDialog.h"
 
+#include "model/ModelCatalog.h"
+
 #include "skills/SkillLibrary.h"
 
 #include "core/Ids.h"
@@ -17,6 +19,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QInputDialog>
 #include <QListWidget>
 #include <QLoggingCategory>
 #include <QPlainTextEdit>
@@ -611,6 +614,9 @@ QWidget *SettingsDialog::buildProviderPage() {
     providerModelsEdit_->setFixedHeight(kModelsEditHeight);
     providerModelsEdit_->setTabChangesFocus(true);
     providerModelsEdit_->setPlaceholderText(QStringLiteral("claude-sonnet-4-5"));
+
+    // 从内置目录选模型：模型 id、上下文窗口、思考档位都在目录里，
+    // 让用户不必逐个手打（手打还容易把 id 拼错，报错要到调用时才发现）。
     enableMonoTypography(providerModelsEdit_, QStringLiteral("QPlainTextEdit#providerModels"),
                          FontRole::MonoSm);
     addFormField(form, QStringLiteral("模型列表"), providerModelsEdit_, providerForm_);
@@ -618,6 +624,22 @@ QWidget *SettingsDialog::buildProviderPage() {
         makeLabel(QStringLiteral("formHint"), QStringLiteral("每行一个模型 id，空行会被忽略。"),
                   FontRole::UiXs, ColorToken::ForegroundSubtlest, providerForm_);
     form->addWidget(providerModelsHintLabel_);
+
+    // 从内置目录选模型：模型 id、上下文窗口、思考档位都在目录里，
+    // 让用户不必逐个手打（手打容易拼错 id，报错要等到调用时才发现）。
+    {
+        auto *pickRow = new QHBoxLayout;
+        pickRow->setContentsMargins(0, 0, 0, 0);
+        auto *pickButton = new QPushButton(QStringLiteral("从列表选择…"), providerForm_);
+        pickButton->setObjectName(QStringLiteral("pickModelsFromCatalog"));
+        pickButton->setToolTip(
+            QStringLiteral("从内置模型目录选择，自动带上上下文窗口与思考档位"));
+        connect(pickButton, &QPushButton::clicked, this,
+                &SettingsDialog::pickModelsFromCatalog);
+        pickRow->addWidget(pickButton);
+        pickRow->addStretch(1);
+        form->addLayout(pickRow);
+    }
 
     providerEnabledCheck_ = new QCheckBox(QStringLiteral("启用"), providerForm_);
     providerEnabledCheck_->setObjectName(QStringLiteral("providerEnabled"));
@@ -1343,6 +1365,82 @@ bool editServerDialog(QWidget *parent, lycode::mcp::ServerConfig *server, bool i
 }
 
 }  // namespace
+
+void SettingsDialog::pickModelsFromCatalog() {
+    QString error;
+    const QList<model::CatalogProvider> providers = model::ModelCatalog::load(&error);
+    if (providers.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("模型目录不可用"),
+                             error.isEmpty()
+                                 ? QStringLiteral("内置模型目录为空。")
+                                 : error);
+        return;
+    }
+
+    // 一个扁平的候选表：`提供商 / 模型`。用 QInputDialog 而不是自建对话框——
+    // 这里只需要"选一个"，为此写一个窗口不值得。
+    QStringList labels;
+    QList<QPair<const model::CatalogProvider *, model::CatalogModel>> lookup;
+    for (const model::CatalogProvider &provider : providers) {
+        for (const model::CatalogModel &catalogModel : provider.models) {
+            labels.append(QStringLiteral("%1 / %2").arg(provider.name, catalogModel.id));
+            lookup.append({&provider, catalogModel});
+        }
+    }
+
+    bool accepted = false;
+    const QString chosen = QInputDialog::getItem(
+        this, QStringLiteral("从列表选择模型"),
+        QStringLiteral("内置目录里的模型（选择后会加入当前 Provider）："), labels, 0, false,
+        &accepted, Qt::Popup | Qt::WindowCloseButtonHint);
+    if (!accepted || chosen.isEmpty()) {
+        return;
+    }
+    const int index = labels.indexOf(chosen);
+    if (index < 0) {
+        return;
+    }
+    const auto &[provider, catalogModel] = lookup.at(index);
+
+    // ① 模型 id 追加到列表（已存在就不重复加）。
+    const QStringList existing = parseModelIds(providerModelsEdit_->toPlainText());
+    if (!existing.contains(catalogModel.id)) {
+        QString text = providerModelsEdit_->toPlainText().trimmed();
+        if (!text.isEmpty()) {
+            text += QLatin1Char('\n');
+        }
+        providerModelsEdit_->setPlainText(text + catalogModel.id);
+    }
+
+    // ② 顺手把 Provider 的名称、协议与地址补上——用户点"从列表选择"的意图
+    //    本来就是"照目录配一个"，让他再手打 base_url 等于把便利又拿走了。
+    //    只在空着的时候填，避免覆盖用户已有的配置。
+    if (providerNameEdit_->text().trimmed().isEmpty()) {
+        providerNameEdit_->setText(provider->name);
+    }
+    if (providerBaseUrlEdit_->text().trimmed().isEmpty()) {
+        providerBaseUrlEdit_->setText(provider->baseUrl);
+        const int kindIndex = providerKindCombo_->findData(static_cast<int>(provider->kind));
+        if (kindIndex >= 0) {
+            providerKindCombo_->setCurrentIndex(kindIndex);
+        }
+    }
+
+    // ③ 目录里的能力写进覆盖表：否则用户选完模型还得去"模型能力"页再填一遍。
+    //    providerId 用当前编辑框里的 id（目录里的名字只是展示名）。
+    const QString providerId =
+        (currentProvider_ >= 0 && currentProvider_ < settings_.providers.size())
+            ? settings_.providers.at(currentProvider_).id
+            : QString();
+    const ModelOptionOverride override =
+        model::ModelCatalog::overrideFor(*provider, catalogModel.id, providerId);
+    if (!override.isEmpty() && !providerId.isEmpty()) {
+        settings_.setModelOverride(providerId, catalogModel.id, override);
+        refreshCapabilityValidation();  // 让"模型能力"页立刻反映出来
+    }
+
+    qCInfo(log) << "已从模型目录选择:" << provider->name << catalogModel.id;
+}
 
 QWidget *SettingsDialog::buildIntegrationsPage() {
     auto *page = new QWidget;

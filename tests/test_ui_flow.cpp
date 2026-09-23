@@ -56,6 +56,7 @@
 
 #include "support/FakeGateway.h"
 #include "ui/ConversationView.h"
+#include "model/ModelCatalog.h"
 #include "ui/MainWindow.h"
 #include "ui/PermissionDialog.h"
 #include "ui/AppConfig.h"
@@ -108,6 +109,7 @@ private slots:
     void everyWorkspaceShowsFoldMarker();
     void windowUsesTheAppIcon();
     void choiceButtonsFillTheComposer();
+    void settingsPickModelsFromTheCatalog();
 
 private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -1514,6 +1516,67 @@ void TestUiFlow::choiceButtonsFillTheComposer() {
     // 填进输入框而不是直接发送：用户还能改一改，也避免误点直接发出。
     QCOMPARE(composer->toPlainText(), QStringLiteral("同时改 Read 与 Grep"));
     QVERIFY2(!bar->isVisible(), "选完之后按钮条应当收起");
+}
+
+void TestUiFlow::settingsPickModelsFromTheCatalog() {
+    // 用户诉求："现在模型只能自定义，没有提供几种可以选择"。
+    // 设置页的 Provider 表单上要有入口，能按内置目录选模型。
+    MainWindow window;
+    window.show();
+    QVERIFY(waitFor([&]() { return window.isVisible(); }, 5000));
+
+    auto *sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+    QVERIFY(sidebar != nullptr);
+    {
+        QTemporaryDir own;
+        QVERIFY(own.isValid());
+        emit sidebar->workspaceRecentRequested(own.path());
+    }
+    QTest::qWait(200);
+
+    // 打开设置对话框（走菜单里那一条，与用户实际路径一致）。
+    auto *settingsAction = window.findChild<QAction *>(QStringLiteral("settingsAction"));
+    QVERIFY2(settingsAction != nullptr, "应当有打开设置的入口");
+
+    // 设置对话框是模态的（exec() 会开嵌套事件循环），trigger() 要等对话框关掉
+    // 才会返回。所以不能 trigger() 之后再去找弹窗——那时测试已经卡在嵌套循环里，
+    // 没人去关它，只能等 QtTest 的函数超时。断言改成在 singleShot 回调里对
+    // 活着的对话框做，结论用变量带出来，trigger() 返回后再 QVERIFY。
+    bool foundDialog = false;
+    bool pickExists = false;
+    bool pickVisible = false;
+    bool pickHasToolTip = false;
+    QTimer::singleShot(300, [&]() {
+        auto *modal = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        if (modal == nullptr) {
+            return;
+        }
+        foundDialog = true;
+        // 按钮挂在 Provider 页上，而对话框默认停在外观页。先切到那一页再断言：
+        // 否则量到的是"这个 Tab 没被选中"，不是"按钮没真正放上界面"。
+        if (auto *modalTabs = modal->findChild<QTabWidget *>(QStringLiteral("settingsTabs"))) {
+            modalTabs->setCurrentIndex(1);
+        }
+        auto *pick = modal->findChild<QPushButton *>(QStringLiteral("pickModelsFromCatalog"));
+        if (pick != nullptr) {
+            pickExists = true;
+            pickVisible = pick->isVisible();
+            pickHasToolTip = !pick->toolTip().isEmpty();
+        }
+        modal->reject();
+    });
+
+    settingsAction->trigger();  // 阻塞，直到上面的 lambda 把对话框关掉
+
+    QVERIFY2(foundDialog, "设置对话框应当以模态方式打开");
+    QVERIFY2(pickExists, "Provider 表单上应当有「从列表选择…」按钮");
+    QVERIFY2(pickVisible, "按钮必须可见（不能只是构造了却没放上界面）");
+    QVERIFY2(pickHasToolTip, "按钮应当有说明");
+
+    // 内置目录本身可用——它是这个按钮的数据源，缺了就会弹出"目录不可用"。
+    QString error;
+    const QList<lycode::model::CatalogProvider> providers = lycode::model::ModelCatalog::load(&error);
+    QVERIFY2(!providers.isEmpty(), qPrintable(QStringLiteral("模型目录载入失败: %1").arg(error)));
 }
 
 QTEST_MAIN(TestUiFlow)

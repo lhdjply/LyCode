@@ -198,6 +198,7 @@ void SidebarPanel::buildUi() {
 
     // ── 设置入口 ────────────────────────────────────────────────────────────
     settingsButton_ = new QPushButton(QStringLiteral("设置"));
+    settingsButton_->setObjectName(QStringLiteral("settingsButton"));
     settingsButton_->setProperty("variant", QStringLiteral("ghost"));
     settingsButton_->setCursor(Qt::PointingHandCursor);
     connect(settingsButton_, &QPushButton::clicked, this, &SidebarPanel::settingsRequested);

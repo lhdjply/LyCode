@@ -92,6 +92,11 @@ private:
     /// 写表格的表头文字。构造与每次 reload 都要调用——QTableWidget::clear()
     /// 会连表头一起清空。
     void applyCapabilityHeaderLabels();
+
+    /// 从内置模型目录里选模型，填进当前 Provider 的模型列表。
+    /// 目录里带的能力（上下文窗口、思考档位）会一并写进 modelOverrides，
+    /// 免得用户选完模型还要去"模型能力"页再填一遍。
+    void pickModelsFromCatalog();
     void reloadModelCapabilityTable();
     /// 创建一个模型行（模型 / 上下文窗口 / 最大输出 / 思考档位 / 默认档位）。
     void addCapabilityRow(int row, const QString &modelId, const ModelOptionOverride &override);

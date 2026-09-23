@@ -9,5 +9,7 @@
     <file>icons/linux/hicolor/256x256/apps/lycode.png</file>
     <file>icons/linux/hicolor/512x512/apps/lycode.png</file>
     <file>icons/windows/lycode.ico</file>
+    <!-- 内置模型目录：设置页据此让用户从列表里选模型 -->
+    <file>model_list.txt</file>
   </qresource>
 </RCC>

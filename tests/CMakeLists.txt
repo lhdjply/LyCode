@@ -24,6 +24,7 @@ set_target_properties(fake_mcp_server PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
+lycode_add_test(test_model_catalog)
 lycode_add_test(test_types)
 lycode_add_test(test_permission_gate)
 lycode_add_test(test_markdown)
