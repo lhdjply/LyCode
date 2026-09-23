@@ -1,0 +1,7 @@
+#!/usr/bin/make -f
+
+# 打包时会真的跑测试：dh_auto_test 在构建目录执行 ctest，12 个套件全部构建并运行。
+# 平台无需额外设置：每个测试由 ctest 属性注入 QT_QPA_PLATFORM=offscreen，
+# 构建 chroot 里没有显示服务也能跑；需要临时跳过时用 DEB_BUILD_OPTIONS=nocheck。
+%:
+	dh $@

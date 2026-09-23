@@ -1,0 +1,32 @@
+Source: lycode
+Section: devel
+Priority: optional
+Maintainer: lhdjply <lhdjply@126.com>
+Build-Depends: debhelper-compat (= 13),
+               cmake,
+               ninja-build,
+               qt6-base-dev,
+               qt6-base-dev-tools,
+Rules-Requires-Root: no
+Standards-Version: 4.6.0
+Homepage: https://github.com/lhdjply/LyCode/
+Vcs-Browser: https://github.com/lhdjply/LyCode
+Vcs-Git: https://github.com/lhdjply/LyCode.git
+
+Package: lycode
+Section: devel
+Priority: optional
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ libqt6sql6-sqlite
+Description: native desktop coding agent built with Qt6
+ LyCode is a native desktop coding agent written in C++20 with Qt6.
+ .
+ It provides workspace and session management, streaming conversations
+ with incremental Markdown rendering, declarative tool calling behind a
+ permission gate, sub-agents, background tasks, MCP servers over stdio,
+ skills, syntax highlighting and a local SQLite session store.
+ .
+ The agent runtime is pure C++ and does not depend on Node.js.
