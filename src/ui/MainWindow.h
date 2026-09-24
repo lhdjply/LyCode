@@ -45,6 +45,7 @@ class QTimer;
 namespace lycode::ui
 {
 
+class ChoiceCard;
 class ConversationView;
 class SidebarPanel;
 
@@ -192,11 +193,14 @@ class MainWindow : public QMainWindow
     /// 重建附件条。
     void refreshAttachmentStrip();
 
-    /// 选项按钮条：模型按统一的 `choices` 格式给出选项时，渲染成可点的按钮。
+    /// 问询卡片：模型按统一的 `choices` 格式给出选项时，在输入框上方渲染成卡片。
     /// 直接开在输入框上方——它是"这一次输入"的辅助，不是对话内容的一部分。
     void refreshChoices();
-    QWidget * choiceBar_ = nullptr;
-    QHBoxLayout * choiceLayout_ = nullptr;
+    /// 用户选完并提交：把拼好的回答写进输入框并**直接发送**。
+    void onChoicesAnswered(const QString & answer);
+    ChoiceCard * choiceCard_ = nullptr;
+    /// 已经放弃过问询卡片的那条消息。刷新时据此不再把同一张卡片摆回来。
+    Id choicesDismissedFor_;
     QPushButton * sendButton_ = nullptr;
     QPushButton * stopButton_ = nullptr;
 

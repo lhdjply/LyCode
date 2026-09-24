@@ -63,23 +63,41 @@ class Markdown
     /// 纯文本预览：去掉 Markdown 标记，用于会话列表的一行摘要。
     static QString toPlainPreview(const QString & markdown, int maxChars = 120);
 
-    /// 一个可点选的选项。
-    struct Choice {
-      /// 按钮上显示的短标签。
+    /// 卡片里的一个选项。
+    struct ChoiceOption {
+      /// 选项标题，显示成卡片里的主行。
       QString label;
-      /// 点选后填进输入框的文本（通常就是选项原文）。
-      QString text;
+      /// 灰字说明，可空。
+      QString description;
+      /// 是否显示推荐徽标——由标签末尾的 `(推荐)` / `(Recommended)` 标记。
+      bool recommended = false;
+      /// 选中后作为回答发出的文本。
+      QString value;
     };
 
-    /// 从 markdown **尾部**识别"让用户在若干选项里选一个"的列表。
+    /// 一道要用户回答的问题，对应卡片的一页。
+    struct ChoiceQuestion {
+      /// 眉标（卡片头部的浅色小字），可空。
+      QString header;
+      /// 问题标题，可空。
+      QString question;
+      QList<ChoiceOption> options;
+    };
+
+    /// 从 markdown **尾部**识别要用户做选择的内容，供问询卡片渲染。
     ///
-    /// 判定刻意保守：宁可不识别，也不要把正文里的普通编号列表变成一排按钮——
-    /// 那会让正常的回答看起来像在要求用户做选择。全部条件都要满足：
-    ///   * 尾部是一个 2–6 项的列表（有序 `1.` / `1)` / `1、`，或无序 `-` / `*`）
-    ///   * 每项只有一行、且不超过 80 字符
-    ///   * 列表**前面紧邻**一行是提问（以 ? / ？ 结尾，或含"选择/哪种/哪个/which/choose"）
-    /// 不满足时返回空列表，调用方据此不显示任何按钮。
-    static QList<Choice> detectChoices(const QString & markdown);
+    /// 判定刻意保守：宁可不识别，也不要把正文里的普通编号列表变成一张卡片——
+    /// 那会让正常的回答看起来像在要求用户做选择。只认 info 为 `choices` 的围栏块，
+    /// 块内语法在系统提示词里写明（改这里就要同步改 SystemPrompt）：
+    ///
+    ///   `# 眉标`          当前问题的眉标（可省）
+    ///   `? 问题`          开一道新问题（可省；省了就是"只有选项没有问题"）
+    ///   `- 标题 :: 说明`  一个选项，` :: ` 之后是灰字说明（可省）
+    ///   `- 标题 (推荐)`   末尾的 `(推荐)` / `(Recommended)` 变成推荐徽标
+    ///
+    /// 每道问题 2–6 个选项、标签不超过 80 字符；任何一项不合规就丢掉**那道问题**，
+    /// 不做"尽力而为"的截取。全都拿不到时返回空列表，调用方据此不显示卡片。
+    static QList<ChoiceQuestion> detectQuestions(const QString & markdown);
 };
 
 }  // namespace lycode::ui

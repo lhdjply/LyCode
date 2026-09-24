@@ -46,6 +46,7 @@ class TestMarkdown : public QObject
     void rendersIndentedFenceWithTildes();
     void inlineCodeSurvivesEmphasisRules();
     void detectsChoicesOnlyFromTheUnifiedFormat();
+    void parsesRichQuestionsWithHeaderDescriptionAndRecommendation();
     void rendersEmphasis();
     void rendersLists();
     void rendersTaskList();
@@ -273,55 +274,141 @@ void TestMarkdown::plainPreviewStripsMarkup()
 void TestMarkdown::detectsChoicesOnlyFromTheUnifiedFormat()
 {
   // 只认统一的 `choices` 围栏。这是刻意的：去猜正文里的编号列表必然误判，
-  // 把"步骤如下：1. 2. 3."或目录变成一排按钮，正常的回答看起来像在逼用户选。
-  const QList<Markdown::Choice> fromFence = Markdown::detectChoices(
-                                              QStringLiteral("我看了两种改法：\n\n"
-                                                             "```choices\n"
-                                                             "- 只改 Read 工具，最小改动\n"
-                                                             "- 同时改 Read 与 Grep\n"
-                                                             "```\n"));
-  QCOMPARE(fromFence.size(), 2);
-  QCOMPARE(fromFence.at(0).label, QStringLiteral("只改 Read 工具，最小改动"));
-  // 点选后填进输入框的就是选项原文。
-  QCOMPARE(fromFence.at(1).text, QStringLiteral("同时改 Read 与 Grep"));
+  // 把"步骤如下：1. 2. 3."或目录变成一张卡片，正常的回答看起来像在逼用户选。
+  const QList<Markdown::ChoiceQuestion> fromFence = Markdown::detectQuestions(
+                                                      QStringLiteral("我看了两种改法：\n\n"
+                                                                     "```choices\n"
+                                                                     "- 只改 Read 工具，最小改动\n"
+                                                                     "- 同时改 Read 与 Grep\n"
+                                                                     "```\n"));
+  QCOMPARE(fromFence.size(), 1);
+  QCOMPARE(fromFence.at(0).options.size(), 2);
+  QCOMPARE(fromFence.at(0).options.at(0).label, QStringLiteral("只改 Read 工具，最小改动"));
+  // 提交后填进输入框的就是选项标题。
+  QCOMPARE(fromFence.at(0).options.at(1).value, QStringLiteral("同时改 Read 与 Grep"));
 
   // 有序列表写法的选项也要能认。
-  const QList<Markdown::Choice> ordered = Markdown::detectChoices(
-                                            QStringLiteral("```choices\n1. 方案甲\n2. 方案乙\n3. 方案丙\n```"));
-  QCOMPARE(ordered.size(), 3);
-  QCOMPARE(ordered.at(2).label, QStringLiteral("方案丙"));
+  const QList<Markdown::ChoiceQuestion> ordered = Markdown::detectQuestions(
+                                                    QStringLiteral("```choices\n1. 方案甲\n2. 方案乙\n3. 方案丙\n```"));
+  QCOMPARE(ordered.size(), 1);
+  QCOMPARE(ordered.at(0).options.size(), 3);
+  QCOMPARE(ordered.at(0).options.at(2).label, QStringLiteral("方案丙"));
 
   // ★ 正文里的普通编号列表**不该**被当成选项——这正是放弃启发式识别的理由。
-  QVERIFY2(Markdown::detectChoices(QStringLiteral("步骤如下：\n\n"
-                                                  "1. 打开文件\n"
-                                                  "2. 修改配置\n"
-                                                  "3. 重启服务\n"))
+  QVERIFY2(Markdown::detectQuestions(QStringLiteral("步骤如下：\n\n"
+                                                     "1. 打开文件\n"
+                                                     "2. 修改配置\n"
+                                                     "3. 重启服务\n"))
            .isEmpty(),
            "普通的编号步骤不该被当成选项");
 
-  // 列表就该是列表，不能因为"看起来像选项"就变成按钮。
-  QVERIFY(Markdown::detectChoices(QStringLiteral("你可以选择：\n- 甲\n- 乙\n")).isEmpty());
+  // 列表就该是列表，不能因为"看起来像选项"就变成卡片。
+  QVERIFY(Markdown::detectQuestions(QStringLiteral("你可以选择：\n- 甲\n- 乙\n")).isEmpty());
 
   // 只有一个选项、或超过 6 项，都不算选择。
-  QVERIFY(Markdown::detectChoices(QStringLiteral("```choices\n- 只有一个\n```")).isEmpty());
-  QVERIFY(Markdown::detectChoices(QStringLiteral(
-                                    "```choices\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n```"))
+  QVERIFY(Markdown::detectQuestions(QStringLiteral("```choices\n- 只有一个\n```")).isEmpty());
+  QVERIFY(Markdown::detectQuestions(QStringLiteral(
+                                      "```choices\n- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n```"))
           .isEmpty());
 
   // 只认**最后**一个 choices 块：前一轮的选项不该再摆出来。
-  const QList<Markdown::Choice> last = Markdown::detectChoices(
-                                         QStringLiteral("```choices\n- 旧的甲\n- 旧的乙\n```\n\n中间说明\n\n"
-                                                        "```choices\n- 新的甲\n- 新的乙\n```\n"));
-  QCOMPARE(last.size(), 2);
-  QCOMPARE(last.at(0).label, QStringLiteral("新的甲"));
+  const QList<Markdown::ChoiceQuestion> last = Markdown::detectQuestions(
+                                                 QStringLiteral("```choices\n- 旧的甲\n- 旧的乙\n```\n\n中间说明\n\n"
+                                                                "```choices\n- 新的甲\n- 新的乙\n```\n"));
+  QCOMPARE(last.size(), 1);
+  QCOMPARE(last.at(0).options.at(0).label, QStringLiteral("新的甲"));
 
-  // 渲染成列表，而不是代码块（否则选项会在正文与按钮里各出现一次）。
+  // 渲染成列表，而不是代码块（否则选项会在正文与卡片里各出现一次）。
   const QString html = Markdown::toHtml(
                          QStringLiteral("```choices\n- 甲方案\n- 乙方案\n```"), testStyle());
   QVERIFY2(html.contains(QStringLiteral("<ul class=\"choices\">")), qPrintable(html));
   QVERIFY2(!html.contains(QStringLiteral("code-block")),
            "choices 块不该渲染成代码块");
   QVERIFY(html.contains(QStringLiteral("甲方案")));
+}
+
+void TestMarkdown::parsesRichQuestionsWithHeaderDescriptionAndRecommendation()
+{
+  // 问询卡片需要比"一行一个标签"更多的信息：眉标、问题、每个选项的灰字说明、
+  // 以及推荐徽标。这些都在同一个 choices 围栏里用行首标记表达。
+  const QList<Markdown::ChoiceQuestion> questions = Markdown::detectQuestions(
+                                                     QStringLiteral(
+                                                       "我看到两条路：\n\n"
+                                                       "```choices\n"
+                                                       "# 重定方向\n"
+                                                       "? 按哪个方向做完？\n"
+                                                       "- 中文源 + 补 302 条英译 (推荐) :: 源文案保持中文，只补英译\n"
+                                                       "- 仍按英文源重做 :: 把 302 处中文改成英文源码\n"
+                                                       "```\n"));
+  QCOMPARE(questions.size(), 1);
+  QCOMPARE(questions.at(0).header, QStringLiteral("重定方向"));
+  QCOMPARE(questions.at(0).question, QStringLiteral("按哪个方向做完？"));
+  QCOMPARE(questions.at(0).options.size(), 2);
+
+  const Markdown::ChoiceOption & first = questions.at(0).options.at(0);
+  QCOMPARE(first.label, QStringLiteral("中文源 + 补 302 条英译"));
+  QVERIFY2(first.recommended, "末尾的 (推荐) 应当变成推荐标记，并从标题里去掉");
+  QCOMPARE(first.description, QStringLiteral("源文案保持中文，只补英译"));
+  QCOMPARE(first.value, first.label);
+
+  const Markdown::ChoiceOption & second = questions.at(0).options.at(1);
+  QVERIFY(!second.recommended);
+  QCOMPARE(second.label, QStringLiteral("仍按英文源重做"));
+  QCOMPARE(second.description, QStringLiteral("把 302 处中文改成英文源码"));
+
+  // `?` 开新的一题：卡片靠它分页（1 / N）。
+  const QList<Markdown::ChoiceQuestion> twoPages = Markdown::detectQuestions(
+                                                     QStringLiteral(
+                                                       "```choices\n"
+                                                       "? 第一题\n"
+                                                       "- 甲\n- 乙\n"
+                                                       "? 第二题\n"
+                                                       "- 丙\n- 丁\n"
+                                                       "```\n"));
+  QCOMPARE(twoPages.size(), 2);
+  QCOMPARE(twoPages.at(1).question, QStringLiteral("第二题"));
+  QCOMPARE(twoPages.at(1).options.at(0).label, QStringLiteral("丙"));
+
+  // 说明文字的分隔符要求两侧有空格：C++ 限定名不能被切成两半。
+  const QList<Markdown::ChoiceQuestion> scoped = Markdown::detectQuestions(
+                                                   QStringLiteral("```choices\n"
+                                                                  "- 改 ProviderRegistry::resolve()\n"
+                                                                  "- 不改\n"
+                                                                  "```\n"));
+  QCOMPARE(scoped.at(0).options.at(0).label,
+           QStringLiteral("改 ProviderRegistry::resolve()"));
+  QVERIFY(scoped.at(0).options.at(0).description.isEmpty());
+
+  // 全角括号的 (推荐) 也认。
+  const QList<Markdown::ChoiceQuestion> fullWidth = Markdown::detectQuestions(
+                                                      QStringLiteral("```choices\n"
+                                                                     "- 甲（推荐）\n"
+                                                                     "- 乙\n"
+                                                                     "```\n"));
+  QCOMPARE(fullWidth.at(0).options.at(0).label, QStringLiteral("甲"));
+  QVERIFY(fullWidth.at(0).options.at(0).recommended);
+
+  // 旧格式（只有选项、没有眉标与问题）仍然要能解析，且拿得到空的头部字段。
+  const QList<Markdown::ChoiceQuestion> legacy = Markdown::detectQuestions(
+                                                   QStringLiteral("```choices\n- 甲\n- 乙\n```\n"));
+  QCOMPARE(legacy.size(), 1);
+  QVERIFY(legacy.at(0).header.isEmpty());
+  QVERIFY(legacy.at(0).question.isEmpty());
+  QCOMPARE(legacy.at(0).options.size(), 2);
+
+  // 合规性仍然按"每道问题"判定：出问题的那一题丢掉，不牵连别题。
+  const QList<Markdown::ChoiceQuestion> partlyBad = Markdown::detectQuestions(
+                                                      QStringLiteral("```choices\n"
+                                                                     "? 七个选项的那题\n"
+                                                                     "- 1\n- 2\n- 3\n- 4\n- 5\n- 6\n- 7\n"
+                                                                     "? 正常的一题\n"
+                                                                     "- 甲\n- 乙\n"
+                                                                     "```\n"));
+  QCOMPARE(partlyBad.size(), 1);
+  QCOMPARE(partlyBad.at(0).question, QStringLiteral("正常的一题"));
+
+  // 正文里的普通列表依旧不能变成卡片。
+  QVERIFY(Markdown::detectQuestions(QStringLiteral("步骤如下：\n\n1. 打开文件\n2. 修改配置\n")).isEmpty());
 }
 
 QTEST_MAIN(TestMarkdown)

@@ -205,17 +205,49 @@ QString Markdown::toHtml(const QString & markdown, const MarkdownStyle & style)
     // 以按钮出现，看起来像重复了两遍。
     if(codeLanguage.trimmed().compare(QLatin1String("choices"),
                                       Qt::CaseInsensitive) == 0) {
+      // 正文里把同一批选项再画一遍，是为了让已经划过去的卡片仍然读得懂。
+      // 这里只做**展示**：控制标记（`#` 眉标、`?` 问题、` :: ` 说明、`(推荐)`）
+      // 都要从可见文字里去掉；语法本身由 Markdown::detectQuestions() 解释，
+      // 两边的规则要一起改。
+      static const QRegularExpression recommendedMark(
+        QStringLiteral("\\s*[（(]\\s*(?:推荐|recommended)\\s*[)）]\\s*$"),
+        QRegularExpression::CaseInsensitiveOption);
+      static const QRegularExpression orderedPrefix(
+        QStringLiteral("^\\d{1,2}[.)\\x{3001}]\\s*"));
+      static const QString descriptionSeparator = QStringLiteral(" :: ");
+
       QString list;
       for(const QString & item : std::as_const(codeLines)) {
         QString text = item.trimmed();
         if(text.isEmpty()) {
           continue;
         }
+        if(text.startsWith(QLatin1Char('#')) || text.startsWith(QLatin1Char('?'))) {
+          const QString heading = text.mid(1).trimmed();
+          if(!heading.isEmpty()) {
+            list += QStringLiteral("<li class=\"choices-heading\">%1</li>").arg(escape(heading));
+          }
+          continue;
+        }
         if(text.size() > 1 && (text.at(0) == QLatin1Char('-') ||
-                               text.at(0) == QLatin1Char('*'))) {
+                               text.at(0) == QLatin1Char('*') ||
+                               text.at(0) == QLatin1Char('+'))) {
           text = text.mid(1).trimmed();
         }
-        list += QStringLiteral("<li>%1</li>").arg(escape(text));
+        else {
+          text.remove(orderedPrefix);
+        }
+        QString description;
+        if(const int at = text.indexOf(descriptionSeparator); at >= 0) {
+          description = text.mid(at + descriptionSeparator.size()).trimmed();
+          text = text.left(at).trimmed();
+        }
+        text.remove(recommendedMark);
+        QString rendered = escape(text);
+        if(!description.isEmpty()) {
+          rendered += QStringLiteral("<span class=\"choices-desc\">%1</span>").arg(escape(description));
+        }
+        list += QStringLiteral("<li>%1</li>").arg(rendered);
       }
       html += QStringLiteral("<ul class=\"choices\">%1</ul>\n").arg(list);
       codeLines.clear();
@@ -466,19 +498,19 @@ QString Markdown::styleSheet(const MarkdownStyle & style)
 // 选项识别
 // ─────────────────────────────────────────────────────────────────────────────
 
-QList<Markdown::Choice> Markdown::detectChoices(const QString & markdown)
+QList<Markdown::ChoiceQuestion> Markdown::detectQuestions(const QString & markdown)
 {
-  constexpr int kMaxChoices = 6;
+  constexpr int kMaxOptionsPerQuestion = 6;
   constexpr int kMaxLabelChars = 80;
   constexpr char kFenceInfo[] = "choices";
 
   // 只认**统一格式**：一个 info 为 `choices` 的围栏块。
   //
   // 为什么不去猜正文里的编号列表：那样必然误判——"步骤如下：1. 2. 3."、
-  // 目录、并列的要点，全都会被变成一排按钮，正常的回答看起来像在逼用户做选择。
+  // 目录、并列的要点，全都会被变成一张卡片，正常的回答看起来像在逼用户做选择。
   // 由系统提示词要求模型按这个格式输出，解析就变成精确匹配。
   const QStringList lines = markdown.split(QLatin1Char('\n'));
-  QStringList labels;
+  QStringList block;
   bool inside = false;
   for(const QString & line : lines) {
     const QString trimmed = line.trimmed();
@@ -491,7 +523,7 @@ QList<Markdown::Choice> Markdown::detectChoices(const QString & markdown)
         trimmed.mid(3, trimmed.size() - 3).trimmed().toLower();
       if(info == QLatin1String(kFenceInfo)) {
         inside = true;
-        labels.clear();  // 只认**最后**一个 choices 块
+        block.clear();  // 只认**最后**一个 choices 块
       }
       continue;
     }
@@ -500,12 +532,50 @@ QList<Markdown::Choice> Markdown::detectChoices(const QString & markdown)
       inside = false;
       continue;
     }
-    if(trimmed.isEmpty()) {
+    if(!trimmed.isEmpty()) {
+      block.append(trimmed);
+    }
+  }
+
+  // 标签末尾的 `(推荐)` / `(Recommended)`（半角/全角括号都认）。
+  static const QRegularExpression kRecommended(
+    QStringLiteral("\\s*[（(]\\s*(?:推荐|recommended)\\s*[)）]\\s*$"),
+    QRegularExpression::CaseInsensitiveOption);
+  // 有序列表前缀：`1.` / `1)` / `1、`。
+  static const QRegularExpression kOrderedPrefix(
+    QStringLiteral("^\\d{1,2}[.)\\x{3001}]\\s*"));
+
+  QList<ChoiceQuestion> questions;
+  ChoiceQuestion current;
+  bool malformed = false;
+
+  const auto flush = [&]() {
+    if(!current.options.isEmpty() && !malformed &&
+       current.options.size() >= 2 && current.options.size() <= kMaxOptionsPerQuestion) {
+      questions.append(current);
+    }
+    current = ChoiceQuestion{};
+    malformed = false;
+  };
+
+  for(const QString & raw : std::as_const(block)) {
+    // `#` 眉标 / `?` 问题标题：两者都算"另起一题"。
+    if(raw.startsWith(QLatin1Char('#')) || raw.startsWith(QLatin1Char('?'))) {
+      const bool isHeader = raw.startsWith(QLatin1Char('#'));
+      const QString text = raw.mid(1).trimmed();
+      if(!current.options.isEmpty()) {
+        flush();   // 上一题的选项已经收齐，这里开新的一题
+      }
+      if(isHeader) {
+        current.header = text;
+      }
+      else {
+        current.question = text;
+      }
       continue;
     }
 
-    // 允许 `- 选项` / `* 选项` / `1. 选项`，也允许直接写一行。
-    QString body = trimmed;
+    QString body = raw;
     if(body.size() > 1 &&
        (body.at(0) == QLatin1Char('-') || body.at(0) == QLatin1Char('*') ||
         body.at(0) == QLatin1Char('+')) &&
@@ -513,27 +583,41 @@ QList<Markdown::Choice> Markdown::detectChoices(const QString & markdown)
       body = body.mid(1).trimmed();
     }
     else {
-      static const QRegularExpression ordered(
-        QStringLiteral("^\\d{1,2}[.)\\x{3001}]\\s*"));
-      body.remove(ordered);
+      body.remove(kOrderedPrefix);
     }
 
-    if(body.isEmpty() || body.size() > kMaxLabelChars ||
-       labels.size() >= kMaxChoices) {
-      return {};  // 格式不合规就整体放弃，不做"尽力而为"的截取
+    // 说明文字的分隔符刻意要求**两侧有空格**：` :: `。
+    // 宽松匹配会把 `ProviderRegistry::resolve()` 这类 C++ 限定名切成两半。
+    static const QString kDescriptionSeparator = QStringLiteral(" :: ");
+    QString label = body;
+    QString description;
+    if(const int at = body.indexOf(kDescriptionSeparator); at >= 0) {
+      label = body.left(at).trimmed();
+      description = body.mid(at + kDescriptionSeparator.size()).trimmed();
     }
-    labels.append(body);
-  }
 
-  if(labels.size() < 2) {
-    return {};
+    bool recommended = false;
+    const QRegularExpressionMatch match = kRecommended.match(label);
+    if(match.hasMatch()) {
+      recommended = true;
+      label = label.left(match.capturedStart()).trimmed();
+    }
+
+    if(label.isEmpty() || label.size() > kMaxLabelChars) {
+      malformed = true;   // 这一题整体作废，不做截取
+      continue;
+    }
+
+    ChoiceOption option;
+    option.label = label;
+    option.description = description;
+    option.recommended = recommended;
+    option.value = label;   // 填回输入框的就是选项标题
+    current.options.append(option);
   }
-  QList<Choice> choices;
-  choices.reserve(labels.size());
-  for(const QString & label : labels) {
-    choices.append(Choice{label, label});
-  }
-  return choices;
+  flush();
+
+  return questions;
 }
 
 QString Markdown::toPlainPreview(const QString & markdown, int maxChars)

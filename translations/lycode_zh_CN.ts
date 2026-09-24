@@ -770,6 +770,67 @@ output_path: %3
     </message>
 </context>
 <context>
+    <name>ui::ChoiceCard</name>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="98"/>
+        <source>Recommended</source>
+        <translation>推荐</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="159"/>
+        <location filename="../src/ui/ChoiceCard.cpp" line="255"/>
+        <location filename="../src/ui/ChoiceCard.cpp" line="314"/>
+        <source>Collapse the question card</source>
+        <translation>收起问题卡片</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="166"/>
+        <source>Dismiss all questions</source>
+        <translation>放弃整组问题</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="184"/>
+        <source>Type your answer</source>
+        <translation>输入你的答案</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="218"/>
+        <source>Previous question</source>
+        <translation>上一题</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="229"/>
+        <source>Next question</source>
+        <translation>下一题</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="235"/>
+        <source>Skip</source>
+        <translation>跳过</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="241"/>
+        <location filename="../src/ui/ChoiceCard.cpp" line="391"/>
+        <source>Submit</source>
+        <translation>提交</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="254"/>
+        <source>Expand the question card</source>
+        <translation>展开问题卡片</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="391"/>
+        <source>Next</source>
+        <translation>下一题</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ChoiceCard.cpp" line="475"/>
+        <source>%1: %2</source>
+        <translation>%1：%2</translation>
+    </message>
+</context>
+<context>
     <name>ui::ConversationView</name>
     <message>
         <location filename="../src/ui/ConversationView.cpp" line="32"/>
@@ -894,79 +955,79 @@ Open it with the system application instead.</source>
 <context>
     <name>ui::MainWindow</name>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="76"/>
-        <location filename="../src/ui/MainWindow.cpp" line="88"/>
+        <location filename="../src/ui/MainWindow.cpp" line="77"/>
+        <location filename="../src/ui/MainWindow.cpp" line="89"/>
         <source>Ready</source>
         <translation>就绪</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="78"/>
+        <location filename="../src/ui/MainWindow.cpp" line="79"/>
         <source>Generating…</source>
         <translation>正在生成…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="80"/>
+        <location filename="../src/ui/MainWindow.cpp" line="81"/>
         <source>Running tools…</source>
         <translation>正在执行工具…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="82"/>
+        <location filename="../src/ui/MainWindow.cpp" line="83"/>
         <source>Waiting for your approval…</source>
         <translation>等待你确认…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="84"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1907"/>
+        <location filename="../src/ui/MainWindow.cpp" line="85"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1942"/>
         <source>Interrupting…</source>
         <translation>正在中断…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="86"/>
+        <location filename="../src/ui/MainWindow.cpp" line="87"/>
         <source>Error</source>
         <translation>出错</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="117"/>
+        <location filename="../src/ui/MainWindow.cpp" line="118"/>
         <source>Context %1 / %2 · auto-compacts at %3</source>
         <translation>上下文 %1 / %2 · 自动压缩于 %3</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="120"/>
+        <location filename="../src/ui/MainWindow.cpp" line="121"/>
         <source>Context %1 / %2</source>
         <translation>上下文 %1 / %2</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="135"/>
+        <location filename="../src/ui/MainWindow.cpp" line="136"/>
         <source>%1 / %2 tokens used</source>
         <translation>已用 %1 / %2 tokens</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="137"/>
+        <location filename="../src/ui/MainWindow.cpp" line="138"/>
         <source>· At %1 or more: old tool output is trimmed on the way out (no model call)</source>
         <translation>· 达到 %1 起：下发时裁剪旧工具输出（不调模型）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="141"/>
+        <location filename="../src/ui/MainWindow.cpp" line="142"/>
         <source>· At %1 or more: the model writes a summary that replaces earlier history</source>
         <translation>· 达到 %1 起：调用模型生成摘要，替换较早的历史</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="145"/>
+        <location filename="../src/ui/MainWindow.cpp" line="146"/>
         <source>· This session has been compacted; the original messages are kept in the archive</source>
         <translation>· 本会话已经压缩过上下文，原始消息保存在归档里</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="148"/>
+        <location filename="../src/ui/MainWindow.cpp" line="149"/>
         <source>Type /compact to compact now.</source>
         <translation>输入 /compact 可立即压缩。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="157"/>
+        <location filename="../src/ui/MainWindow.cpp" line="158"/>
         <source>Cached %1% · uncached %2 · cache read %3 · output %4</source>
         <translation>缓存 %1% · 未缓存 %2 · 缓存读 %3 · 输出 %4</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="167"/>
+        <location filename="../src/ui/MainWindow.cpp" line="168"/>
         <source>%1
   Uncached input  %2
   Cache read      %3
@@ -981,7 +1042,7 @@ Open it with the system application instead.</source>
   缓存命中率  %6%</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="177"/>
+        <location filename="../src/ui/MainWindow.cpp" line="178"/>
         <source>Cache hit rate = cache read / (cache read + uncached input).
 The denominator excludes cache writes: a first write never had a chance to hit.
 
@@ -996,27 +1057,27 @@ The denominator excludes cache writes: a first write never had a chance to hit.
 %2</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="179"/>
+        <location filename="../src/ui/MainWindow.cpp" line="180"/>
         <source>This session (cumulative)</source>
         <translation>本次会话累计</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="180"/>
+        <location filename="../src/ui/MainWindow.cpp" line="181"/>
         <source>Last turn</source>
         <translation>最近一轮</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="196"/>
+        <location filename="../src/ui/MainWindow.cpp" line="197"/>
         <source>Failed to load settings; defaults are in use: </source>
         <translation>配置载入失败，已使用默认设置：</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="220"/>
+        <location filename="../src/ui/MainWindow.cpp" line="221"/>
         <source>Session storage unavailable</source>
         <translation>会话存储不可用</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="221"/>
+        <location filename="../src/ui/MainWindow.cpp" line="222"/>
         <source>Cannot open the session database:
 %1
 
@@ -1027,241 +1088,241 @@ History will not be saved during this run.</source>
 本次运行不会保存历史记录。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="255"/>
+        <location filename="../src/ui/MainWindow.cpp" line="256"/>
         <source>MCP server &quot;%1&quot; unavailable: %2</source>
         <translation>MCP 服务器「%1」不可用：%2</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="414"/>
+        <location filename="../src/ui/MainWindow.cpp" line="418"/>
         <source>Describe what you want to get done… (Enter to send, Shift+Enter for a newline, paste images)
 Type /compact to compact the context, /help for commands</source>
         <translation>描述你想完成的任务…（Enter 发送，Shift+Enter 换行，可粘贴图片）
 输入 /compact 压缩上下文，/help 查看命令</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="432"/>
+        <location filename="../src/ui/MainWindow.cpp" line="436"/>
         <source>Session mode: plan is read-only, build is the default, edit edits, yolo skips approvals</source>
         <translation>会话模式：plan 只读规划 / build 默认 / edit 编辑 / yolo 免确认</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="434"/>
+        <location filename="../src/ui/MainWindow.cpp" line="438"/>
         <source>plan · read-only</source>
         <translation>plan 只读规划</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="436"/>
+        <location filename="../src/ui/MainWindow.cpp" line="440"/>
         <source>build · default</source>
         <translation>build 默认</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="438"/>
+        <location filename="../src/ui/MainWindow.cpp" line="442"/>
         <source>edit · edit</source>
         <translation>edit 编辑</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="439"/>
+        <location filename="../src/ui/MainWindow.cpp" line="443"/>
         <source>yolo · no approvals</source>
         <translation>yolo 免确认</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="444"/>
+        <location filename="../src/ui/MainWindow.cpp" line="448"/>
         <source>Image</source>
         <translation>图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="446"/>
+        <location filename="../src/ui/MainWindow.cpp" line="450"/>
         <source>Attach an image (you can also paste with Ctrl+V or drag one in)</source>
         <translation>附加图片（也可以直接 Ctrl+V 粘贴或拖入）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="457"/>
+        <location filename="../src/ui/MainWindow.cpp" line="461"/>
         <source>Choose the model for this session</source>
         <translation>选择本会话使用的模型</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="466"/>
+        <location filename="../src/ui/MainWindow.cpp" line="470"/>
         <source>Reasoning level: higher means more thorough reasoning and more tokens</source>
         <translation>思考等级：越高推理越充分，消耗的 token 也越多</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="471"/>
+        <location filename="../src/ui/MainWindow.cpp" line="475"/>
         <source>Stop</source>
         <translation>停止</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="477"/>
+        <location filename="../src/ui/MainWindow.cpp" line="481"/>
         <source>Send</source>
         <translation>发送</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="524"/>
+        <location filename="../src/ui/MainWindow.cpp" line="528"/>
         <source>Context 000.0 / 2000.0M</source>
         <translation>上下文 000.0 / 2000.0M</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="543"/>
+        <location filename="../src/ui/MainWindow.cpp" line="547"/>
         <source>Cached 100% · uncached 000.0M · cache read 000.0M · output 000.0M</source>
         <translation>缓存 100% · 未缓存 000.0M · 缓存读 000.0M · 输出 000.0M</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="551"/>
+        <location filename="../src/ui/MainWindow.cpp" line="555"/>
         <source>File</source>
         <translation>文件</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="553"/>
+        <location filename="../src/ui/MainWindow.cpp" line="557"/>
         <source>New session</source>
         <translation>新建会话</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="557"/>
+        <location filename="../src/ui/MainWindow.cpp" line="561"/>
         <source>Open Workspace…</source>
         <translation>打开工作区…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="562"/>
+        <location filename="../src/ui/MainWindow.cpp" line="566"/>
         <source>Settings…</source>
         <translation>设置…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="568"/>
+        <location filename="../src/ui/MainWindow.cpp" line="572"/>
         <source>Quit</source>
         <translation>退出</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="572"/>
+        <location filename="../src/ui/MainWindow.cpp" line="576"/>
         <source>View</source>
         <translation>视图</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="599"/>
+        <location filename="../src/ui/MainWindow.cpp" line="607"/>
         <source>Increase font size</source>
         <translation>增大字号</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="607"/>
+        <location filename="../src/ui/MainWindow.cpp" line="615"/>
         <source>Decrease font size</source>
         <translation>减小字号</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="615"/>
+        <location filename="../src/ui/MainWindow.cpp" line="623"/>
         <source>Help</source>
         <translation>帮助</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="616"/>
-        <location filename="../src/ui/MainWindow.cpp" line="619"/>
+        <location filename="../src/ui/MainWindow.cpp" line="624"/>
+        <location filename="../src/ui/MainWindow.cpp" line="627"/>
         <source>About LyCode</source>
         <translation>关于 LyCode</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="620"/>
+        <location filename="../src/ui/MainWindow.cpp" line="628"/>
         <source>&lt;b&gt;LyCode&lt;/b&gt; %1&lt;br/&gt;&lt;br/&gt;An AI coding workbench — native Qt6 / C++.&lt;br/&gt;Rewritten from the LyCode design spec and agent semantics.</source>
         <translation>&lt;b&gt;LyCode&lt;/b&gt; %1&lt;br/&gt;&lt;br/&gt;AI 编程工作台 —— Qt6 / C++ 原生实现。&lt;br/&gt;基于 LyCode 的设计规范与 Agent 语义重写。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="782"/>
+        <location filename="../src/ui/MainWindow.cpp" line="811"/>
         <source> (no tool support)</source>
         <translation>（不支持工具）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="788"/>
+        <location filename="../src/ui/MainWindow.cpp" line="817"/>
         <source>(no model configured — add one in Settings)</source>
         <translation>（未配置模型，请在设置中添加）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="843"/>
+        <location filename="../src/ui/MainWindow.cpp" line="872"/>
         <source>Reasoning </source>
         <translation>思考 </translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1013"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1042"/>
         <source>Session is running</source>
         <translation>会话正在运行</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1014"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1043"/>
         <source>The current session is still running. Starting a new session will interrupt it. Continue?</source>
         <translation>当前会话仍在运行。新建会话会中断它，是否继续？</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1026"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1055"/>
         <source>No workspace yet — use &quot;Open Workspace…&quot; to pick a directory first.</source>
         <translation>还没有工作区：先用「打开工作区…」选择一个目录。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1034"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1063"/>
         <source>Model required</source>
         <translation>需要配置模型</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1035"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1064"/>
         <source>No usable model yet. Add a model under Settings → Model and fill in its model list.</source>
         <translation>还没有可用的模型。请在「设置 → 模型」中添加一个模型并填写模型列表。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2017"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2052"/>
         <source>No usable model right now — check the Base URL and API key.</source>
         <translation>当前没有可用的模型，请检查 Base URL 与 API Key。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1046"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1075"/>
         <source>Cannot create session</source>
         <translation>无法新建会话</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1133"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1171"/>
         <source>Delete session</source>
         <translation>删除会话</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1134"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1172"/>
         <source>Delete this session and all of its messages? This cannot be undone.</source>
         <translation>确定要删除这个会话及其全部消息吗？此操作不可撤销。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1150"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1289"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1188"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1327"/>
         <source>Delete failed: </source>
         <translation>删除失败：</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1155"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1193"/>
         <source>Session deleted.</source>
         <translation>会话已删除。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1188"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1226"/>
         <source>That workspace is not in the list.</source>
         <translation>该工作区不在列表里。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1195"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1233"/>
         <source>Removed from the list: %1 (sessions and files are untouched)</source>
         <translation>已从列表移除：%1（会话与文件都还在）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1228"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1266"/>
         <source>The last workspace was removed. Use &quot;Open Workspace…&quot; to pick a directory and continue.</source>
         <translation>已移除最后一个工作区。用「打开工作区…」选择目录即可继续。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1244"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1282"/>
         <source>Removed from the list: %1 (workspace files are untouched)</source>
         <translation>已从列表移除：%1（工作区文件未被改动）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1259"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1297"/>
         <source>This workspace has no sessions to delete.</source>
         <translation>该工作区没有可删除的会话。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1266"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1304"/>
         <source>Delete workspace sessions</source>
         <translation>删除工作区的会话</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1267"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1305"/>
         <source>This deletes all %2 sessions under &quot;%1&quot; and their messages.
 
 This cannot be undone.
@@ -1272,163 +1333,158 @@ The workspace directory itself and the files inside it will **not** be deleted.<
 工作区目录本身和其中的文件**不会**被删除。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1299"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1337"/>
         <source>Deleted %2 sessions under &quot;%1&quot; (workspace files are untouched).</source>
         <translation>已删除「%1」的 %2 个会话（工作区文件未受影响）。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1308"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1346"/>
         <source>Select workspace directory</source>
         <translation>选择工作区目录</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1322"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1360"/>
         <source>Directory does not exist: </source>
         <translation>目录不存在：</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1360"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1398"/>
         <source>Switched to workspace: </source>
         <translation>已切换工作区：</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1434"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1472"/>
         <source>Done.</source>
         <translation>完成。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1444"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1482"/>
         <source>Interrupted.</source>
         <translation>已中断。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1449"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1487"/>
         <source>This turn was not executed.</source>
         <translation>本次回合未执行。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1476"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1514"/>
         <source>The subagent finished; see the sidebar list for its full run.</source>
         <translation>子代理已完成，可在左侧列表查看它的完整过程。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1478"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1516"/>
         <source>The subagent failed; see that session in the sidebar list.</source>
         <translation>子代理执行失败，详见左侧列表中的该会话。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1496"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1534"/>
         <source>· Background tasks %1</source>
         <translation>· 后台任务 %1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1500"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1538"/>
         <source>%1 background task(s) running. Use TaskOutput to read their output, or TaskStop on a tool card to stop them.</source>
         <translation>有 %1 个后台任务正在运行。用 TaskOutput 查看它们的输出，或在工具卡片里用 TaskStop 终止。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1533"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1571"/>
         <source>Connected to %1 MCP server(s); the tools they provide are registered as regular tools the model can call.</source>
         <translation>已连接 %1 个 MCP 服务器；它们提供的工具已注册为普通工具，模型可以直接调用。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1617"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1655"/>
         <source>Attach image</source>
         <translation>附加图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1618"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1656"/>
         <source>Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;All files (*)</source>
         <translation>图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;所有文件 (*)</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1630"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1668"/>
         <source>Cannot read: %1</source>
         <translation>无法读取：%1</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1652"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1690"/>
         <source>Only image attachments are supported; got %1.</source>
         <translation>只支持图片附件，收到的是 %1。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1660"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1698"/>
         <source>Image too large (%1 MB); the limit is 8 MB.</source>
         <translation>图片过大（%1 MB），上限 8 MB。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1667"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1705"/>
         <source>Pasted image</source>
         <translation>粘贴的图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1731"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1769"/>
         <source>Remove this image</source>
         <translation>移除这张图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1784"/>
-        <source>Click to put it in the input box: %1</source>
-        <translation>点击填入输入框：%1</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1806"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1841"/>
         <source>No session yet, so there is nothing to compact.</source>
         <translation>还没有会话，无法压缩上下文。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1819"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1854"/>
         <source>Compacting the context…</source>
         <translation>正在压缩上下文…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1825"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1860"/>
         <source>Commands: /compact compacts the context, /help shows this note.</source>
         <translation>命令：/compact 压缩上下文，/help 查看这条说明。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1832"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1867"/>
         <source>Unknown command: %1 (available: /compact, /help)</source>
         <translation>未知命令：%1（可用 /compact、/help）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1860"/>
-        <location filename="../src/ui/MainWindow.cpp" line="2012"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1895"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2047"/>
         <source>Connecting to MCP servers…</source>
         <translation>正在连接 MCP 服务器…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2021"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2056"/>
         <source>Settings saved.</source>
         <translation>设置已保存。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2031"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2066"/>
         <source>Interface language changed. Reopen the app for it to take full effect.</source>
         <translation>界面语言已切换。重新打开应用后完全生效。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2047"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2082"/>
         <source>Interface language</source>
         <translation>界面语言</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2048"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2083"/>
         <source>The interface language has been changed. Restart now to apply it?</source>
         <translation>界面语言已更改。是否立即重启以应用？</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2061"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2096"/>
         <source>Could not restart automatically. Please close and reopen the app.</source>
         <translation>无法自动重启，请手动关闭并重新打开应用。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2073"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2108"/>
         <source>Failed to save settings: </source>
         <translation>设置保存失败：</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2126"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2161"/>
         <source>pasted-image.png</source>
         <translation>粘贴的图片.png</translation>
     </message>

@@ -427,19 +427,30 @@ QString SystemPromptBuilder::build(const SystemPromptInput & input)
 
   // ④ 让用户做选择时的统一格式。
   // 解析端只认这个格式（不去猜正文列表），所以这段是功能的一部分，
-  // 不是"建议"——改这里就要同步改 Markdown::detectChoices。
+  // 不是"建议"——改这里就要同步改 Markdown::detectQuestions。
   sections << QStringLiteral(
              "## Offering choices\n\n"
-             "When you need the user to pick between concrete alternatives, do not just list "
-             "them in prose. Put them in a fenced block whose info string is exactly "
-             "`choices`, one option per line:\n\n"
+             "When you need the user to decide between concrete alternatives, do not just list "
+             "them in prose. Put them in a fenced block whose info string is exactly `choices`. "
+             "The UI renders that block as a question card, so this format is a contract — only "
+             "the line shapes below are understood:\n\n"
              "```choices\n"
-             "- First option\n"
-             "- Second option\n"
+             "# Short heading (optional)\n"
+             "? The question itself (optional; starts a new card page)\n"
+             "- Option label :: one-line explanation (optional)\n"
+             "- Another option (Recommended)\n"
              "```\n\n"
-             "Rules: 2-6 options; each on a single line, under 40 characters; no explanation "
-             "inside the block (put it outside). The UI turns them into buttons the user can "
-             "click, which is faster and less error-prone than retyping one.");
+             "Rules:\n"
+             "* 2-6 options per question; keep option labels short (under ~40 characters).\n"
+             "* `#` sets the card's small heading, `?` sets the question. Repeat `?` only when "
+             "you genuinely need several answers — each page is answered or skipped on its own, "
+             "so one question is usually the better choice.\n"
+             "* ` :: ` (spaces on both sides) separates an option's label from its explanation. "
+             "Use it only for that: `Foo::bar` style text is left untouched.\n"
+             "* End an option label with `(Recommended)` to mark the one you suggest, and put "
+             "it first so the default is also what the user reads first.\n"
+             "* Keep the surrounding prose outside the block — the card shows everything that "
+             "is inside it.");
 
   // ⑤ 技能清单。只放名字与描述：正文由 Skill 工具按需加载。
   if(!input.skillsSection.trimmed().isEmpty()) {

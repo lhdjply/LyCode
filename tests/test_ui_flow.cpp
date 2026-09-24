@@ -25,6 +25,7 @@
 #include <QJsonObject>
 #include <QFontMetrics>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QIcon>
@@ -117,7 +118,8 @@ class TestUiFlow : public QObject
     void removingCurrentWorkspaceActuallyWorks();
     void everyWorkspaceShowsFoldMarker();
     void windowUsesTheAppIcon();
-    void choiceButtonsFillTheComposer();
+    void choiceCardSendsTheAnswer();
+    void choiceCardPaginatesSkipsAndTakesCustomAnswer();
     void settingsPickModelsFromTheCatalog();
     /// 在设置里切换主题后，「视图 → 主题」的勾选必须跟着变。
     void themeMenuCheckFollowsSettingsDialog();
@@ -1589,10 +1591,11 @@ void TestUiFlow::windowUsesTheAppIcon()
   QVERIFY2(!window.windowIcon().isNull(), "主窗口应当带应用图标");
 }
 
-void TestUiFlow::choiceButtonsFillTheComposer()
+void TestUiFlow::choiceCardSendsTheAnswer()
 {
-  // 用户诉求："当 ai 给你几个选项时需要可以选择"。模型按系统提示词的统一格式
-  // （`choices` 围栏）给出选项，界面渲染成按钮，点一下填进输入框。
+  // 用户诉求："当 ai 给你几个选项时需要可以选择"，并且要长得像参考实现的问询卡片：
+  // 眉标 + 问题 + 编号选项（带灰字说明与推荐徽标）+ 页脚。模型按系统提示词的统一
+  // 格式（`choices` 围栏）给出选项，界面渲染成卡片，选完点「提交」直接发出。
   MainWindow window;
   window.show();
   QVERIFY(waitFor([&]() {
@@ -1614,33 +1617,152 @@ void TestUiFlow::choiceButtonsFillTheComposer()
     }, 5000));
   }
 
-  gateway_->enqueue(textResponse(
-                      QByteArray("我看到两种改法：\n\n```choices\n- 只改 Read 工具\n- 同时改 Read 与 Grep\n```")));
+  gateway_->enqueue(textResponse(QByteArray(
+    "我看到两种改法：\n\n"
+    "```choices\n"
+    "# 改动范围\n"
+    "? 这次改到哪一层？\n"
+    "- 只改 Read 工具 (推荐) :: 最小改动，先验证方向\n"
+    "- 同时改 Read 与 Grep :: 一次到位\n"
+    "```")));
   composer->setPlainText(QStringLiteral("怎么改？"));
   sendButton->click();
 
-  auto * bar = window.findChild<QWidget *>(QStringLiteral("choiceBar"));
-  QVERIFY2(bar != nullptr, "输入框上方应当有选项按钮条");
+  auto * card = window.findChild<QWidget *>(QStringLiteral("choiceCard"));
+  QVERIFY2(card != nullptr, "输入框上方应当有问询卡片");
   QVERIFY2(waitFor([&]() {
-    return bar->isVisible();
+    return card->isVisible();
   }, 15000),
-  "模型按统一格式给出选项后，按钮条应当出现");
+  "模型按统一格式给出选项后，卡片应当出现");
 
-  const QList<QPushButton *> buttons =
-    window.findChildren<QPushButton *>(QStringLiteral("choiceButton"));
-  QCOMPARE(buttons.size(), 2);
-  QCOMPARE(buttons.at(0)->text(), QStringLiteral("只改 Read 工具"));
+  // 头部：眉标与问题都要显示出来。
+  auto * eyebrow = card->findChild<QLabel *>(QStringLiteral("choiceEyebrow"));
+  auto * title = card->findChild<QLabel *>(QStringLiteral("choiceTitle"));
+  QVERIFY(eyebrow != nullptr && title != nullptr);
+  QCOMPARE(eyebrow->text(), QStringLiteral("改动范围"));
+  QCOMPARE(title->text(), QStringLiteral("这次改到哪一层？"));
 
-  // 截图要在点击**之前**拍：点完按钮条就收起了，拍到的会是空状态，
-  // 那张图看不出这个功能长什么样。
-  const QString shot = screenshotDir() + QStringLiteral("/18-choice-buttons.png");
+  const QList<QPushButton *> options =
+    card->findChildren<QPushButton *>(QStringLiteral("choiceOption"));
+  QCOMPARE(options.size(), 2);
+
+  // 选项里有编号、标题、灰字说明；第一个带推荐徽标。
+  auto * firstLabel = options.at(0)->findChild<QLabel *>(QStringLiteral("choiceOptionLabel"));
+  auto * firstDescription = options.at(0)->findChild<QLabel *>(QStringLiteral("choiceDescription"));
+  auto * firstNumber = options.at(0)->findChild<QLabel *>(QStringLiteral("choiceNumber"));
+  QVERIFY(firstLabel != nullptr && firstDescription != nullptr && firstNumber != nullptr);
+  QCOMPARE(firstNumber->text(), QStringLiteral("1"));
+  QCOMPARE(firstLabel->text(), QStringLiteral("只改 Read 工具"));
+  QCOMPARE(firstDescription->text(), QStringLiteral("最小改动，先验证方向"));
+  QCOMPARE(options.at(0)->findChildren<QLabel *>(QStringLiteral("choiceBadge")).size(), 1);
+  QCOMPARE(options.at(1)->findChildren<QLabel *>(QStringLiteral("choiceBadge")).size(), 0);
+
+  // 没作答之前不给提交——跳过是另外一颗按钮。
+  auto * submit = card->findChild<QPushButton *>(QStringLiteral("choiceSubmitButton"));
+  auto * skip = card->findChild<QPushButton *>(QStringLiteral("choiceSkipButton"));
+  auto * pager = card->findChild<QLabel *>(QStringLiteral("choicePagerLabel"));
+  QVERIFY(submit != nullptr && skip != nullptr && pager != nullptr);
+  QCOMPARE(pager->text(), QStringLiteral("1 / 1"));
+  QVERIFY2(!submit->isEnabled(), "还没选项就不该能提交");
+
+  // 截图要在点选**之前**拍：提交完卡片就收起了，拍到的会是空状态。
+  const QString shot = screenshotDir() + QStringLiteral("/18-choice-card.png");
   QVERIFY2(window.grab().save(shot), qPrintable(shot));
 
-  buttons.at(1)->click();
-  // 填进输入框而不是直接发送：用户还能改一改，也避免误点直接发出。
-  // 这里是**模型输出的选项文本**，不是界面文案：它原样填进输入框，不该被翻译。
-  QCOMPARE(composer->toPlainText(), QStringLiteral("同时改 Read 与 Grep"));
-  QVERIFY2(!bar->isVisible(), "选完之后按钮条应当收起");
+  options.at(1)->click();
+  QVERIFY2(submit->isEnabled(), "选中一项之后应当可以提交");
+
+  // 提交 = 直接发送：模型应当**真的收到**这次选择，并给出下一轮回复。
+  gateway_->enqueue(textResponse("好的，两个一起改。"));
+  const int requestsBefore = gateway_->requestCount();
+  submit->click();
+
+  QVERIFY2(!card->isVisible(), "提交之后卡片应当收起");
+  QVERIFY2(waitFor([&]() {
+    return gateway_->requestCount() > requestsBefore;
+  }, 15000),
+  "提交后应当自动发出请求，而不是只填进输入框等用户再点发送");
+  QVERIFY2(gateway_->lastBody().contains(QStringLiteral("同时改 Read 与 Grep").toUtf8()),
+           qPrintable(QStringLiteral("请求体里应当带上所选的选项，实际：%1")
+                      .arg(QString::fromUtf8(gateway_->lastBody()))));
+  // 发送成功后输入框被清空（与点「发送」按钮的行为一致）。
+  QCOMPARE(composer->toPlainText(), QString());
+}
+
+void TestUiFlow::choiceCardPaginatesSkipsAndTakesCustomAnswer()
+{
+  // 多道题要能分页（1 / 2），能跳过，也能用自定义答案代替选项——
+  // 这三件事都是参考实现的问询卡片有的交互。
+  MainWindow window;
+  window.show();
+  QVERIFY(waitFor([&]() {
+    return window.isVisible();
+  }, 5000));
+
+  auto * sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+  auto * composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+  auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+  QVERIFY(sidebar != nullptr && composer != nullptr && sendButton != nullptr);
+  {
+    QTemporaryDir own;
+    QVERIFY(own.isValid());
+    emit sidebar->workspaceRecentRequested(own.path());
+    QVERIFY(waitFor([&]() {
+      return sendButton->isEnabled();
+    }, 5000));
+  }
+
+  gateway_->enqueue(textResponse(QByteArray(
+    "两个问题：\n\n"
+    "```choices\n"
+    "? 先改哪个工具？\n"
+    "- Read\n- Grep\n"
+    "? 要不要顺带补测试？\n"
+    "- 要\n- 不要\n"
+    "```")));
+  composer->setPlainText(QStringLiteral("怎么改？"));
+  sendButton->click();
+
+  auto * card = window.findChild<QWidget *>(QStringLiteral("choiceCard"));
+  QVERIFY(card != nullptr);
+  QVERIFY2(waitFor([&]() {
+    return card->isVisible();
+  }, 15000), "卡片应当出现");
+
+  auto * pager = card->findChild<QLabel *>(QStringLiteral("choicePagerLabel"));
+  auto * submit = card->findChild<QPushButton *>(QStringLiteral("choiceSubmitButton"));
+  auto * skip = card->findChild<QPushButton *>(QStringLiteral("choiceSkipButton"));
+  auto * custom = card->findChild<QLineEdit *>(QStringLiteral("choiceCustomEdit"));
+  QVERIFY(pager != nullptr && submit != nullptr && skip != nullptr && custom != nullptr);
+
+  QCOMPARE(pager->text(), QStringLiteral("1 / 2"));
+  // 不是最后一题时，主按钮是「下一题」而不是「提交」。
+  QCOMPARE(submit->text(), QStringLiteral("Next"));
+
+  // 第一题用「跳过」：直接翻到第二题。
+  skip->click();
+  QCOMPARE(pager->text(), QStringLiteral("2 / 2"));
+  QCOMPARE(submit->text(), QStringLiteral("Submit"));
+
+  // 第二题用自定义答案。
+  const QString expected = QStringLiteral("要不要顺带补测试？: 先别补，等接口定下来");
+  custom->setText(QStringLiteral("先别补，等接口定下来"));
+  QVERIFY2(submit->isEnabled(), "填了自定义答案就应当可以提交");
+
+  gateway_->enqueue(textResponse("明白，等接口。"));
+  const int requestsBefore = gateway_->requestCount();
+  submit->click();
+
+  QVERIFY2(!card->isVisible(), "提交之后卡片应当收起");
+  QVERIFY2(waitFor([&]() {
+    return gateway_->requestCount() > requestsBefore;
+  }, 15000),
+  "提交后应当自动发送");
+  // 跳过的题不参与拼装；多题场合要带问题前缀，否则模型分不清答的是哪一题。
+  QVERIFY2(gateway_->lastBody().contains(expected.toUtf8()),
+           qPrintable(QStringLiteral("请求体里应当带上拼好的回答，实际：%1")
+                      .arg(QString::fromUtf8(gateway_->lastBody()))));
+  QCOMPARE(composer->toPlainText(), QString());
 }
 
 void TestUiFlow::settingsPickModelsFromTheCatalog()
@@ -2032,6 +2154,16 @@ void TestUiFlow::chineseTranslationsReachTheUi()
     QVERIFY2(menuTexts.contains(QStringLiteral("新建会话")),
              qPrintable(QStringLiteral("中文菜单里应当有「新建会话」，实际：%1")
                         .arg(menuTexts.join(QStringLiteral(" / ")))));
+
+    // 问询卡片的文案也必须进中文包。新控件最容易漏：把字面量包进辅助函数就抽不到，
+    // 界面会静默留在英文（这里直接从控件上读，读不到就是没进 .qm）。
+    auto * customEdit = window.findChild<QLineEdit *>(QStringLiteral("choiceCustomEdit"));
+    auto * skipButton = window.findChild<QPushButton *>(QStringLiteral("choiceSkipButton"));
+    auto * submitButton = window.findChild<QPushButton *>(QStringLiteral("choiceSubmitButton"));
+    QVERIFY(customEdit != nullptr && skipButton != nullptr && submitButton != nullptr);
+    QCOMPARE(customEdit->placeholderText(), QStringLiteral("输入你的答案"));
+    QCOMPARE(skipButton->text(), QStringLiteral("跳过"));
+    QCOMPARE(submitButton->text(), QStringLiteral("提交"));
   }
 
   // 还原设置，别把后面的测试带偏。

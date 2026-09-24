@@ -7,6 +7,7 @@
 #include "skills/SkillLibrary.h"
 #include "tools/BackgroundTaskRegistry.h"
 #include "tools/TodoStore.h"
+#include "ui/ChoiceCard.h"
 #include "ui/ConversationView.h"
 #include "ui/Markdown.h"
 #include "model/ReasoningLevels.h"
@@ -398,15 +399,18 @@ void MainWindow::buildUi()
   attachmentStrip_->hide();  // 没有附件时不占位置
   composerLayout->addWidget(attachmentStrip_);
 
-  // 选项按钮条：位置在附件条与输入框之间。放在这里而不是对话流里，
+  // 问询卡片：位置在附件条与输入框之间。放在这里而不是对话流里，
   // 是因为它描述的是"这次要输入什么"，与输入框同属一个操作单元。
-  choiceBar_ = new QWidget;
-  choiceBar_->setObjectName(QStringLiteral("choiceBar"));
-  choiceLayout_ = new QHBoxLayout(choiceBar_);
-  choiceLayout_->setContentsMargins(0, 0, 0, 0);
-  choiceLayout_->setSpacing(6);
-  choiceBar_->hide();
-  composerLayout->addWidget(choiceBar_);
+  choiceCard_ = new ChoiceCard;
+  choiceCard_->hide();
+  composerLayout->addWidget(choiceCard_);
+  connect(choiceCard_, &ChoiceCard::answersReady, this, &MainWindow::onChoicesAnswered);
+  connect(choiceCard_, &ChoiceCard::dismissed, this, [this]() {
+    // 记住"这条消息的卡片已经被放弃"，否则同一轮里任何一次刷新都会把它摆回来。
+    choicesDismissedFor_ = runtime_.messages().isEmpty()
+                             ? Id{}
+                             : runtime_.messages().constLast().id;
+  });
 
   composer_ = new QPlainTextEdit;
   composer_->setObjectName(QStringLiteral("composer"));
@@ -1076,6 +1080,11 @@ void MainWindow::onNewSessionRequested()
   // startSession 不发 messageAdded（新会话没有历史），所以这里先后都安全，
   // 但统一顺序后"清空 → 由 runtime 发消息填充"就是唯一的不变式。
   conversation_->clear();
+  // 问询卡片属于"上一个会话的这一步该选什么"，换会话必须收起：
+  // 它只在下一轮结束时才会按新消息重建，不收就会跨会话留在屏幕上。
+  if(choiceCard_ != nullptr) {
+    choiceCard_->hideCard();
+  }
   activeSessionId_ = runtime_.session().id;
   sidebar_->setActiveSession(activeSessionId_);
   currentModel_ = selection;
@@ -1109,6 +1118,10 @@ void MainWindow::onSessionSelected(const Id & sessionId)
   // 如果 clear() 放在它**之后**，刚载入的历史会被立刻抹掉——表现就是
   // "关掉软件再打开，之前的会话打不开（点开是空的）"（实测踩到）。
   conversation_->clear();
+  // 同 onNewSessionRequested：卡片不跟着会话走，换会话就收起。
+  if(choiceCard_ != nullptr) {
+    choiceCard_->hideCard();
+  }
 
   QString error;
   if(!runtime_.loadSession(sessionId, &error)) {
@@ -1772,19 +1785,14 @@ void MainWindow::refreshAttachmentStrip()
 
 void MainWindow::refreshChoices()
 {
-  if(choiceBar_ == nullptr || choiceLayout_ == nullptr) {
+  if(choiceCard_ == nullptr) {
     return;
-  }
-  while(QLayoutItem * item = choiceLayout_->takeAt(0)) {
-    if(QWidget * widget = item->widget()) {
-      widget->deleteLater();
-    }
-    delete item;
   }
 
   // 只看**最后一条有正文的 assistant 消息**：选项是针对"当前该选什么"的，
   // 翻看历史时不应该把早先那轮的选项又摆出来。
   QString latest;
+  Id latestId;
   for(auto it = runtime_.messages().crbegin(); it != runtime_.messages().crend(); ++it) {
     if(it->role != MessageRole::Assistant || it->modelOnly) {
       continue;
@@ -1792,33 +1800,41 @@ void MainWindow::refreshChoices()
     const QString text = it->plainText().trimmed();
     if(!text.isEmpty()) {
       latest = text;
+      latestId = it->id;
       break;
     }
   }
 
-  const QList<Markdown::Choice> choices = Markdown::detectChoices(latest);
-  if(choices.isEmpty()) {
-    choiceBar_->hide();
+  // 用户已经放弃过这条消息的卡片就不再摆回来（✕ 之后不该"自己长回来"）。
+  if(!latestId.isEmpty() && latestId == choicesDismissedFor_) {
+    choiceCard_->hideCard();
     return;
   }
 
-  for(const Markdown::Choice & choice : choices) {
-    auto * button = new QPushButton(choice.label);
-    button->setObjectName(QStringLiteral("choiceButton"));
-    button->setCursor(Qt::PointingHandCursor);
-    button->setToolTip(QCoreApplication::translate("ui::MainWindow",
-                                                   "Click to put it in the input box: %1").arg(choice.text));
-    connect(button, &QPushButton::clicked, this, [this, choice]() {
-      // 填进输入框而不是直接发送：用户可以改一改再发，也避免误点直接发出。
-      composer_->setPlainText(choice.text);
-      composer_->setFocus();
-      choiceBar_->hide();
-    });
-    choiceLayout_->addWidget(button);
+  const QList<Markdown::ChoiceQuestion> questions = Markdown::detectQuestions(latest);
+  if(questions.isEmpty()) {
+    choiceCard_->hideCard();
+    return;
   }
-  choiceLayout_->addStretch(1);
-  choiceBar_->show();
-  qCDebug(log) << "已显示选项按钮; 数量=" << choices.size();
+
+  choiceCard_->setQuestions(questions);
+  qCDebug(log) << "已显示问询卡片; 问题数=" << questions.size();
+}
+
+void MainWindow::onChoicesAnswered(const QString & answer)
+{
+  if(answer.trimmed().isEmpty()) {
+    return;   // 整组都跳过了：不动输入框，也不发送（空消息没有意义）
+  }
+  // 先写进输入框、再走与「发送」按钮完全相同的路径。
+  //
+  // 为什么不直接调 runtime_.submitMessage()：那条路上还有建会话、等 MCP 握手、
+  // 斜杠命令分支等一串前置处理，绕过它们会在"空会话里第一次发送"这类场景下出错。
+  // 而且写进输入框之后，发送失败（没有工作区、正在运行、运行时拒绝）时这次选择
+  // 还留在输入框里，用户不会白选一遍。
+  composer_->setPlainText(answer);
+  composer_->setFocus();
+  onSendRequested();
 }
 
 void MainWindow::handleSlashCommand(const QString & rawText)

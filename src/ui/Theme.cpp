@@ -1228,6 +1228,124 @@ QFrame[role="accent"] {
     border-radius: 10px;
 }
 
+/* ── 问询卡片（模型用 choices 围栏给出选项） ───────────────────────────────
+   规格对齐参考实现的 QuestionComposer：20px 卡片圆角、头部 24/20 内边距、
+   40px 高的选项行、20px 编号块、小号推荐徽标。 */
+QFrame#choiceCard {
+    background: %POPOVER%;
+    border: 1px solid %POPOVER_BORDER%;
+    border-radius: 20px;
+}
+QWidget#choiceHeader, QWidget#choiceFooter {
+    background: transparent;
+    border: none;
+}
+QScrollArea#choiceBodyScroll {
+    background: transparent;
+    border: none;
+}
+QScrollArea#choiceBodyScroll > QWidget > QWidget {
+    background: transparent;
+}
+QLabel#choiceEyebrow {
+    color: %FOREGROUND_SUBTLE%;
+    font-size: %UI_SM%px;
+}
+QLabel#choiceTitle {
+    color: %FOREGROUND%;
+    font-size: %UI_LG%px;
+    font-weight: 500;
+}
+QPushButton#choiceIconButton {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: %FOREGROUND_SUBTLE%;
+    font-size: %UI_BASE%px;
+    padding: 0;
+}
+QPushButton#choiceIconButton:hover {
+    background: %HOVER%;
+    color: %FOREGROUND%;
+}
+QPushButton#choiceIconButton:disabled {
+    color: %FOREGROUND_SUBTLEST%;
+}
+QPushButton#choiceOption {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    text-align: left;
+}
+QPushButton#choiceOption:hover {
+    background: %HOVER%;
+}
+QPushButton#choiceOption[selected="true"] {
+    background: %HOVER%;
+    border: 1px solid %BORDER%;
+}
+QLabel#choiceNumber {
+    background: %SURFACE%;
+    color: %FOREGROUND_SUBTLE%;
+    border-radius: 6px;
+    font-size: %UI_SM%px;
+    font-weight: 500;
+}
+QLabel#choiceOptionLabel {
+    color: %FOREGROUND%;
+    font-size: %UI_BASE%px;
+    font-weight: 500;
+}
+QLabel#choiceDescription {
+    color: %FOREGROUND_SUBTLE%;
+    font-size: %UI_BASE%px;
+    /* 显式 400：说明与标题（500）要拉开一档，否则整段看起来一样重。 */
+    font-weight: 400;
+}
+QLabel#choiceBadge {
+    background: %TAG%;
+    color: %BRAND%;
+    border-radius: 6px;
+    padding: 0 4px;
+    font-size: %UI_SM%px;
+    font-weight: 600;
+}
+QLineEdit#choiceCustomEdit {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 8px 12px;
+    color: %FOREGROUND%;
+    font-size: %UI_BASE%px;
+}
+QLineEdit#choiceCustomEdit:hover {
+    background: %HOVER%;
+}
+QLineEdit#choiceCustomEdit:focus {
+    background: %HOVER%;
+    border: 1px solid %BORDER%;
+}
+QPushButton#choicePagerButton {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: %FOREGROUND_SUBTLE%;
+    font-size: %UI_LG%px;
+    padding: 0;
+}
+QPushButton#choicePagerButton:hover:enabled {
+    background: %HOVER%;
+    color: %FOREGROUND%;
+}
+QPushButton#choicePagerButton:disabled {
+    color: %FOREGROUND_SUBTLEST%;
+}
+QLabel#choicePagerLabel {
+    color: %FOREGROUND_SUBTLE%;
+    font-size: %UI_BASE%px;
+    font-weight: 500;
+}
+
 QProgressBar {
     background: %SURFACE%;
     border: none;
