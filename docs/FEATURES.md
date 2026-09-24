@@ -7,7 +7,7 @@
 ## 首次使用
 
 1. 启动后用左侧的**工作区**行选择项目目录。
-2. 打开 **设置 → Provider**，新增一个 Provider：
+2. 打开 **设置 → 模型**，新增一个模型：
    - **Anthropic Messages**：Base URL 填 `https://api.anthropic.com`，API Key 填 `sk-ant-...`
    - **OpenAI 兼容**：Base URL 填 `https://api.openai.com/v1`（或自建网关地址），API Key 按需
    - **模型列表**每行填一个模型 id，例如 `claude-sonnet-4-20250514`
@@ -172,10 +172,10 @@ Windows 的启动指纹取不到（只有 Linux 实现读 `/proc/<pid>/stat`）�
 | 环节 | 做法 |
 | --- | --- |
 | `ToolResult` | 新增 `images`（`QList<FilePart>`），**不放在 metadata 里**——metadata 只会变成文字 |
-| 工具结果消息 | 除了 Tool part，还要为每张图追加一个 **File part**：provider 的图片序列化只认 File part，图只挂在 Tool part 上模型依然看不见 |
+| 工具结果消息 | 除了 Tool part，还要为每张图追加一个 **File part**：模型的图片序列化只认 File part，图只挂在 Tool part 上模型依然看不见 |
 | 持久化与界面 | `ToolPart::images` 随 part 一起进 SQLite，工具卡片直接渲染缩略图，重启后还在 |
 
-两个 provider 都不需要额外改动：图片以 File part 进入工具结果消息后，走的就是普通图片附件那条序列化路径（Anthropic 的 `image` 块 / OpenAI 的 `image_url`）。
+两个模型都不需要额外改动：图片以 File part 进入工具结果消息后，走的就是普通图片附件那条序列化路径（Anthropic 的 `image` 块 / OpenAI 的 `image_url`）。
 
 ## MCP（stdio）
 
@@ -200,7 +200,7 @@ Windows 的启动指纹取不到（只有 Linux 实现读 `/proc/<pid>/stat`）�
 | stdout 上的**非 JSON 行跳过** | Node 生态的服务器常往 stdout 打人类日志；当成致命错误会让整套集成"连不上"且毫无线索 |
 | 按 `id` 匹配响应 | 响应到达顺序不保证与请求一致，按顺序配会串台；同时要把**通知**（无 id）和响应区分开 |
 | 工具名 `mcp__<server>__<tool>` | 避免不同服务器的同名工具互相覆盖，也让模型/用户一眼看出信任边界 |
-| 工具名过滤非法字符 | 服务器返回的名字带空格或斜杠时，不少 provider 会直接拒收工具声明 |
+| 工具名过滤非法字符 | 服务器返回的名字带空格或斜杠时，不少模型会直接拒收工具声明 |
 | 入参 schema **原样透传** | 修补 schema 会让模型看到的入参与服务器期望的不一致，报错很难定位 |
 | 权限默认**保守** | 远端工具对我们不透明：没声明就按 `System` 处理（每次都要确认）且独占执行 |
 | `readOnlyHint` 只在**放宽**方向采信 | 那是服务器自述，不是可信信息；用它来收紧等于把权限交给一个我们不审计的进程 |
@@ -365,7 +365,7 @@ Markdown 代码块里的代码会着色：注释、字符串、关键字、类�
 | 环节 | 做法 |
 | --- | --- |
 | 待发状态 | `pendingAttachments_`，属于"这次编辑"，切换会话时作废 |
-| MIME 判定 | `QMimeDatabase::mimeTypeForFileNameAndData()`，**不按扩展名硬编码**——png 存成 `.jpg` 会让 `media_type` 与实际字节不符，两个 provider 都会拒绝 |
+| MIME 判定 | `QMimeDatabase::mimeTypeForFileNameAndData()`，**不按扩展名硬编码**——png 存成 `.jpg` 会让 `media_type` 与实际字节不符，两个模型都会拒绝 |
 | 剪贴板 | `QImage` 统一转 PNG 再编码，理由同上 |
 | 上限 | 单张 8 MB（base64 后还要进 SQLite 与 HTTP body） |
 | Anthropic | `{"type":"image","source":{"type":"base64","media_type":…,"data":…}}` |
@@ -586,14 +586,14 @@ other-project  —  /home/u/other   ▸  ├ 打开
 
 要点：
 
-- 同一件事在两种协议里表达不同（Anthropic 用 token 预算，OpenAI 用枚举），Agent 循环按档位**同时填好两个字段**，provider 各取所需。`off` 的实现是**完全不传字段**，而不是传空值——部分兼容网关见到未知字段会直接 400。
+- 同一件事在两种协议里表达不同（Anthropic 用 token 预算，OpenAI 用枚举），Agent 循环按档位**同时填好两个字段**，模型各取所需。`off` 的实现是**完全不传字段**，而不是传空值——部分兼容网关见到未知字段会直接 400。
 - Anthropic 要求 `budget_tokens >= 1024` 且 `< max_tokens`，`clampReasoningBudget()` 会做一次收敛，保证发出的请求一定合法（`maxOutputTokens` 太小时会自动关闭思考而不是发出一个会被拒的请求）。
 - **不支持思考的模型不显示这个下拉**，用户不会看到一个永远禁用的空控件。
 - 每个模型上次用的档位会被记住（按 `providerId/modelId` 存），切换模型时自动恢复，不会静默重置。
 
 ## 模型上下文大小
 
-Provider 自报的上下文窗口经常不准（第三方兼容服务尤其如此），而**窗口值错了会直接导致压缩阈值判断失误**。所以设置页里可以对每个模型覆盖：
+模型自报的上下文窗口经常不准（第三方兼容服务尤其如此），而**窗口值错了会直接导致压缩阈值判断失误**。所以设置页里可以对每个模型覆盖：
 
 - **上下文窗口**（`0` = 沿用内置默认，通常 128000，Claude 系列 200000）
 - **最大输出**（`0` = 沿用默认）
@@ -619,15 +619,15 @@ Provider 自报的上下文窗口经常不准（第三方兼容服务尤其如�
 - **摘要请求是非阻塞的**：需要摘要时只发起请求，当前这一步仍用现有上下文发出去；摘要回来后才替换。这样压缩不会让用户干等。
 - **两条阈值都显示在状态栏**（"上下文 3.4k / 64.0k · 自动压缩于 44.8k"），悬浮说明给出两个阈值的含义。用户不该靠猜"什么时候会被压"。
 - microcompact **只改下发副本**。`ToolPart::output` 里的原文不动，工具卡片照旧显示完整输出——裁掉的是"再喂给模型的那一份"。
-- full compact 的**裁剪点只落在 user 消息边界**。两种 provider 的线格式都要求 `tool_result` / `role=tool` 紧跟对应的 `tool_calls`，从中间切断会得到一个悬空的 `tool_use`，请求会被直接拒。
-- 摘要消息是 **User 角色 + `modelOnly`**：`System` 角色不下发给 provider（两家 provider 都显式跳过），摘要就白写了；而 `modelOnly` 让它不出现在用户可见的对话流里。用户看到的是同一位置的**压缩分隔行**（`TimelinePart`）。
+- full compact 的**裁剪点只落在 user 消息边界**。两种模型的线格式都要求 `tool_result` / `role=tool` 紧跟对应的 `tool_calls`，从中间切断会得到一个悬空的 `tool_use`，请求会被直接拒。
+- 摘要消息是 **User 角色 + `modelOnly`**：`System` 角色不下发给模型（两家模型都显式跳过），摘要就白写了；而 `modelOnly` 让它不出现在用户可见的对话流里。用户看到的是同一位置的**压缩分隔行**（`TimelinePart`）。
 - **压缩不丢历史**。被替换掉的消息先写进 `archived_message` 表再删除，`SessionStore::archiveMessages()` 在同一个事务里做完两件事。归档表刻意不设外键，会话/消息删除时不跟着消失。
 - 摘要与分隔行**随会话落盘**，重开应用后 `restoreContextSummary()` 会把摘要认回来；否则活动历史已经删掉、摘要又没存，就是永久丢失。
 - 原文交给摘要模型的**只保留尾部**（近处更重要），提示词明确要求按"目标 / 已完成 / 关键决策 / 问题 / 当前状态 / 下一步"六段写，并写明"拿不准就写不确定，不要猜"。
-- 估算**宁可高估**（约 3 字符/token，英文自然语言约 4）。高估的代价是压缩早一点发生；低估的代价是请求被 provider 拒绝。
+- 估算**宁可高估**（约 3 字符/token，英文自然语言约 4）。高估的代价是压缩早一点发生；低估的代价是请求被模型拒绝。
 - 估算口径包含**工具声明与系统提示词**。它们在小窗口里能占掉九成预算，不计的话"用量 3%"却已经超窗。
 - 消息太少（默认少于 8 条）或没有完整的 user 轮可切时**不压缩**：摘要未必比原文便宜。
-- 压缩失败**不算回合失败**。单独一条 `compactionNotice` 信号走到状态栏，不会显示成一次错误；本轮该发什么还是发什么，由 provider 决定是否超窗。
+- 压缩失败**不算回合失败**。单独一条 `compactionNotice` 信号走到状态栏，不会显示成一次错误；本轮该发什么还是发什么，由模型决定是否超窗。
 
 内建命令（输入框里以 `/` 开头，**不会发给模型**）：
 

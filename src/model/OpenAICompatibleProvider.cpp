@@ -366,7 +366,7 @@ class OpenAiStream final : public ModelStream
         return;
       }
       if(network_ == nullptr || url_.isEmpty()) {
-        fail(QStringLiteral("OpenAI 兼容 provider 未正确配置 baseUrl"));
+        fail(QStringLiteral("OpenAI 兼容模型未正确配置 baseUrl"));
         return;
       }
 

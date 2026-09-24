@@ -419,7 +419,7 @@ bool AgentRuntime::startSession(const Workspace & workspace, SessionMode mode,
   if(!model.isValid()) {
     if(errorOut != nullptr) {
       *errorOut = QCoreApplication::translate("agent::AgentRuntime",
-                                              "No model selected. Configure a provider and a model in Settings first.");
+                                              "No model selected. Configure a model in Settings first.");
     }
     return false;
   }
@@ -718,7 +718,7 @@ void AgentRuntime::runModelStep()
 
   if(providers_ == nullptr) {
     completeTurn(TurnResult::Failed, QCoreApplication::translate("agent::AgentRuntime",
-                                                                 "The provider registry is not initialized."));
+                                                                 "The model registry is not initialized."));
     return;
   }
 
@@ -730,7 +730,7 @@ void AgentRuntime::runModelStep()
     // 内部 id 摆给用户看只会把人引向一个不存在的东西。给出可行动的下一步。
     completeTurn(TurnResult::Failed,
                  QCoreApplication::translate("agent::AgentRuntime",
-                                             "The model this session uses is no longer available (the provider was deleted or is not fully configured). Pick another model in the picker at the bottom, then send again."));
+                                             "The model this session uses is no longer available (it was deleted or is not fully configured). Pick another model in the picker at the bottom, then send again."));
     return;
   }
 

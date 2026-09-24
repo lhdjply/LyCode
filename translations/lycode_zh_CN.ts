@@ -40,11 +40,6 @@
         <translation>工作区路径为空。</translation>
     </message>
     <message>
-        <location filename="../src/agent/AgentRuntime.cpp" line="421"/>
-        <source>No model selected. Configure a provider and a model in Settings first.</source>
-        <translation>未选择模型，请先在设置中配置 Provider 与模型。</translation>
-    </message>
-    <message>
         <location filename="../src/agent/AgentRuntime.cpp" line="460"/>
         <source>Session storage is not initialized.</source>
         <translation>会话存储未初始化。</translation>
@@ -103,14 +98,19 @@
         <translation>单次回合的模型步数超过安全上限（%1），已中止。</translation>
     </message>
     <message>
+        <location filename="../src/agent/AgentRuntime.cpp" line="421"/>
+        <source>No model selected. Configure a model in Settings first.</source>
+        <translation>未选择模型，请先在设置中配置模型。</translation>
+    </message>
+    <message>
         <location filename="../src/agent/AgentRuntime.cpp" line="720"/>
-        <source>The provider registry is not initialized.</source>
-        <translation>Provider 注册表未初始化。</translation>
+        <source>The model registry is not initialized.</source>
+        <translation>模型注册表未初始化。</translation>
     </message>
     <message>
         <location filename="../src/agent/AgentRuntime.cpp" line="732"/>
-        <source>The model this session uses is no longer available (the provider was deleted or is not fully configured). Pick another model in the picker at the bottom, then send again.</source>
-        <translation>当前会话用的模型已不可用（Provider 被删除或未配置完整）。请在底部模型下拉框里重新选一个模型后再发送。</translation>
+        <source>The model this session uses is no longer available (it was deleted or is not fully configured). Pick another model in the picker at the bottom, then send again.</source>
+        <translation>当前会话用的模型已不可用（已被删除或未配置完整）。请在底部模型下拉框里重新选一个模型后再发送。</translation>
     </message>
     <message>
         <location filename="../src/agent/AgentRuntime.cpp" line="783"/>
@@ -1196,8 +1196,13 @@ Type /compact to compact the context, /help for commands</source>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="1035"/>
-        <source>No usable model yet. Add a provider under Settings → Provider and fill in its model list.</source>
-        <translation>还没有可用的模型。请在「设置 → Provider」中添加一个 Provider 并填写模型列表。</translation>
+        <source>No usable model yet. Add a model under Settings → Model and fill in its model list.</source>
+        <translation>还没有可用的模型。请在「设置 → 模型」中添加一个模型并填写模型列表。</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/MainWindow.cpp" line="2017"/>
+        <source>No usable model right now — check the Base URL and API key.</source>
+        <translation>当前没有可用的模型，请检查 Base URL 与 API Key。</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="1046"/>
@@ -1391,11 +1396,6 @@ The workspace directory itself and the files inside it will **not** be deleted.<
         <location filename="../src/ui/MainWindow.cpp" line="2012"/>
         <source>Connecting to MCP servers…</source>
         <translation>正在连接 MCP 服务器…</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2017"/>
-        <source>No usable provider right now — check the Base URL and API key.</source>
-        <translation>当前没有可用的 Provider，请检查 Base URL 与 API Key。</translation>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="2021"/>
@@ -1735,30 +1735,15 @@ Leave empty to use the default (whatever the model reports).</source>
         <translation>切换界面语言。英文是源文案，中文来自随安装包一起发布的翻译文件。</translation>
     </message>
     <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="563"/>
-        <source>Configured providers</source>
-        <translation>已配置 Provider</translation>
-    </message>
-    <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="582"/>
         <source>Add</source>
         <translation>新增</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="583"/>
-        <source>Add a provider</source>
-        <translation>新增一个 Provider 配置</translation>
     </message>
     <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="584"/>
         <location filename="../src/ui/SettingsDialog.cpp" line="1603"/>
         <source>Delete</source>
         <translation>删除</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="587"/>
-        <source>Delete the selected provider (applies when you click OK)</source>
-        <translation>删除选中的 Provider（点「确定」后生效）</translation>
     </message>
     <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="589"/>
@@ -1769,11 +1754,6 @@ Leave empty to use the default (whatever the model reports).</source>
         <location filename="../src/ui/SettingsDialog.cpp" line="590"/>
         <source>Move down</source>
         <translation>下移</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="614"/>
-        <source>No providers configured yet. Click &quot;Add&quot; in the lower left to start.</source>
-        <translation>尚未配置 Provider，点击左下角「新增」开始。</translation>
     </message>
     <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="622"/>
@@ -1830,19 +1810,9 @@ Leave empty to use the default (whatever the model reports).</source>
         <translation>启用</translation>
     </message>
     <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="697"/>
-        <source>Disabled providers do not appear in the model picker</source>
-        <translation>停用后该 Provider 不会出现在模型选择器中</translation>
-    </message>
-    <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="705"/>
         <source>Model capabilities</source>
         <translation>模型能力</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="713"/>
-        <source>Overrides the metadata the provider reports. Leave 0 or empty to keep the built-in default. Context window and output limit are in tokens.</source>
-        <translation>覆盖 Provider 自报的模型元信息；留 0 / 留空表示沿用内置默认。窗口与输出上限的单位是 token。</translation>
     </message>
     <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="746"/>
@@ -1884,11 +1854,6 @@ Leave empty to use the default (whatever the model reports).</source>
         <location filename="../src/ui/SettingsDialog.cpp" line="959"/>
         <source>Base URL cannot be empty</source>
         <translation>Base URL 不能为空</translation>
-    </message>
-    <message>
-        <location filename="../src/ui/SettingsDialog.cpp" line="1007"/>
-        <source>New provider</source>
-        <translation>新 Provider</translation>
     </message>
     <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="1053"/>
@@ -2032,9 +1997,49 @@ It should be written as KEY=VALUE.</source>
         <translation>从列表选择模型</translation>
     </message>
     <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="396"/>
+        <source>Model</source>
+        <translation>模型</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="563"/>
+        <source>Configured models</source>
+        <translation>已配置模型</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="583"/>
+        <source>Add a model</source>
+        <translation>新增一个模型</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="587"/>
+        <source>Delete the selected model (applies when you click OK)</source>
+        <translation>删除选中的模型（点「确定」后生效）</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="614"/>
+        <source>No models configured yet. Click &quot;Add&quot; in the lower left to start.</source>
+        <translation>尚未配置模型，点击左下角「新增」开始。</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="697"/>
+        <source>Disabled models do not appear in the model picker</source>
+        <translation>停用后该模型不会出现在模型选择器中</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="713"/>
+        <source>Overrides the metadata the model reports. Leave 0 or empty to keep the built-in default. Context window and output limit are in tokens.</source>
+        <translation>覆盖模型自报的元信息；留 0 / 留空表示沿用内置默认。窗口与输出上限的单位是 token。</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/SettingsDialog.cpp" line="1007"/>
+        <source>New model</source>
+        <translation>新模型</translation>
+    </message>
+    <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="1502"/>
-        <source>Models from the built-in catalog (selected ones are added to the current provider):</source>
-        <translation>内置目录里的模型（选择后会加入当前 Provider）：</translation>
+        <source>Models from the built-in catalog (selected ones are added to the current model list):</source>
+        <translation>内置目录里的模型（选择后会加入当前模型列表）：</translation>
     </message>
     <message>
         <location filename="../src/ui/SettingsDialog.cpp" line="1562"/>

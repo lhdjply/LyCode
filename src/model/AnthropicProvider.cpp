@@ -325,7 +325,7 @@ class AnthropicStream final : public ModelStream
         return;
       }
       if(network_ == nullptr || url_.isEmpty()) {
-        fail(QStringLiteral("Anthropic provider 未正确配置 baseUrl"));
+        fail(QStringLiteral("Anthropic 模型未正确配置 baseUrl"));
         return;
       }
 

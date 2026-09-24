@@ -1033,7 +1033,7 @@ void MainWindow::onNewSessionRequested()
     QMessageBox::information(
       this, QCoreApplication::translate("ui::MainWindow", "Model required"),
       QCoreApplication::translate("ui::MainWindow",
-                                  "No usable model yet. Add a provider under Settings → Provider and fill in its model list."));
+                                  "No usable model yet. Add a model under Settings → Model and fill in its model list."));
     onSettingsRequested();
     return;
   }
@@ -2015,7 +2015,7 @@ void MainWindow::onSettingsRequested()
 
   if(!providers_.hasUsableProvider()) {
     setStatusMessage(QCoreApplication::translate("ui::MainWindow",
-                                                 "No usable provider right now — check the Base URL and API key."));
+                                                 "No usable model right now — check the Base URL and API key."));
   }
   else {
     setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Settings saved."));

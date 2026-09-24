@@ -393,7 +393,7 @@ SettingsDialog::SettingsDialog(const AppSettings & settings, QWidget * parent)
   tabs_ = new QTabWidget(this);
   tabs_->setObjectName(QStringLiteral("settingsTabs"));
   tabs_->addTab(buildAppearancePage(), QCoreApplication::translate("ui::SettingsDialog", "Appearance"));
-  tabs_->addTab(buildProviderPage(), QStringLiteral("Provider"));
+  tabs_->addTab(buildProviderPage(), QCoreApplication::translate("ui::SettingsDialog", "Model"));
   tabs_->addTab(buildSessionPage(), QCoreApplication::translate("ui::SettingsDialog", "Session"));
   tabs_->addTab(buildIntegrationsPage(), QStringLiteral("MCP / Skills"));
   root->addWidget(tabs_, 1);
@@ -561,7 +561,7 @@ QWidget * SettingsDialog::buildProviderPage()
   auto * left = new QVBoxLayout;
   left->setSpacing(8);
   left->addWidget(makeLabel(QStringLiteral("formFieldCaption"), QCoreApplication::translate("ui::SettingsDialog",
-                                                                                            "Configured providers"),
+                                                                                            "Configured models"),
                             FontRole::UiSm, ColorToken::ForegroundSubtle, page));
 
   auto * listFrame = new QFrame(page);
@@ -580,12 +580,12 @@ QWidget * SettingsDialog::buildProviderPage()
   left->addWidget(listFrame, 1);
 
   auto * addButton = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Add"), page);
-  addButton->setToolTip(QCoreApplication::translate("ui::SettingsDialog", "Add a provider"));
+  addButton->setToolTip(QCoreApplication::translate("ui::SettingsDialog", "Add a model"));
   removeProviderButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Delete"), page);
   // 删除会连本地保存的 key 一起丢掉，用 destructive 变体提示后果。
   removeProviderButton_->setProperty("variant", "destructive");
   removeProviderButton_->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
-                                                                "Delete the selected provider (applies when you click OK)"));
+                                                                "Delete the selected model (applies when you click OK)"));
   moveUpButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Move up"), page);
   moveDownButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Move down"), page);
 
@@ -612,7 +612,7 @@ QWidget * SettingsDialog::buildProviderPage()
 
   providerEmptyHintLabel_ =
     makeLabel(QStringLiteral("formHint"), QCoreApplication::translate("ui::SettingsDialog",
-                                                                      "No providers configured yet. Click \"Add\" in the lower left to start."),
+                                                                      "No models configured yet. Click \"Add\" in the lower left to start."),
               FontRole::UiSm, ColorToken::ForegroundSubtle, providerForm_);
   providerEmptyHintLabel_->setWordWrap(true);
   form->addWidget(providerEmptyHintLabel_);
@@ -695,7 +695,7 @@ QWidget * SettingsDialog::buildProviderPage()
   providerEnabledCheck_ = new QCheckBox(QCoreApplication::translate("ui::SettingsDialog", "Enabled"), providerForm_);
   providerEnabledCheck_->setObjectName(QStringLiteral("providerEnabled"));
   providerEnabledCheck_->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
-                                                                "Disabled providers do not appear in the model picker"));
+                                                                "Disabled models do not appear in the model picker"));
   form->addWidget(providerEnabledCheck_);
 
   // ── 模型能力覆盖 ──────────────────────────────────────────────────────
@@ -711,7 +711,7 @@ QWidget * SettingsDialog::buildProviderPage()
   capabilityLayout->addWidget(makeLabel(
                                 QStringLiteral("modelCapabilityHint"),
                                 QCoreApplication::translate("ui::SettingsDialog",
-                                                            "Overrides the metadata the provider reports. Leave 0 or empty to keep the built-in default. Context window and output limit are in tokens."),
+                                                            "Overrides the metadata the model reports. Leave 0 or empty to keep the built-in default. Context window and output limit are in tokens."),
                                 FontRole::UiXs, ColorToken::ForegroundSubtlest, modelCapabilityGroup_));
 
   modelCapabilityTable_ = new QTableWidget(0, 5, modelCapabilityGroup_);
@@ -1004,7 +1004,7 @@ void SettingsDialog::addProvider()
 {
   ProviderConfig config;
   config.id = newId(QStringLiteral("provider"));
-  config.name = QCoreApplication::translate("ui::SettingsDialog", "New provider");
+  config.name = QCoreApplication::translate("ui::SettingsDialog", "New model");
   config.kind = ProviderKind::OpenAICompatible;
   // baseUrl 留空：由占位符按协议提示默认值，避免"选了 Anthropic 却留着 OpenAI 的 URL"。
   config.enabled = true;
@@ -1500,7 +1500,7 @@ void SettingsDialog::pickModelsFromCatalog()
   const QString chosen = QInputDialog::getItem(
                            this, QCoreApplication::translate("ui::SettingsDialog", "Pick a model from the list"),
                            QCoreApplication::translate("ui::SettingsDialog",
-                                                       "Models from the built-in catalog (selected ones are added to the current provider):"), labels, 0, false,
+                                                       "Models from the built-in catalog (selected ones are added to the current model list):"), labels, 0, false,
                            &accepted, Qt::Popup | Qt::WindowCloseButtonHint);
   if(!accepted || chosen.isEmpty()) {
     return;

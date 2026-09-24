@@ -49,7 +49,7 @@ cmake --build build
 ### 首次使用
 
 1. 在左侧选择**工作区**（项目目录）。
-2. 打开 **设置 → Provider** 新增 Provider：Anthropic Messages 填 `https://api.anthropic.com`，或选 OpenAI 兼容填网关地址；模型列表每行一个模型 id。
+2. 打开 **设置 → 模型** 新增模型：Anthropic Messages 填 `https://api.anthropic.com`，或选 OpenAI 兼容填网关地址；模型列表每行一个模型 id。
 3. 在输入框下方选择**模式**、**模型**与**思考等级**，输入任务后 `Enter` 发送（`Shift+Enter` 换行）。
 
 会话模式：`plan`（只读，副作用工具直接拒绝）、`build`（默认，读写与命令都要确认）、`edit`（写文件免确认）、`yolo`（全部放行）。各项能力的详细用法与边界见 [docs/FEATURES.md](docs/FEATURES.md)。
@@ -59,7 +59,7 @@ cmake --build build
 数据都在 `~/.cache/lycode/` 下（Windows 为 `C:\Users\<用户名>\lycode\`）：
 
 ```
-settings.json    应用配置（Provider、主题、字号、最近工作区）
+settings.json    应用配置（模型、主题、字号、最近工作区）
 sessions.db      会话与消息（SQLite，WAL 模式）
 logs/lycode.log  日志
 ```
@@ -97,7 +97,7 @@ Linux 与 Windows 的 CI 都跑**全部 12 个**套件。`Bash` 工具执行的 
 | 路径 | 职责 |
 | --- | --- |
 | `src/core` | 领域模型（`Types`）、JSON 辅助、日志、ID 生成 |
-| `src/model` | Provider 抽象、SSE 增量解析、Anthropic / OpenAI 兼容流式客户端 |
+| `src/model` | 模型抽象、SSE 增量解析、Anthropic / OpenAI 兼容流式客户端 |
 | `src/tools` | 工具契约（metadata 驱动）、注册表、12 个内置工具、统一 diff、后台任务注册表 |
 | `src/mcp` | MCP stdio 客户端与管理器（远端工具适配成普通工具） |
 | `src/skills` | Skill 发现与解析（`SKILL.md` / frontmatter） |
