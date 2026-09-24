@@ -103,7 +103,6 @@ jobs:
           version: "6.8.0"
           arch: win64_msvc2022_64
           cache: true
-          modules: "qttools"
 
       - name: 配置
         run: >
