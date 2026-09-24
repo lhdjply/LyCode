@@ -90,9 +90,7 @@ ctest --test-dir build --output-on-failure
 
 12 个套件，全部使用 `QT_QPA_PLATFORM=offscreen`，不需要显示服务。覆盖领域模型、权限链、Markdown、Agent 主循环（真实 HTTP + SSE）、MCP（拉起的真实子进程）、Skills、Diff、语法高亮、文件查看器与界面级端到端；套件清单见 `tests/CMakeLists.txt`。
 
-Windows CI 只跑其中 11 个：`test_ui_flow` 是 Qt 控件级交互测试，其 Windows 行为尚未在真机上验证过。
-
-`Bash` 工具执行的 shell 按平台不同（Linux 走 bash，Windows 走 PowerShell，cmd 兜底），两端的差异见 [docs/FEATURES.md](docs/FEATURES.md#平台差异shell)。
+Linux 与 Windows 的 CI 都跑**全部 12 个**套件。`Bash` 工具执行的 shell 按平台不同（Linux 走 bash，Windows 走 PowerShell，cmd 兜底），两端的差异见 [docs/FEATURES.md](docs/FEATURES.md#平台差异shell)。
 
 ## 仓库结构
 
