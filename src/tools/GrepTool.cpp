@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -626,11 +627,12 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
                << "headLimit=" << options.headLimit << "offset=" << options.offset;
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GrepTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(options.pattern.isEmpty()) {
-    finish(ToolResult::failure(QStringLiteral("pattern 不能为空"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GrepTool", "pattern cannot be empty"),
                                QStringLiteral("invalid_input")));
     return;
   }
@@ -638,7 +640,7 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
      options.outputMode != QLatin1String("files_with_matches") &&
      options.outputMode != QLatin1String("count")) {
     finish(ToolResult::failure(
-             QStringLiteral("output_mode 只能是 content / files_with_matches / count，收到：%1")
+             QCoreApplication::translate("tools::GrepTool", "output_mode must be content / files_with_matches / count; got: %1")
              .arg(options.outputMode),
              QStringLiteral("invalid_input")));
     return;
@@ -650,7 +652,7 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
     base = context.resolvePath(options.basePath);
     if(base.isEmpty()) {
       finish(ToolResult::failure(
-               QStringLiteral("path 非法或超出工作区范围：%1")
+               QCoreApplication::translate("tools::GrepTool", "Invalid path, or outside the workspace: %1")
                .arg(toolutil::redactForLog(options.basePath)),
                QStringLiteral("path_outside_workspace")));
       return;
@@ -663,7 +665,8 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
     base = context.workspace.path;
   }
   if(base.isEmpty() || !QFileInfo::exists(base)) {
-    finish(ToolResult::failure(QStringLiteral("搜索路径不存在：%1").arg(base),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GrepTool",
+                                                           "The search path does not exist: %1").arg(base),
                                QStringLiteral("invalid_search_path")));
     return;
   }
@@ -682,7 +685,7 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
     // 先本地编译一次：两个后端就能给出同一份错误文案，
     // 也避免把非法 pattern 交给外部进程再去解析它的报错格式。
     finish(ToolResult::failure(
-             QStringLiteral("正则表达式非法：%1").arg(options.regex.errorString()),
+             QCoreApplication::translate("tools::GrepTool", "Invalid regular expression: %1").arg(options.regex.errorString()),
              QStringLiteral("invalid_pattern")));
     return;
   }
@@ -696,7 +699,7 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
   auto finalize = [finish, options, context, startedMs, meta](GrepOutcome outcome) {
     if(outcome.cancelled) {
       finish(ToolResult::failure(
-               QStringLiteral("执行已取消"), QStringLiteral("cancelled"),
+               QCoreApplication::translate("tools::GrepTool", "Execution cancelled"), QStringLiteral("cancelled"),
       QJsonObject{{QStringLiteral("backend"), outcome.backend}}));
       return;
     }
@@ -786,7 +789,8 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
       resultMeta.insert(QStringLiteral("typeFilterIgnored"), true);
       resultMeta.insert(
                   QStringLiteral("typeFilterNote"),
-                  QStringLiteral("native 后端不支持 type 过滤（未能找到系统 ripgrep），已忽略该参数"));
+                  QCoreApplication::translate("tools::GrepTool",
+                                              "The native backend does not support type filtering (no system ripgrep was found), so that argument was ignored"));
     }
     QJsonArray skipped;
     for(const QString & name : outcome.skippedDirs) {
@@ -841,7 +845,7 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
       *interrupt = QStringLiteral("failed_to_start");
       GrepOutcome outcome;
       outcome.backend = QStringLiteral("ripgrep");
-      outcome.error = QStringLiteral("无法启动 ripgrep：%1")
+      outcome.error = QCoreApplication::translate("tools::GrepTool", "Could not start ripgrep: %1")
                       .arg(process->errorString());
       outcome.errorCode = QStringLiteral("backend_failed");
       finalize(std::move(outcome));
@@ -862,7 +866,8 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
       if(*interrupt == QStringLiteral("timeout")) {
         GrepOutcome outcome;
         outcome.backend = QStringLiteral("ripgrep");
-        outcome.error = QStringLiteral("ripgrep 搜索超时，已终止进程。");
+        outcome.error = QCoreApplication::translate("tools::GrepTool",
+                                                    "The ripgrep search timed out and the process was killed.");
         outcome.errorCode = QStringLiteral("timeout");
         finalize(std::move(outcome));
         return;
@@ -877,7 +882,7 @@ void GrepTool::execute(const QJsonObject & input, const ToolContext & context, T
       if(exitCode != 0 || status != QProcess::NormalExit) {
         GrepOutcome outcome;
         outcome.backend = QStringLiteral("ripgrep");
-        outcome.error = QStringLiteral("ripgrep 失败（exitCode=%1）：%2")
+        outcome.error = QCoreApplication::translate("tools::GrepTool", "ripgrep failed (exitCode=%1): %2")
                         .arg(exitCode)
                         .arg(QString::fromUtf8(stderrBytes).trimmed());
         outcome.errorCode = QStringLiteral("backend_failed");

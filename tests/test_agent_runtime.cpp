@@ -1653,7 +1653,7 @@ void TestAgentRuntime::backgroundNotificationIsInjected()
   // 下一次用户输入时，通知必须在第一个模型步之前注入上下文。
   gateway_->enqueue(textResponse("我看到了后台任务的结果"));
   QSignalSpy secondSpy(runtime_.get(), &AgentRuntime::turnFinished);
-  QVERIFY2(runtime_->submitText(QStringLiteral("继续"), &error), qPrintable(error));
+  QVERIFY2(runtime_->submitText(QStringLiteral("Continue"), &error), qPrintable(error));
   QVERIFY(secondSpy.wait(10000));
 
   const QByteArray body = gateway_->lastBody();
@@ -1755,7 +1755,7 @@ void TestAgentRuntime::autoBackgroundsOnTimeout()
   const QString taskId =
     part.metadata.value(QStringLiteral("backgroundTaskId")).toString();
   QVERIFY(!taskId.isEmpty());
-  QVERIFY(part.output.contains(QStringLiteral("已自动转入后台")));
+  QVERIFY(part.output.contains(QStringLiteral("moved to the background")));
   QVERIFY(part.output.contains(taskId));
 
   // 进程仍在跑：没有被杀掉，只是把控制权还给了模型。
@@ -1929,7 +1929,7 @@ void TestAgentRuntime::readToolReturnsImageToTheModel()
   QCOMPARE(readPart.images.first().mimeType, QStringLiteral("image/png"));
   QVERIFY(!readPart.images.first().base64.isEmpty());
   // 正文要明确告诉模型"图已附上"，否则它仍可能去跑外部命令确认。
-  QVERIFY2(readPart.output.contains(QStringLiteral("已随本次结果附上")),
+  QVERIFY2(readPart.output.contains(QStringLiteral("attached to this result")),
            qPrintable(readPart.output));
 
   // ② 工具结果消息里必须有 File part：provider 的图片序列化只认 File part，
@@ -2113,7 +2113,7 @@ void TestAgentRuntime::microcompactTrimsOldToolOutputInRequest()
   runtime_->setCompactionPolicy(policy);
 
   // 第 2 轮：一个不带工具的普通回答，但请求体会带上历史。
-  runOneTurn(runtime_.get(), gateway_.get(), QStringLiteral("继续"),
+  runOneTurn(runtime_.get(), gateway_.get(), QStringLiteral("Continue"),
              textResponse("ok"));
 
   const QJsonArray messages = lastRequestMessages(*gateway_);

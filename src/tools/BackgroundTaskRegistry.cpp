@@ -13,6 +13,7 @@
 #include <QProcess>
 #include <QSaveFile>
 #include <QTimer>
+#include <QCoreApplication>
 
 #ifdef Q_OS_UNIX
   #include <csignal>
@@ -666,7 +667,7 @@ QString BackgroundTaskRegistry::buildNotification(const Entry & entry)
 
   // 尾部预览可能很长，通知里再收一次，避免把上下文挤满。
   const QString tail = json::truncate(task.outputPreview.trimmed(), 2000,
-                                      QStringLiteral("\n…[更多输出见 output-path]"));
+                                      QCoreApplication::translate("tools::BackgroundTaskRegistry", "\n…[more output in output-path]"));
 
   QStringList lines;
   lines << QStringLiteral("<task-notification>");

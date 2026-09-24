@@ -10,6 +10,7 @@
 #include <QLoggingCategory>
 #include <QStringList>
 #include <algorithm>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -53,7 +54,8 @@ ToolResult readImage(const QString & path, const QFileInfo & info, const QString
 {
   if(info.size() > kMaxImageBytes) {
     return ToolResult::failure(
-             QStringLiteral("图片过大（%1 字节，上限 %2 字节），请改用 Bash 处理。")
+             QCoreApplication::translate("tools::ReadTool",
+                                         "The image is too large (%1 bytes; limit %2 bytes). Use Bash to handle it instead.")
              .arg(info.size())
              .arg(kMaxImageBytes),
              QStringLiteral("file_too_large"));
@@ -61,7 +63,7 @@ ToolResult readImage(const QString & path, const QFileInfo & info, const QString
   QFile file(path);
   if(!file.open(QIODevice::ReadOnly)) {
     return ToolResult::failure(
-             QStringLiteral("无法打开图片文件：%1").arg(file.errorString()),
+             QCoreApplication::translate("tools::ReadTool", "Could not open the image file: %1").arg(file.errorString()),
              QStringLiteral("read_failed"));
   }
   const QByteArray bytes = file.readAll();
@@ -89,8 +91,8 @@ ToolResult readImage(const QString & path, const QFileInfo & info, const QString
 
   // 正文里明确告诉模型"图已经附在结果里了"，避免它再去用外部命令确认。
   ToolResult result = ToolResult::success(
-                        QStringLiteral("已读取图片 %1（%2，%3 字节）。图片内容已随本次结果附上，"
-                                       "直接看图回答即可，不需要借助外部命令。")
+                        QCoreApplication::translate("tools::ReadTool",
+                                                    "Read image %1 (%2, %3 bytes). The image is attached to this result; just look at it to answer, no external command is needed.")
                         .arg(path, mime)
                         .arg(bytes.size()),
                         meta);
@@ -187,11 +189,12 @@ void ReadTool::execute(const QJsonObject & input, const ToolContext & context, T
                << "limit=" << json::integer(input, QStringLiteral("limit"), kDefaultLimit);
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::ReadTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(rawPath.isEmpty()) {
-    finish(ToolResult::failure(QStringLiteral("file_path 不能为空"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::ReadTool", "file_path cannot be empty"),
                                QStringLiteral("invalid_input")));
     return;
   }
@@ -200,25 +203,28 @@ void ReadTool::execute(const QJsonObject & input, const ToolContext & context, T
   if(path.isEmpty()) {
     // resolvePath 返回空串 == 越界（含 `../` 逃逸）或路径非法。
     finish(ToolResult::failure(
-             QStringLiteral("路径非法或超出工作区范围：%1").arg(toolutil::redactForLog(rawPath)),
+             QCoreApplication::translate("tools::ReadTool",
+                                         "Invalid path, or outside the workspace: %1").arg(toolutil::redactForLog(rawPath)),
              QStringLiteral("path_outside_workspace")));
     return;
   }
 
   const QFileInfo info(path);
   if(!info.exists()) {
-    finish(ToolResult::failure(QStringLiteral("文件不存在：%1").arg(path),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::ReadTool", "File does not exist: %1").arg(path),
                                QStringLiteral("file_not_found")));
     return;
   }
   if(info.isDir()) {
     finish(ToolResult::failure(
-             QStringLiteral("%1 是目录，Read 只能读取文件；请用 Glob/Grep 或 Bash ls。").arg(path),
+             QCoreApplication::translate("tools::ReadTool",
+                                         "%1 is a directory; Read only reads files. Use Glob/Grep or Bash ls.").arg(path),
              QStringLiteral("is_a_directory")));
     return;
   }
   if(!info.isFile()) {
-    finish(ToolResult::failure(QStringLiteral("%1 不是普通文件（可能是设备/FIFO）。").arg(path),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::ReadTool",
+                                                           "%1 is not a regular file (it may be a device or FIFO).").arg(path),
                                QStringLiteral("not_a_regular_file")));
     return;
   }
@@ -235,7 +241,8 @@ void ReadTool::execute(const QJsonObject & input, const ToolContext & context, T
 
   QFile file(path);
   if(!file.open(QIODevice::ReadOnly)) {
-    finish(ToolResult::failure(QStringLiteral("无法打开文件：%1").arg(file.errorString()),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::ReadTool",
+                                                           "Could not open the file: %1").arg(file.errorString()),
                                QStringLiteral("read_failed")));
     return;
   }
@@ -249,8 +256,8 @@ void ReadTool::execute(const QJsonObject & input, const ToolContext & context, T
 
   if(toolutil::looksBinary(bytes)) {
     finish(ToolResult::failure(
-             QStringLiteral("%1 看起来是二进制文件（前 8KiB 内含 NUL 字节），"
-                            "Read 不支持；请改用 Bash（如 `file`、`xxd`、`strings`）。")
+             QCoreApplication::translate("tools::ReadTool",
+                                         "%1 looks like a binary file (a NUL byte appears in the first 8 KiB), which Read does not support. Use Bash instead (for example `file`, `xxd`, `strings`).")
              .arg(path),
              QStringLiteral("binary_file")));
     return;

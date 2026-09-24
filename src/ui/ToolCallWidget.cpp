@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -99,7 +100,7 @@ void ToolCallWidget::buildUi()
   toggleButton_->setArrowType(Qt::RightArrow);
   toggleButton_->setAutoRaise(true);
   toggleButton_->setCheckable(true);
-  toggleButton_->setToolTip(QStringLiteral("展开或收起详情"));
+  toggleButton_->setToolTip(QCoreApplication::translate("ui::ToolCallWidget", "Expand or collapse details"));
   connect(toggleButton_, &QToolButton::toggled, this, [this](bool expanded) {
     toggleButton_->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
     if(body_ != nullptr) {
@@ -110,7 +111,7 @@ void ToolCallWidget::buildUi()
 
   // 状态灯：用一个圆点字符而不是自绘，避免引入额外绘制代码。
   stateDot_ = new QLabel(QStringLiteral("\u25CF"));
-  stateDot_->setToolTip(QStringLiteral("工具状态"));
+  stateDot_->setToolTip(QCoreApplication::translate("ui::ToolCallWidget", "Tool status"));
   header->addWidget(stateDot_);
 
   nameLabel_ = new QLabel;
@@ -137,14 +138,14 @@ void ToolCallWidget::buildUi()
   bodyLayout->setContentsMargins(0, 4, 0, 0);
   bodyLayout->setSpacing(4);
 
-  inputCaption_ = new QLabel(QStringLiteral("入参"));
+  inputCaption_ = new QLabel(QCoreApplication::translate("ui::ToolCallWidget", "Arguments"));
   inputCaption_->setFont(Theme::instance().font(FontRole::UiXs));
   inputView_ = makeMonoView();
   inputView_->setMaximumHeight(140);
   bodyLayout->addWidget(inputCaption_);
   bodyLayout->addWidget(inputView_);
 
-  outputCaption_ = new QLabel(QStringLiteral("输出"));
+  outputCaption_ = new QLabel(QCoreApplication::translate("ui::ToolCallWidget", "Output"));
   outputCaption_->setFont(Theme::instance().font(FontRole::UiXs));
   outputView_ = makeMonoView();
   outputView_->setMaximumHeight(kOutputMaxHeight);
@@ -153,7 +154,7 @@ void ToolCallWidget::buildUi()
 
   // 改动补丁放在输出之前：对 Write/Edit 来说"改了什么"才是用户要看的，
   // 那句"Wrote 3 lines"没什么信息量。
-  diffCaption_ = new QLabel(QStringLiteral("改动"));
+  diffCaption_ = new QLabel(QCoreApplication::translate("ui::ToolCallWidget", "Changes"));
   diffCaption_->setFont(Theme::instance().font(FontRole::UiXs));
   diffView_ = new DiffView;
   diffView_->setMaximumHeight(kDiffMaxHeight);
@@ -240,19 +241,19 @@ QString ToolCallWidget::stateText() const
 {
   switch(part_.tool.state) {
     case ToolState::InputStreaming:
-      return QStringLiteral("接收参数中");
+      return QCoreApplication::translate("ui::ToolCallWidget", "Receiving arguments");
     case ToolState::PendingApproval:
-      return QStringLiteral("等待确认");
+      return QCoreApplication::translate("ui::ToolCallWidget", "Awaiting approval");
     case ToolState::Running:
-      return QStringLiteral("执行中");
+      return QCoreApplication::translate("ui::ToolCallWidget", "Running");
     case ToolState::Success:
-      return QStringLiteral("成功");
+      return QCoreApplication::translate("ui::ToolCallWidget", "Succeeded");
     case ToolState::Error:
-      return QStringLiteral("失败");
+      return QCoreApplication::translate("ui::ToolCallWidget", "Failed");
     case ToolState::Cancelled:
-      return QStringLiteral("已取消");
+      return QCoreApplication::translate("ui::ToolCallWidget", "Cancelled");
   }
-  return QStringLiteral("未知");
+  return QCoreApplication::translate("ui::ToolCallWidget", "Unknown");
 }
 
 void ToolCallWidget::refreshHeader()
@@ -262,7 +263,7 @@ void ToolCallWidget::refreshHeader()
   stateDot_->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::css(stateColor())));
   stateDot_->setToolTip(stateText());
 
-  nameLabel_->setText(part_.tool.name.isEmpty() ? QStringLiteral("(未命名工具)")
+  nameLabel_->setText(part_.tool.name.isEmpty() ? QCoreApplication::translate("ui::ToolCallWidget", "(unnamed tool)")
                       : part_.tool.name);
   nameLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::css(palette.foreground)));
 
@@ -329,8 +330,9 @@ void ToolCallWidget::refreshBodies()
   else {
     outputCaption_->setVisible(true);
     outputView_->setVisible(true);
-    outputCaption_->setText(part_.tool.state == ToolState::Error ? QStringLiteral("错误")
-                            : QStringLiteral("输出"));
+    outputCaption_->setText(part_.tool.state == ToolState::Error ? QCoreApplication::translate("ui::ToolCallWidget",
+                                                                                               "Error")
+                            : QCoreApplication::translate("ui::ToolCallWidget", "Output"));
     outputView_->setPlainText(json::truncate(outputText, kInlineOutputLimit));
     const QColor textColor = part_.tool.state == ToolState::Error ? palette.destructive
                              : palette.foreground;
@@ -346,22 +348,23 @@ void ToolCallWidget::refreshBodies()
       QStringLiteral("color: %1;").arg(Theme::css(palette.foregroundSubtle)));
     switch(part_.tool.state) {
       case ToolState::InputStreaming:
-        emptyHint_->setText(QStringLiteral("正在接收调用参数…"));
+        emptyHint_->setText(QCoreApplication::translate("ui::ToolCallWidget", "Receiving call arguments…"));
         break;
       case ToolState::PendingApproval:
-        emptyHint_->setText(QStringLiteral("等待你确认后才会执行。"));
+        emptyHint_->setText(QCoreApplication::translate("ui::ToolCallWidget", "It runs only after you approve."));
         break;
       case ToolState::Running:
-        emptyHint_->setText(QStringLiteral("正在执行…"));
+        emptyHint_->setText(QCoreApplication::translate("ui::ToolCallWidget", "Running…"));
         break;
       case ToolState::Cancelled:
-        emptyHint_->setText(QStringLiteral("该调用已取消，未产生输出。"));
+        emptyHint_->setText(QCoreApplication::translate("ui::ToolCallWidget",
+                                                        "This call was cancelled and produced no output."));
         break;
       case ToolState::Success:
-        emptyHint_->setText(QStringLiteral("执行成功，无输出。"));
+        emptyHint_->setText(QCoreApplication::translate("ui::ToolCallWidget", "Succeeded with no output."));
         break;
       case ToolState::Error:
-        emptyHint_->setText(QStringLiteral("执行失败，无错误详情。"));
+        emptyHint_->setText(QCoreApplication::translate("ui::ToolCallWidget", "Failed with no error details."));
         break;
     }
   }
@@ -416,7 +419,7 @@ void ToolCallWidget::syncDiff()
 
   diffView_->setHunks(hunks);
   // 头部直接给出增删行数：不展开卡片也能看出改动规模。
-  diffCaption_->setText(QStringLiteral("改动  +%1  −%2")
+  diffCaption_->setText(QCoreApplication::translate("ui::ToolCallWidget", "Changes  +%1  −%2")
                         .arg(diffView_->additions())
                         .arg(diffView_->deletions()));
   diffCaption_->show();
@@ -436,8 +439,10 @@ void ToolCallWidget::syncFileLink()
     fileCaption_->hide();
     return;
   }
-  fileCaption_->setText(QStringLiteral("查看文件  %1  ▸").arg(QFileInfo(path).fileName()));
-  fileCaption_->setToolTip(QStringLiteral("点击查看完整内容：%1").arg(path));
+  fileCaption_->setText(QCoreApplication::translate("ui::ToolCallWidget",
+                                                    "View file  %1  ▸").arg(QFileInfo(path).fileName()));
+  fileCaption_->setToolTip(QCoreApplication::translate("ui::ToolCallWidget",
+                                                       "Click to view the full content: %1").arg(path));
   fileCaption_->show();
 }
 
@@ -466,8 +471,8 @@ void ToolCallWidget::syncImages()
       label->setObjectName(QStringLiteral("toolImage"));
       // 缩略图只有 240px，看不清细节。整块可点，点开看原尺寸。
       label->setCursor(Qt::PointingHandCursor);
-      label->setToolTip(QStringLiteral("点击查看原图（%1）")
-                        .arg(image.fileName.isEmpty() ? QStringLiteral("图片")
+      label->setToolTip(QCoreApplication::translate("ui::ToolCallWidget", "Click to view the original image (%1)")
+                        .arg(image.fileName.isEmpty() ? QCoreApplication::translate("ui::ToolCallWidget", "Image")
                              : image.fileName));
       label->installEventFilter(const_cast<ToolCallWidget *>(this));
       constexpr int kMaxEdge = 240;
@@ -476,7 +481,7 @@ void ToolCallWidget::syncImages()
                                        Qt::SmoothTransformation)
                        : pixmap);
       label->setToolTip(QStringLiteral("%1（%2 · %3×%4）")
-                        .arg(image.fileName.isEmpty() ? QStringLiteral("图片")
+                        .arg(image.fileName.isEmpty() ? QCoreApplication::translate("ui::ToolCallWidget", "Image")
                              : image.fileName,
                              image.mimeType)
                         .arg(pixmap.width())
@@ -485,7 +490,8 @@ void ToolCallWidget::syncImages()
       continue;
     }
     // 解不出图时不要静默：至少说明"这里有张图但没能解码"。
-    auto * label = new QLabel(QStringLiteral("图片无法解码：%1").arg(image.fileName));
+    auto * label = new QLabel(QCoreApplication::translate("ui::ToolCallWidget",
+                                                          "The image could not be decoded: %1").arg(image.fileName));
     label->setFont(Theme::instance().font(FontRole::UiXs));
     imageLayout_->addWidget(label);
   }

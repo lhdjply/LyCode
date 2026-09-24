@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -47,26 +48,26 @@ constexpr int kNeedsAttentionRole = Qt::UserRole + 2;
 QString statusBadge(const Session & session)
 {
   if(session.pendingPermissionCount > 0) {
-    return QStringLiteral("%1 待确认").arg(session.pendingPermissionCount);
+    return QCoreApplication::translate("ui::SidebarPanel", "%1 awaiting approval").arg(session.pendingPermissionCount);
   }
   // 子代理会话与主会话混在同一个列表里，必须能一眼分出来。
   if(session.isSubagent()) {
     switch(session.status) {
       case SessionStatus::Running:
       case SessionStatus::Prewarming:
-        return QStringLiteral("子代理 · 运行中");
+        return QCoreApplication::translate("ui::SidebarPanel", "Subagent · running");
       case SessionStatus::Error:
-        return QStringLiteral("子代理 · 出错");
+        return QCoreApplication::translate("ui::SidebarPanel", "Subagent · error");
       default:
-        return QStringLiteral("子代理");
+        return QCoreApplication::translate("ui::SidebarPanel", "Subagent");
     }
   }
   switch(session.status) {
     case SessionStatus::Running:
     case SessionStatus::Prewarming:
-      return QStringLiteral("运行中");
+      return QCoreApplication::translate("ui::SidebarPanel", "Running");
     case SessionStatus::Error:
-      return QStringLiteral("出错");
+      return QCoreApplication::translate("ui::SidebarPanel", "Error");
     case SessionStatus::Draft:
     case SessionStatus::CompletedSuccess:
     case SessionStatus::CompletedInterrupted:
@@ -98,9 +99,10 @@ void SidebarPanel::buildUi()
   // 那才是"在哪建"这个信息真正所在的位置。
   // 措辞与菜单栏的「打开工作区…」保持一致——同一个动作在两个地方叫两个名字，
   // 用户会以为是两件事。也不该叫"新建"：目录本来就在磁盘上，是**打开**它。
-  newWorkspaceButton_ = new QPushButton(QStringLiteral("打开工作区…"));
+  newWorkspaceButton_ = new QPushButton(QCoreApplication::translate("ui::SidebarPanel", "Open Workspace…"));
   newWorkspaceButton_->setObjectName(QStringLiteral("newWorkspaceButton"));
-  newWorkspaceButton_->setToolTip(QStringLiteral("选择已有目录，把它加进工作区列表"));
+  newWorkspaceButton_->setToolTip(QCoreApplication::translate("ui::SidebarPanel",
+                                                              "Pick an existing directory to add to the workspace list"));
   newWorkspaceButton_->setProperty("accent", true);
   newWorkspaceButton_->setCursor(Qt::PointingHandCursor);
   // ⚠ 这个按钮的动作是"选目录并加进工作区列表"，**不是**新建会话。
@@ -179,8 +181,9 @@ void SidebarPanel::buildUi()
       // 不是"打开/关闭工作区"。要切到某个工作区，点它下面的会话即可
       //（MainWindow 会先切工作区再打开），或点它右侧的 "+" 新建一个。
       const QString path = workspacePathOf(item);
-      QAction * remove = menu.addAction(QStringLiteral("从最近列表移除"));
-      QAction * purge = menu.addAction(QStringLiteral("删除该工作区的全部会话…"));
+      QAction * remove = menu.addAction(QCoreApplication::translate("ui::SidebarPanel", "Remove from the recent list"));
+      QAction * purge = menu.addAction(QCoreApplication::translate("ui::SidebarPanel",
+                                                                   "Delete all sessions in this workspace…"));
       QAction * chosen = menu.exec(sessionTree_->mapToGlobal(position));
       if(chosen == remove) {
         emit workspaceRemoveRequested(path);
@@ -190,7 +193,7 @@ void SidebarPanel::buildUi()
       }
       return;
     }
-    QAction * remove = menu.addAction(QStringLiteral("删除会话"));
+    QAction * remove = menu.addAction(QCoreApplication::translate("ui::SidebarPanel", "Delete session"));
     if(menu.exec(sessionTree_->mapToGlobal(position)) == remove) {
       emit sessionDeleteRequested(id);
     }
@@ -198,14 +201,14 @@ void SidebarPanel::buildUi()
   root->addWidget(sessionTree_, 1);
 
   // 空状态提示与树互斥显示。
-  emptyHint_ = new QLabel(QStringLiteral("还没有会话。"));
+  emptyHint_ = new QLabel(QCoreApplication::translate("ui::SidebarPanel", "No sessions yet."));
   emptyHint_->setAlignment(Qt::AlignCenter);
   emptyHint_->setFont(Theme::instance().font(FontRole::UiSm));
   emptyHint_->setVisible(false);
   root->addWidget(emptyHint_);
 
   // ── 设置入口 ────────────────────────────────────────────────────────────
-  settingsButton_ = new QPushButton(QStringLiteral("设置"));
+  settingsButton_ = new QPushButton(QCoreApplication::translate("ui::SidebarPanel", "Settings"));
   settingsButton_->setObjectName(QStringLiteral("settingsButton"));
   settingsButton_->setProperty("variant", QStringLiteral("ghost"));
   settingsButton_->setCursor(Qt::PointingHandCursor);
@@ -255,7 +258,7 @@ QTreeWidgetItem * SidebarPanel::makeSessionItem(const SessionSummary & summary) 
 
   QString title = session.title.trimmed();
   if(title.isEmpty()) {
-    title = QStringLiteral("未命名会话");
+    title = QCoreApplication::translate("ui::SidebarPanel", "Untitled session");
   }
 
   // **只显示标题，一行。**
@@ -429,7 +432,7 @@ QTreeWidgetItem * SidebarPanel::ensureWorkspaceItem(const QString & path)
   addSession->setCursor(Qt::PointingHandCursor);
   addSession->setAutoRaise(true);
   addSession->setFixedSize(20, 20);
-  addSession->setToolTip(QStringLiteral("在「%1」里新建会话")
+  addSession->setToolTip(QCoreApplication::translate("ui::SidebarPanel", "New session in \"%1\"")
                          .arg(item->data(0, kWorkspaceNameRole).toString()));
   item->setToolTip(0, path);
   connect(addSession, &QToolButton::clicked, this,
@@ -611,8 +614,10 @@ void SidebarPanel::refreshEmptyState()
     // 两种"空"的下一步动作完全不同：没有工作区要去加一个；
     // 有工作区但没会话就去新建会话。提示语混用会让用户点错地方。
     emptyHint_->setText(workspace_.isValid()
-                        ? QStringLiteral("这个工作区还没有会话。\n点工作区行右侧的 + 新建一个。")
-                        : QStringLiteral("还没有工作区。\n点上面的「打开工作区…」选择一个目录。"));
+                        ? QCoreApplication::translate("ui::SidebarPanel",
+                                                      "This workspace has no sessions yet.\nUse the + on the workspace row to create one.")
+                        : QCoreApplication::translate("ui::SidebarPanel",
+                                                      "No workspace yet.\nUse \"Open Workspace…\" above to pick a directory."));
   }
   emptyHint_->setVisible(isEmpty);
   sessionTree_->setVisible(!isEmpty);

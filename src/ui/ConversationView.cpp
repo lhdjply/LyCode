@@ -13,6 +13,7 @@
 #include <QTextBrowser>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -28,28 +29,28 @@ QString roleDisplayName(MessageRole role)
 {
   switch(role) {
     case MessageRole::User:
-      return QStringLiteral("你");
+      return QCoreApplication::translate("ui::ConversationView", "You");
     case MessageRole::Assistant:
       return QStringLiteral("LyCode");
     case MessageRole::System:
-      return QStringLiteral("系统");
+      return QCoreApplication::translate("ui::ConversationView", "System");
   }
-  return QStringLiteral("未知");
+  return QCoreApplication::translate("ui::ConversationView", "Unknown");
 }
 
 QString statusDisplayName(MessageStatus status)
 {
   switch(status) {
     case MessageStatus::Pending:
-      return QStringLiteral("等待中");
+      return QCoreApplication::translate("ui::ConversationView", "Waiting");
     case MessageStatus::Streaming:
-      return QStringLiteral("生成中");
+      return QCoreApplication::translate("ui::ConversationView", "Generating");
     case MessageStatus::Complete:
       return {};
     case MessageStatus::Interrupted:
-      return QStringLiteral("已中断");
+      return QCoreApplication::translate("ui::ConversationView", "Interrupted");
     case MessageStatus::Failed:
-      return QStringLiteral("失败");
+      return QCoreApplication::translate("ui::ConversationView", "Failed");
   }
   return {};
 }
@@ -263,7 +264,7 @@ void MessageWidget::buildPartWidget(const Part & part)
         const bool reasoning = part.kind == PartKind::Reasoning;
         if(reasoning) {
           // 思考内容折在一条弱化的说明行下，避免抢占正文注意力。
-          auto * caption = new QLabel(QStringLiteral("思考过程"));
+          auto * caption = new QLabel(QCoreApplication::translate("ui::ConversationView", "Reasoning"));
           caption->setFont(Theme::instance().font(FontRole::UiXs));
           caption->setStyleSheet(QStringLiteral("color: %1;")
                                  .arg(Theme::css(Theme::instance().palette()
@@ -321,7 +322,7 @@ void MessageWidget::buildPartWidget(const Part & part)
                            : pixmap);
           image->setToolTip(QStringLiteral("%1（%2 · %3×%4）")
                             .arg(part.file.fileName.isEmpty()
-                                 ? QStringLiteral("图片")
+                                 ? QCoreApplication::translate("ui::ConversationView", "Image")
                                  : part.file.fileName,
                                  part.file.mimeType)
                             .arg(pixmap.width())
@@ -339,7 +340,8 @@ void MessageWidget::buildPartWidget(const Part & part)
       }
 
     case PartKind::Artifact: {
-        auto * label = new QLabel(QStringLiteral("产物：") + part.artifact.displayName);
+        auto * label = new QLabel(QCoreApplication::translate("ui::ConversationView",
+                                                              "Artifacts:") + part.artifact.displayName);
         label->setFont(Theme::instance().font(FontRole::UiSm));
         label->setTextInteractionFlags(Qt::TextSelectableByMouse);
         addPartWidget(label);
@@ -347,7 +349,7 @@ void MessageWidget::buildPartWidget(const Part & part)
       }
 
     case PartKind::Subagent: {
-        auto * label = new QLabel(QStringLiteral("子代理：") + part.subagent.title);
+        auto * label = new QLabel(QCoreApplication::translate("ui::ConversationView", "Subagents:") + part.subagent.title);
         label->setFont(Theme::instance().font(FontRole::UiSm));
         label->setWordWrap(true);
         label->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -573,8 +575,8 @@ ConversationView::ConversationView(QWidget * parent) : QWidget(parent)
   emptyState_->setAlignment(Qt::AlignCenter);
   emptyState_->setWordWrap(true);
   emptyState_->setText(
-    QStringLiteral("开始一个新会话\n\n在工作区里描述你想完成的任务，"
-                   "LyCode 会读取代码、执行命令并给出改动。"));
+    QCoreApplication::translate("ui::ConversationView",
+                                "Start a new session\n\nDescribe what you want to get done in this workspace. LyCode will read code, run commands, and make the changes."));
   containerLayout_->insertWidget(0, emptyState_, 1);
 
   scroll_->setWidget(container_);

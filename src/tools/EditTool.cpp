@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QLoggingCategory>
 #include <QList>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -128,14 +129,14 @@ QString EditTool::validateInput(const QJsonObject & input) const
     return base;
   }
   if(json::str(input, QStringLiteral("file_path")).trimmed().isEmpty()) {
-    return QStringLiteral("file_path 不能为空");
+    return QCoreApplication::translate("tools::EditTool", "file_path cannot be empty");
   }
   if(json::str(input, QStringLiteral("old_string")).isEmpty()) {
     // 空 old_string 会在每个位置匹配，必然造成意外的整文件改写。
-    return QStringLiteral("old_string 不能为空");
+    return QCoreApplication::translate("tools::EditTool", "old_string cannot be empty");
   }
   if(!input.value(QStringLiteral("new_string")).isString()) {
-    return QStringLiteral("new_string 必须是字符串");
+    return QCoreApplication::translate("tools::EditTool", "new_string must be a string");
   }
   return {};
 }
@@ -158,7 +159,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
                << "replaceAll=" << replaceAll;
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::EditTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(toolutil::shouldRejectForReadOnly(meta, context)) {
@@ -175,7 +177,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   const QString path = context.resolvePath(rawPath);
   if(path.isEmpty()) {
     finish(ToolResult::failure(
-             QStringLiteral("路径非法或超出工作区范围：%1").arg(toolutil::redactForLog(rawPath)),
+             QCoreApplication::translate("tools::EditTool",
+                                         "Invalid path, or outside the workspace: %1").arg(toolutil::redactForLog(rawPath)),
              QStringLiteral("path_outside_workspace")));
     return;
   }
@@ -183,12 +186,13 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   const QFileInfo info(path);
   if(!info.exists()) {
     finish(ToolResult::failure(
-             QStringLiteral("文件不存在：%1（Edit 不能创建新文件，请用 Write）").arg(path),
+             QCoreApplication::translate("tools::EditTool",
+                                         "File does not exist: %1 (Edit cannot create files; use Write)").arg(path),
              QStringLiteral("file_not_found")));
     return;
   }
   if(!info.isFile()) {
-    finish(ToolResult::failure(QStringLiteral("%1 不是普通文件。").arg(path),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::EditTool", "%1 is not a regular file.").arg(path),
                                QStringLiteral("not_a_regular_file")));
     return;
   }
@@ -197,7 +201,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   constexpr qint64 kMaxEditableBytes = 32 * 1024 * 1024;
   if(info.size() > kMaxEditableBytes) {
     finish(ToolResult::failure(
-             QStringLiteral("文件过大（%1 字节，Edit 上限 %2 字节），请用 Bash 或 Write。")
+             QCoreApplication::translate("tools::EditTool",
+                                         "The file is too large (%1 bytes; Edit is limited to %2 bytes). Use Bash or Write.")
              .arg(info.size())
              .arg(kMaxEditableBytes),
              QStringLiteral("file_too_large")));
@@ -207,7 +212,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   const qint64 startedMs = nowMs();
   QFile file(path);
   if(!file.open(QIODevice::ReadOnly)) {
-    finish(ToolResult::failure(QStringLiteral("无法读取文件：%1").arg(file.errorString()),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::EditTool",
+                                                           "Could not read the file: %1").arg(file.errorString()),
                                QStringLiteral("read_failed")));
     return;
   }
@@ -221,8 +227,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   if(matchCount == 0) {
     // 最常见的失败：模型记错了缩进或行内容。错误里给出可操作的下一步。
     finish(ToolResult::failure(
-             QStringLiteral("在 %1 中找不到 old_string。请先用 Read 确认原文"
-                            "（注意缩进与空白必须逐字一致）。")
+             QCoreApplication::translate("tools::EditTool",
+                                         "old_string was not found in %1. Use Read to check the exact text first (indentation and whitespace must match exactly).")
              .arg(path),
              QStringLiteral("string_not_found")));
     return;
@@ -230,8 +236,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   if(matchCount > 1 && !replaceAll) {
     // 歧义必须失败：静默改第一个匹配是"看起来成功"的错误行为。
     finish(ToolResult::failure(
-             QStringLiteral("old_string 在 %1 中出现了 %2 次，无法确定要替换哪一处。"
-                            "请扩大上下文使匹配唯一，或用 replace_all=true 全部替换。")
+             QCoreApplication::translate("tools::EditTool",
+                                         "old_string appears %2 times in %1, so it is ambiguous. Include more context to make the match unique, or pass replace_all=true to replace every occurrence.")
              .arg(path)
              .arg(matchCount),
              QStringLiteral("multiple_matches")));
@@ -254,7 +260,8 @@ void EditTool::execute(const QJsonObject & input, const ToolContext & context, T
   QString writeError;
   if(!toolutil::writeFileAtomic(path, updated.toUtf8(), &writeError)) {
     qCCritical(log) << "Edit 写回失败; path=" << path << "error=" << writeError;
-    finish(ToolResult::failure(QStringLiteral("写回文件失败：%1").arg(writeError),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::EditTool",
+                                                           "Failed to write the file back: %1").arg(writeError),
                                QStringLiteral("write_failed")));
     return;
   }

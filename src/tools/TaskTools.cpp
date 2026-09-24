@@ -7,6 +7,7 @@
 
 #include "core/Json.h"
 #include "tools/BackgroundTaskRegistry.h"
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -51,7 +52,7 @@ QString renderTask(const BackgroundTask & task)
   }
   else {
     lines << QString();
-    lines << QStringLiteral("(目前没有输出)");
+    lines << QCoreApplication::translate("tools::TaskTools", "(no output yet)");
   }
   return lines.join(QLatin1Char('\n'));
 }
@@ -138,12 +139,13 @@ void TaskOutputTool::execute(const QJsonObject & input, const ToolContext & cont
 {
   const QString taskId = stringArg(input, QStringLiteral("task_id")).trimmed();
   if(taskId.isEmpty()) {
-    done(ToolResult::failure(QStringLiteral("task_id 不能为空。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::TaskTools", "task_id cannot be empty."),
                              QStringLiteral("invalid_input")));
     return;
   }
   if(context.backgroundTasks == nullptr) {
-    done(ToolResult::failure(QStringLiteral("当前环境不支持后台任务。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::TaskTools",
+                                                         "This environment does not support background tasks."),
                              QStringLiteral("unsupported")));
     return;
   }
@@ -151,7 +153,8 @@ void TaskOutputTool::execute(const QJsonObject & input, const ToolContext & cont
   BackgroundTaskRegistry * registry = context.backgroundTasks;
   if(!registry->contains(taskId)) {
     done(ToolResult::failure(
-           QStringLiteral("找不到后台任务：%1（可用 TaskOutput 的任务仅限本次会话启动的）")
+           QCoreApplication::translate("tools::TaskTools",
+                                       "Background task not found: %1 (TaskOutput only reaches tasks started in this session)")
            .arg(taskId),
            QStringLiteral("task_not_found")));
     return;
@@ -277,19 +280,20 @@ void TaskStopTool::execute(const QJsonObject & input, const ToolContext & contex
     taskId = stringArg(input, QStringLiteral("shell_id")).trimmed();
   }
   if(taskId.isEmpty()) {
-    done(ToolResult::failure(QStringLiteral("task_id 不能为空。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::TaskTools", "task_id cannot be empty."),
                              QStringLiteral("invalid_input")));
     return;
   }
   if(context.backgroundTasks == nullptr) {
-    done(ToolResult::failure(QStringLiteral("当前环境不支持后台任务。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::TaskTools",
+                                                         "This environment does not support background tasks."),
                              QStringLiteral("unsupported")));
     return;
   }
 
   BackgroundTaskRegistry * registry = context.backgroundTasks;
   if(!registry->contains(taskId)) {
-    done(ToolResult::failure(QStringLiteral("找不到后台任务：%1").arg(taskId),
+    done(ToolResult::failure(QCoreApplication::translate("tools::TaskTools", "Background task not found: %1").arg(taskId),
                              QStringLiteral("task_not_found")));
     return;
   }
@@ -298,7 +302,8 @@ void TaskStopTool::execute(const QJsonObject & input, const ToolContext & contex
   if(!before.isRunning()) {
     // 已结束的任务不算错误：告诉模型现状即可，避免它反复重试。
     ToolResult result = ToolResult::success(
-                          QStringLiteral("任务 %1 已经结束（status=%2, exit_code=%3），无需停止。")
+                          QCoreApplication::translate("tools::TaskTools",
+                                                      "Task %1 has already finished (status=%2, exit_code=%3); there is nothing to stop.")
                           .arg(taskId, before.status)
                           .arg(before.exitCode));
     result.metadata = taskMetadata(before);
@@ -308,7 +313,7 @@ void TaskStopTool::execute(const QJsonObject & input, const ToolContext & contex
   }
 
   if(!registry->stop(taskId)) {
-    done(ToolResult::failure(QStringLiteral("停止任务失败：%1").arg(taskId),
+    done(ToolResult::failure(QCoreApplication::translate("tools::TaskTools", "Failed to stop the task: %1").arg(taskId),
                              QStringLiteral("stop_failed")));
     return;
   }
@@ -317,7 +322,8 @@ void TaskStopTool::execute(const QJsonObject & input, const ToolContext & contex
   // 可以用 TaskOutput 确认。不谎报"已终止"。
   qCInfo(log) << "已请求停止后台任务;" << taskId;
   ToolResult result = ToolResult::success(
-                        QStringLiteral("已向任务 %1 发送终止信号。用 TaskOutput 查看最终状态与退出码。")
+                        QCoreApplication::translate("tools::TaskTools",
+                                                    "Sent a termination signal to task %1. Use TaskOutput to see its final status and exit code.")
                         .arg(taskId));
   result.metadata = taskMetadata(before);
   result.metadata.insert(QStringLiteral("stopRequested"), true);

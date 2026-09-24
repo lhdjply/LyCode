@@ -31,6 +31,7 @@
 #include <csignal>
 #include <algorithm>
 #include <memory>
+#include <QCoreApplication>
 
 #ifdef Q_OS_UNIX
   #include <unistd.h>
@@ -169,7 +170,7 @@ QString BashTool::validateInput(const QJsonObject & input) const
     return base;
   }
   if(json::str(input, QStringLiteral("command")).trimmed().isEmpty()) {
-    return QStringLiteral("command 不能为空");
+    return QCoreApplication::translate("tools::BashTool", "command cannot be empty");
   }
   return {};
 }
@@ -219,11 +220,12 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
   }
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::BashTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(command.trimmed().isEmpty()) {
-    finish(ToolResult::failure(QStringLiteral("command 不能为空"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::BashTool", "command cannot be empty"),
                                QStringLiteral("invalid_input")));
     return;
   }
@@ -243,7 +245,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     cwd = QDir::currentPath();
   }
   if(!QFileInfo(cwd).isDir()) {
-    finish(ToolResult::failure(QStringLiteral("工作目录不存在：%1").arg(cwd),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::BashTool",
+                                                           "Working directory does not exist: %1").arg(cwd),
                                QStringLiteral("invalid_cwd")));
     return;
   }
@@ -262,7 +265,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
   if(runInBackground) {
     if(context.backgroundTasks == nullptr) {
       finish(ToolResult::failure(
-               QStringLiteral("当前环境不支持后台任务（run_in_background）。"),
+               QCoreApplication::translate("tools::BashTool",
+                                           "This environment does not support background tasks (run_in_background)."),
                QStringLiteral("unsupported")));
       return;
     }
@@ -270,7 +274,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     const QString taskId = context.backgroundTasks->allocateTaskId();
     const QString outputPath = BackgroundTaskRegistry::outputPathForTask(taskId);
     if(outputPath.isEmpty()) {
-      finish(ToolResult::failure(QStringLiteral("无法创建后台任务输出目录。"),
+      finish(ToolResult::failure(QCoreApplication::translate("tools::BashTool",
+                                                             "Could not create the background task output directory."),
                                  QStringLiteral("output_path_unavailable")));
       return;
     }
@@ -305,7 +310,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     if(!launched || pid <= 0) {
       qCCritical(log) << "后台任务启动失败; program=" << program << "cwd=" << cwd;
       finish(ToolResult::failure(
-               QStringLiteral("后台任务无法启动（program=%1，cwd=%2）。").arg(program, cwd),
+               QCoreApplication::translate("tools::BashTool", "The background task could not start (program=%1, cwd=%2).").arg(program,
+                   cwd),
                QStringLiteral("spawn_failed")));
       return;
     }
@@ -320,7 +326,7 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     adoptRequest.detached = true;
     if(context.backgroundTasks->adopt(adoptRequest).isEmpty()) {
       qCCritical(log) << "后台任务登记失败，进程将成为孤儿; pid=" << pid;
-      finish(ToolResult::failure(QStringLiteral("后台任务登记失败。"),
+      finish(ToolResult::failure(QCoreApplication::translate("tools::BashTool", "Failed to register the background task."),
                                  QStringLiteral("background_register_failed")));
       return;
     }
@@ -328,11 +334,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     qCInfo(log) << "后台任务已分离启动; id=" << taskId << "pid=" << pid
                 << "output=" << outputPath;
     ToolResult result = ToolResult::success(
-                          QStringLiteral("命令已在后台启动（已与宿主分离，可跨重启存活）。\n"
-                                         "task_id: %1\n"
-                                         "output_path: %2\n"
-                                         "pid: %3\n\n"
-                                         "用 TaskOutput 读取进度或结果，用 TaskStop 终止。")
+                          QCoreApplication::translate("tools::BashTool",
+                                                      "The command was started in the background (detached from the host, survives restarts).\ntask_id: %1\noutput_path: %2\npid: %3\n\nUse TaskOutput to read progress or results, and TaskStop to stop it.")
                           .arg(taskId, outputPath)
                           .arg(pid));
     result.metadata.insert(QStringLiteral("status"), QStringLiteral("backgrounded"));
@@ -444,12 +447,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
 
     const BackgroundTask task = context.backgroundTasks->task(taskId);
     ToolResult result = ToolResult::success(
-                          QStringLiteral("命令超过超时（%1ms）仍在运行，已自动转入后台。\n"
-                                         "task_id: %2\n"
-                                         "output_path: %3\n\n"
-                                         "用 TaskOutput 读取进度，用 TaskStop 终止。\n"
-                                         "注意：它继承的是前台管道，只在本进程存活期间继续"
-                                         "运行；需要跨重启请用 run_in_background 显式启动。")
+                          QCoreApplication::translate("tools::BashTool",
+                                                      "The command exceeded its timeout (%1ms) and is still running, so it was moved to the background.\ntask_id: %2\noutput_path: %3\n\nUse TaskOutput to read progress and TaskStop to stop it.\nNote: it inherited the foreground pipes, so it only lives as long as this process. Use run_in_background to survive a restart.")
                           .arg(timeoutMs)
                           .arg(taskId, task.outputPath));
     result.metadata.insert(QStringLiteral("status"),
@@ -484,7 +483,7 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     metadata.insert(QStringLiteral("timedOut"), state->timedOut);
     metadata.insert(QStringLiteral("truncated"), false);
     finish(ToolResult::failure(
-             QStringLiteral("无法启动命令进程：%1").arg(process->errorString()),
+             QCoreApplication::translate("tools::BashTool", "Could not start the command process: %1").arg(process->errorString()),
              QStringLiteral("spawn_failed"), metadata));
   });
 
@@ -548,7 +547,7 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     if(state->cancelled) {
       qCInfo(log) << "Bash 已取消; durationMs=" << durationMs;
       ToolResult result = ToolResult::failure(
-                            QStringLiteral("命令已取消"), QStringLiteral("cancelled"),
+                            QCoreApplication::translate("tools::BashTool", "Command cancelled"), QStringLiteral("cancelled"),
                             metadata);
       result.output = combined;
       finish(std::move(result));
@@ -556,8 +555,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     }
     if(state->timedOut) {
       ToolResult result = ToolResult::failure(
-                            QStringLiteral("命令超时（%1 ms），进程组已被终止。"
-                                           "如需更长时间请显式提高 timeout（上限 %2 ms）。")
+                            QCoreApplication::translate("tools::BashTool",
+                                                        "The command timed out (%1 ms) and its process group was killed. Raise timeout explicitly if it needs longer (limit %2 ms).")
                             .arg(timeoutMs)
                             .arg(kMaxTimeoutMs),
                             QStringLiteral("timeout"), metadata);
@@ -567,7 +566,8 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
     }
     if(!normalExit) {
       ToolResult result = ToolResult::failure(
-                            QStringLiteral("命令异常结束（未正常退出，可能是段错误或被信号杀死）。"),
+                            QCoreApplication::translate("tools::BashTool",
+                                                        "The command ended abnormally (it did not exit normally; it may have segfaulted or been killed by a signal)."),
                             QStringLiteral("crashed"), metadata);
       result.output = combined;
       finish(std::move(result));
@@ -579,7 +579,7 @@ void BashTool::execute(const QJsonObject & input, const ToolContext & context, T
       qCWarning(log) << "Bash 非零退出码; exitCode=" << exitCode
                      << "durationMs=" << durationMs;
       ToolResult result = ToolResult::failure(
-                            QStringLiteral("命令以退出码 %1 结束").arg(exitCode),
+                            QCoreApplication::translate("tools::BashTool", "The command exited with code %1").arg(exitCode),
                             QStringLiteral("nonzero_exit"), metadata);
       result.output = combined;
       finish(std::move(result));

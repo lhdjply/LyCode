@@ -14,6 +14,7 @@
 #include <QStringList>
 
 #include <algorithm>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -190,11 +191,12 @@ void GlobTool::execute(const QJsonObject & input, const ToolContext & context, T
                << "path=" << toolutil::redactForLog(rawPath);
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GlobTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(rawPattern.trimmed().isEmpty()) {
-    finish(ToolResult::failure(QStringLiteral("pattern 不能为空"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GlobTool", "pattern cannot be empty"),
                                QStringLiteral("invalid_input")));
     return;
   }
@@ -205,7 +207,8 @@ void GlobTool::execute(const QJsonObject & input, const ToolContext & context, T
     base = context.resolvePath(rawPath);
     if(base.isEmpty()) {
       finish(ToolResult::failure(
-               QStringLiteral("path 非法或超出工作区范围：%1").arg(toolutil::redactForLog(rawPath)),
+               QCoreApplication::translate("tools::GlobTool",
+                                           "Invalid path, or outside the workspace: %1").arg(toolutil::redactForLog(rawPath)),
                QStringLiteral("path_outside_workspace")));
       return;
     }
@@ -219,7 +222,8 @@ void GlobTool::execute(const QJsonObject & input, const ToolContext & context, T
 
   const QFileInfo baseInfo(base);
   if(base.isEmpty() || !baseInfo.exists() || !baseInfo.isDir()) {
-    finish(ToolResult::failure(QStringLiteral("搜索根目录不存在或不是目录：%1").arg(base),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GlobTool",
+                                                           "The search root does not exist or is not a directory: %1").arg(base),
                                QStringLiteral("invalid_base_directory")));
     return;
   }
@@ -232,7 +236,8 @@ void GlobTool::execute(const QJsonObject & input, const ToolContext & context, T
     const QString normalizedBase = QDir::fromNativeSeparators(QDir::cleanPath(base));
     if(!toolutil::pathWithin(normalizedBase, normalizedPattern)) {
       finish(ToolResult::failure(
-               QStringLiteral("绝对 glob 模式必须位于搜索根目录内：%1").arg(pattern),
+               QCoreApplication::translate("tools::GlobTool",
+                                           "An absolute glob pattern must stay inside the search root: %1").arg(pattern),
                QStringLiteral("invalid_input")));
       return;
     }
@@ -254,7 +259,8 @@ void GlobTool::execute(const QJsonObject & input, const ToolContext & context, T
   walk(base, base, regex, &walkResult, context);
 
   if(walkResult.cancelled) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::GlobTool", "Execution cancelled"),
+                               QStringLiteral("cancelled"),
     QJsonObject{{
         QStringLiteral("numFiles"),
         walkResult.matches.size()
@@ -299,7 +305,8 @@ void GlobTool::execute(const QJsonObject & input, const ToolContext & context, T
   }
   resultMeta.insert(QStringLiteral("skippedDirectories"), skipped);
   resultMeta.insert(QStringLiteral("skippedNote"),
-                    QStringLiteral("跳过了依赖/构建目录（.git、node_modules、build*、.cache 等）"));
+                    QCoreApplication::translate("tools::GlobTool",
+                                                "Skipped dependency/build directories (.git, node_modules, build*, .cache, and similar)"));
   resultMeta.insert(QStringLiteral("durationMs"), static_cast<double>(nowMs() - startedMs));
 
   qCInfo(log) << "Glob 完成; pattern=" << pattern << "base=" << base

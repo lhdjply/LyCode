@@ -4,6 +4,7 @@
 #include <QLoggingCategory>
 
 #include "skills/SkillLibrary.h"
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -60,12 +61,13 @@ void SkillTool::execute(const QJsonObject & input, const ToolContext & context, 
 {
   const QString name = stringArg(input, QStringLiteral("name")).trimmed();
   if(name.isEmpty()) {
-    done(ToolResult::failure(QStringLiteral("name 不能为空。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::SkillTool", "name cannot be empty."),
                              QStringLiteral("invalid_input")));
     return;
   }
   if(context.skills == nullptr) {
-    done(ToolResult::failure(QStringLiteral("当前环境没有配置技能目录。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::SkillTool",
+                                                         "No skill directory is configured in this environment."),
                              QStringLiteral("skills_unavailable")));
     return;
   }
@@ -79,8 +81,8 @@ void SkillTool::execute(const QJsonObject & input, const ToolContext & context, 
       available.append(candidate.id);
     }
     done(ToolResult::failure(
-           QStringLiteral("找不到技能「%1」。可用：%2")
-           .arg(name, available.isEmpty() ? QStringLiteral("(无)")
+           QCoreApplication::translate("tools::SkillTool", "Skill \"%1\" not found. Available: %2")
+           .arg(name, available.isEmpty() ? QCoreApplication::translate("tools::SkillTool", "(none)")
                 : available.join(QStringLiteral(", "))),
            QStringLiteral("skill_not_found")));
     return;

@@ -32,6 +32,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Sql Concurrent)
+# LinguistTools 提供 qt_add_translations：.ts 源文件 → lrelease → .qm → 嵌进资源。
+# 它是**必需**组件而不是可选：翻译是这个产品的功能之一，缺工具链应当构建失败，
+# 而不是悄悄产出一个"选英文没反应"的包。
+find_package(Qt6 6.4 REQUIRED COMPONENTS LinguistTools)
 
 qt_standard_project_setup()
 
@@ -83,6 +87,22 @@ endif()
 # 图标资源挂在 lycode_lib 上（而不是可执行文件）：测试链接的是这个目标，
 # 资源跟着它才能被测试验证到。
 target_sources(lycode_lib PRIVATE assets/resources.qrc)
+
+# ── 界面翻译 ────────────────────────────────────────────────────────────────
+# 源码里的中文是**源文案**（tr() 标记可翻译），英文来自 translations/*.ts。
+# 这里把 lrelease 产出的 .qm 嵌进 lycode_lib 的资源（:/i18n/lycode_<lang>.qm），
+# 理由与图标相同：测试链接的是 lycode_lib，翻译跟着它才能被测试验证到；
+# 同时不用操心 .qm 有没有被安装包带上（Windows 安装器尤其容易漏）。
+#
+# ⚠ 不设 QT_I18N_SOURCE_LANGUAGE 之类的全局量：源文案是中文，而 Qt 默认把源语言
+#   当英文并据此生成"复数形式"的 .ts，那会产出一个与本项目无关的文件。
+#   NO_GENERATE_PLURALS_TS_FILE 关掉它；中文没有复数变化，本项目也不需要复数。
+qt_add_translations(
+  lycode_lib
+  TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/lycode_zh_CN.ts"
+  RESOURCE_PREFIX "/i18n"
+  NO_GENERATE_PLURALS_TS_FILE
+)
 
 # Windows 下额外编译 .rc，让 exe 文件本身在资源管理器里有图标。
 if(WIN32)

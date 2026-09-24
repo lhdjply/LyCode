@@ -38,6 +38,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -146,22 +147,22 @@ void fillProviderItemWidget(QWidget * widget, const ProviderConfig & config);
 QString providerKindDisplay(ProviderKind kind)
 {
   return kind == ProviderKind::Anthropic ? QStringLiteral("Anthropic Messages")
-         : QStringLiteral("OpenAI 兼容");
+         : QCoreApplication::translate("ui::SettingsDialog", "OpenAI-compatible");
 }
 
 QString availabilityDisplay(AccountAvailability availability)
 {
   switch(availability) {
     case AccountAvailability::Available:
-      return QStringLiteral("可用");
+      return QCoreApplication::translate("ui::SettingsDialog", "Available");
     case AccountAvailability::Pending:
-      return QStringLiteral("等待中");
+      return QCoreApplication::translate("ui::SettingsDialog", "Checking");
     case AccountAvailability::Unavailable:
-      return QStringLiteral("不可用");
+      return QCoreApplication::translate("ui::SettingsDialog", "Unavailable");
     case AccountAvailability::Unknown:
-      return QStringLiteral("未知");
+      return QCoreApplication::translate("ui::SettingsDialog", "Unknown");
   }
-  return QStringLiteral("未知");
+  return QCoreApplication::translate("ui::SettingsDialog", "Unknown");
 }
 
 QString unavailableReasonDisplay(AccountUnavailableReason reason)
@@ -170,13 +171,13 @@ QString unavailableReasonDisplay(AccountUnavailableReason reason)
     case AccountUnavailableReason::None:
       return {};
     case AccountUnavailableReason::NotAuthenticated:
-      return QStringLiteral("未登录");
+      return QCoreApplication::translate("ui::SettingsDialog", "Not signed in");
     case AccountUnavailableReason::NotConnected:
-      return QStringLiteral("未连接");
+      return QCoreApplication::translate("ui::SettingsDialog", "Not connected");
     case AccountUnavailableReason::CredentialFailed:
-      return QStringLiteral("凭据失效");
+      return QCoreApplication::translate("ui::SettingsDialog", "Credentials expired");
     case AccountUnavailableReason::NotEntitled:
-      return QStringLiteral("无权限");
+      return QCoreApplication::translate("ui::SettingsDialog", "No permission");
   }
   return {};
 }
@@ -187,17 +188,17 @@ QString sessionModeDisplay(SessionMode mode)
 {
   switch(mode) {
     case SessionMode::Plan:
-      return QStringLiteral("plan · 只读规划");
+      return QCoreApplication::translate("ui::SettingsDialog", "plan · read-only");
     case SessionMode::Build:
-      return QStringLiteral("build · 默认");
+      return QCoreApplication::translate("ui::SettingsDialog", "build · default");
     case SessionMode::Edit:
-      return QStringLiteral("edit · 编辑");
+      return QCoreApplication::translate("ui::SettingsDialog", "edit · edit");
     case SessionMode::Yolo:
-      return QStringLiteral("yolo · 免确认");
+      return QCoreApplication::translate("ui::SettingsDialog", "yolo · no approvals");
     case SessionMode::Auto:
-      return QStringLiteral("auto · 内部态");
+      return QCoreApplication::translate("ui::SettingsDialog", "auto · internal");
   }
-  return QStringLiteral("build · 默认");
+  return QCoreApplication::translate("ui::SettingsDialog", "build · default");
 }
 
 /// 模型列表：每行一个 id。去重但保持顺序（重复配置没有意义）。
@@ -256,7 +257,8 @@ QString reasoningLevelsTooltip()
   for(const ReasoningLevel & level : levels) {
     parts.append(level.id + QLatin1Char('=') + level.label);
   }
-  return QStringLiteral("逗号分隔的档位 id，例如 %1。\n合法取值：%2\n留空 = 沿用默认（由模型自报的档位决定）。")
+  return QCoreApplication::translate("ui::SettingsDialog",
+                                     "Comma-separated level ids, for example %1.\nValid values: %2\nLeave empty to use the default (whatever the model reports).")
          .arg(defaultReasoningLevelIds().join(QLatin1Char(',')), parts.join(QStringLiteral(", ")));
 }
 
@@ -345,15 +347,16 @@ void fillProviderItemWidget(QWidget * widget, const ProviderConfig & config)
   auto * name = widget->findChild<QLabel *>(QStringLiteral("providerItemName"));
   auto * subtitle = widget->findChild<QLabel *>(QStringLiteral("providerItemSubtitle"));
   if(name != nullptr) {
-    const QString text = config.name.isEmpty() ? QStringLiteral("（未命名）") : config.name;
+    const QString text = config.name.isEmpty() ? QCoreApplication::translate("ui::SettingsDialog",
+                                                                             "(unnamed)") : config.name;
     name->setText(QFontMetrics(name->font()).elidedText(text, Qt::ElideRight,
                                                         kProviderItemTextWidth));
   }
   if(subtitle != nullptr) {
     QString text = providerKindDisplay(config.kind) + QStringLiteral(" · ") +
-                   (config.baseUrl.isEmpty() ? QStringLiteral("未设置 Base URL") : config.baseUrl);
+                   (config.baseUrl.isEmpty() ? QCoreApplication::translate("ui::SettingsDialog", "No Base URL set") : config.baseUrl);
     if(!config.enabled) {
-      text += QStringLiteral(" · 已停用");
+      text += QCoreApplication::translate("ui::SettingsDialog", " · disabled");
     }
     subtitle->setText(
       QFontMetrics(subtitle->font()).elidedText(text, Qt::ElideMiddle, kProviderItemTextWidth));
@@ -366,7 +369,7 @@ SettingsDialog::SettingsDialog(const AppSettings & settings, QWidget * parent)
   : QDialog(parent), settings_(settings)
 {
   setObjectName(QStringLiteral("SettingsDialog"));
-  setWindowTitle(QStringLiteral("设置"));
+  setWindowTitle(QCoreApplication::translate("ui::SettingsDialog", "Settings"));
   // 比原先宽得多：Provider 页新增了五列的「模型能力」表格。
   // 五列要在"不出现横向滚动条"的前提下放得下，右栏至少需要 ~620px，
   // 叠加左侧 Provider 列表与边距，对话框需要 ~940px。
@@ -389,9 +392,9 @@ SettingsDialog::SettingsDialog(const AppSettings & settings, QWidget * parent)
 
   tabs_ = new QTabWidget(this);
   tabs_->setObjectName(QStringLiteral("settingsTabs"));
-  tabs_->addTab(buildAppearancePage(), QStringLiteral("外观"));
+  tabs_->addTab(buildAppearancePage(), QCoreApplication::translate("ui::SettingsDialog", "Appearance"));
   tabs_->addTab(buildProviderPage(), QStringLiteral("Provider"));
-  tabs_->addTab(buildSessionPage(), QStringLiteral("会话"));
+  tabs_->addTab(buildSessionPage(), QCoreApplication::translate("ui::SettingsDialog", "Session"));
   tabs_->addTab(buildIntegrationsPage(), QStringLiteral("MCP / Skills"));
   root->addWidget(tabs_, 1);
 
@@ -470,9 +473,10 @@ QWidget * SettingsDialog::buildAppearancePage()
 
   themeCombo_ = new QComboBox(page);
   themeCombo_->setObjectName(QStringLiteral("themeModeCombo"));
-  themeCombo_->addItem(QStringLiteral("跟随系统"), static_cast<int>(ThemeMode::System));
-  themeCombo_->addItem(QStringLiteral("浅色"), static_cast<int>(ThemeMode::Light));
-  themeCombo_->addItem(QStringLiteral("深色"), static_cast<int>(ThemeMode::Dark));
+  themeCombo_->addItem(QCoreApplication::translate("ui::SettingsDialog", "Follow system"),
+                       static_cast<int>(ThemeMode::System));
+  themeCombo_->addItem(QCoreApplication::translate("ui::SettingsDialog", "Light"), static_cast<int>(ThemeMode::Light));
+  themeCombo_->addItem(QCoreApplication::translate("ui::SettingsDialog", "Dark"), static_cast<int>(ThemeMode::Dark));
   themeCombo_->setCurrentIndex(
     std::max(themeCombo_->findData(static_cast<int>(settings_.themeMode)), 0));
 
@@ -490,19 +494,21 @@ QWidget * SettingsDialog::buildAppearancePage()
 
   languageCombo_ = new QComboBox(page);
   languageCombo_->setObjectName(QStringLiteral("languageCombo"));
-  languageCombo_->addItem(QStringLiteral("简体中文 (zh-CN)"), QStringLiteral("zh-CN"));
+  languageCombo_->addItem(QCoreApplication::translate("ui::SettingsDialog", "简体中文 (zh-CN)"),
+                          QStringLiteral("zh-CN"));
   languageCombo_->addItem(QStringLiteral("English (en-US)"), QStringLiteral("en-US"));
   const int languageIndex = languageCombo_->findData(settings_.language);
   languageCombo_->setCurrentIndex(std::max(languageIndex, 0));
   // 未知语言值在打开时就被归一化，避免"界面显示中文、保存里却留着 fr-FR"。
   settings_.language = languageCombo_->currentData().toString();
 
-  addFormField(layout, QStringLiteral("主题模式"), themeCombo_, page);
-  addFormField(layout, QStringLiteral("界面字号"), uiFontSpin_, page);
-  addFormField(layout, QStringLiteral("代码字号"), codeFontSpin_, page);
-  addFormField(layout, QStringLiteral("语言"), languageCombo_, page);
+  addFormField(layout, QCoreApplication::translate("ui::SettingsDialog", "Theme"), themeCombo_, page);
+  addFormField(layout, QCoreApplication::translate("ui::SettingsDialog", "UI font size"), uiFontSpin_, page);
+  addFormField(layout, QCoreApplication::translate("ui::SettingsDialog", "Code font size"), codeFontSpin_, page);
+  addFormField(layout, QCoreApplication::translate("ui::SettingsDialog", "Language"), languageCombo_, page);
   layout->addWidget(makeLabel(QStringLiteral("formHint"),
-                              QStringLiteral("语言偏好只保存取值，界面翻译尚未接入。"),
+                              QCoreApplication::translate("ui::SettingsDialog",
+                                                          "Switches the interface language. English is the source text; Chinese comes from the bundled translation file."),
                               FontRole::UiXs, ColorToken::ForegroundSubtlest, page));
   layout->addStretch(1);
 
@@ -554,7 +560,8 @@ QWidget * SettingsDialog::buildProviderPage()
   // ── 左栏：已配置列表 + 底部增删/排序（放在列表下方，不与右侧表单抢横向空间）──
   auto * left = new QVBoxLayout;
   left->setSpacing(8);
-  left->addWidget(makeLabel(QStringLiteral("formFieldCaption"), QStringLiteral("已配置 Provider"),
+  left->addWidget(makeLabel(QStringLiteral("formFieldCaption"), QCoreApplication::translate("ui::SettingsDialog",
+                                                                                            "Configured providers"),
                             FontRole::UiSm, ColorToken::ForegroundSubtle, page));
 
   auto * listFrame = new QFrame(page);
@@ -572,14 +579,15 @@ QWidget * SettingsDialog::buildProviderPage()
   listLayout->addWidget(providerList_);
   left->addWidget(listFrame, 1);
 
-  auto * addButton = new QPushButton(QStringLiteral("新增"), page);
-  addButton->setToolTip(QStringLiteral("新增一个 Provider 配置"));
-  removeProviderButton_ = new QPushButton(QStringLiteral("删除"), page);
+  auto * addButton = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Add"), page);
+  addButton->setToolTip(QCoreApplication::translate("ui::SettingsDialog", "Add a provider"));
+  removeProviderButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Delete"), page);
   // 删除会连本地保存的 key 一起丢掉，用 destructive 变体提示后果。
   removeProviderButton_->setProperty("variant", "destructive");
-  removeProviderButton_->setToolTip(QStringLiteral("删除选中的 Provider（点「确定」后生效）"));
-  moveUpButton_ = new QPushButton(QStringLiteral("上移"), page);
-  moveDownButton_ = new QPushButton(QStringLiteral("下移"), page);
+  removeProviderButton_->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                                "Delete the selected provider (applies when you click OK)"));
+  moveUpButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Move up"), page);
+  moveDownButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Move down"), page);
 
   auto * buttonRow = new QHBoxLayout;
   buttonRow->setSpacing(8);
@@ -603,23 +611,26 @@ QWidget * SettingsDialog::buildProviderPage()
   form->setSpacing(8);
 
   providerEmptyHintLabel_ =
-    makeLabel(QStringLiteral("formHint"), QStringLiteral("尚未配置 Provider，点击左下角「新增」开始。"),
+    makeLabel(QStringLiteral("formHint"), QCoreApplication::translate("ui::SettingsDialog",
+                                                                      "No providers configured yet. Click \"Add\" in the lower left to start."),
               FontRole::UiSm, ColorToken::ForegroundSubtle, providerForm_);
   providerEmptyHintLabel_->setWordWrap(true);
   form->addWidget(providerEmptyHintLabel_);
 
   providerNameEdit_ = new QLineEdit(providerForm_);
   providerNameEdit_->setObjectName(QStringLiteral("providerName"));
-  providerNameEdit_->setPlaceholderText(QStringLiteral("例如：公司网关"));
-  providerNameErrorLabel_ = addFormField(form, QStringLiteral("名称"), providerNameEdit_, providerForm_);
+  providerNameEdit_->setPlaceholderText(QCoreApplication::translate("ui::SettingsDialog",
+                                                                    "For example: Company gateway"));
+  providerNameErrorLabel_ = addFormField(form, QCoreApplication::translate("ui::SettingsDialog", "Name"),
+                                         providerNameEdit_, providerForm_);
 
   providerKindCombo_ = new QComboBox(providerForm_);
   providerKindCombo_->setObjectName(QStringLiteral("providerKind"));
   providerKindCombo_->addItem(QStringLiteral("Anthropic Messages"),
                               static_cast<int>(ProviderKind::Anthropic));
-  providerKindCombo_->addItem(QStringLiteral("OpenAI 兼容"),
+  providerKindCombo_->addItem(QCoreApplication::translate("ui::SettingsDialog", "OpenAI-compatible"),
                               static_cast<int>(ProviderKind::OpenAICompatible));
-  addFormField(form, QStringLiteral("协议"), providerKindCombo_, providerForm_);
+  addFormField(form, QCoreApplication::translate("ui::SettingsDialog", "Protocol"), providerKindCombo_, providerForm_);
 
   providerBaseUrlEdit_ = new QLineEdit(providerForm_);
   providerBaseUrlEdit_->setObjectName(QStringLiteral("providerBaseUrl"));
@@ -638,8 +649,9 @@ QWidget * SettingsDialog::buildProviderPage()
   providerApiKeyEdit_->setEchoMode(QLineEdit::Password);  // 默认遮蔽
   enableMonoTypography(providerApiKeyEdit_, QStringLiteral("QLineEdit#providerApiKey"),
                        FontRole::UiBase);
-  providerShowKeyCheck_ = new QCheckBox(QStringLiteral("显示"), keyRow);
-  providerShowKeyCheck_->setToolTip(QStringLiteral("临时显示本次输入的密钥；已保存的密钥不会回填"));
+  providerShowKeyCheck_ = new QCheckBox(QCoreApplication::translate("ui::SettingsDialog", "Show"), keyRow);
+  providerShowKeyCheck_->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                                "Reveals the key you just typed; a saved key is never filled back in"));
   keyLayout->addWidget(providerApiKeyEdit_, 1);
   keyLayout->addWidget(providerShowKeyCheck_);
   addFormField(form, QStringLiteral("API Key"), keyRow, providerForm_);
@@ -655,9 +667,10 @@ QWidget * SettingsDialog::buildProviderPage()
   // 让用户不必逐个手打（手打还容易把 id 拼错，报错要到调用时才发现）。
   enableMonoTypography(providerModelsEdit_, QStringLiteral("QPlainTextEdit#providerModels"),
                        FontRole::MonoSm);
-  addFormField(form, QStringLiteral("模型列表"), providerModelsEdit_, providerForm_);
+  addFormField(form, QCoreApplication::translate("ui::SettingsDialog", "Model list"), providerModelsEdit_, providerForm_);
   providerModelsHintLabel_ =
-    makeLabel(QStringLiteral("formHint"), QStringLiteral("每行一个模型 id，空行会被忽略。"),
+    makeLabel(QStringLiteral("formHint"), QCoreApplication::translate("ui::SettingsDialog",
+                                                                      "One model id per line; blank lines are ignored."),
               FontRole::UiXs, ColorToken::ForegroundSubtlest, providerForm_);
   form->addWidget(providerModelsHintLabel_);
 
@@ -666,10 +679,12 @@ QWidget * SettingsDialog::buildProviderPage()
   {
     auto * pickRow = new QHBoxLayout;
     pickRow->setContentsMargins(0, 0, 0, 0);
-    auto * pickButton = new QPushButton(QStringLiteral("从列表选择…"), providerForm_);
+    auto * pickButton = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Pick from list…"),
+                                        providerForm_);
     pickButton->setObjectName(QStringLiteral("pickModelsFromCatalog"));
     pickButton->setToolTip(
-      QStringLiteral("从内置模型目录选择，自动带上上下文窗口与思考档位"));
+      QCoreApplication::translate("ui::SettingsDialog",
+                                  "Pick from the built-in model catalog, including context window and reasoning levels"));
     connect(pickButton, &QPushButton::clicked, this,
             &SettingsDialog::pickModelsFromCatalog);
     pickRow->addWidget(pickButton);
@@ -677,24 +692,26 @@ QWidget * SettingsDialog::buildProviderPage()
     form->addLayout(pickRow);
   }
 
-  providerEnabledCheck_ = new QCheckBox(QStringLiteral("启用"), providerForm_);
+  providerEnabledCheck_ = new QCheckBox(QCoreApplication::translate("ui::SettingsDialog", "Enabled"), providerForm_);
   providerEnabledCheck_->setObjectName(QStringLiteral("providerEnabled"));
-  providerEnabledCheck_->setToolTip(QStringLiteral("停用后该 Provider 不会出现在模型选择器中"));
+  providerEnabledCheck_->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                                "Disabled providers do not appear in the model picker"));
   form->addWidget(providerEnabledCheck_);
 
   // ── 模型能力覆盖 ──────────────────────────────────────────────────────
   // 用 QGroupBox 而不是自绘容器：它的 sizeHint 由布局算出（本项目踩过
   // "把表格塞进 sizeHint 不含子布局的控件导致表格被压成 0 高"的坑）。
   // 表格本身放在 providerForm_ 的滚动区里，且自身高度有上限，两级都能滚。
-  modelCapabilityGroup_ = new QGroupBox(QStringLiteral("模型能力"), providerForm_);
+  modelCapabilityGroup_ = new QGroupBox(QCoreApplication::translate("ui::SettingsDialog", "Model capabilities"),
+                                        providerForm_);
   modelCapabilityGroup_->setObjectName(QStringLiteral("modelCapabilityGroup"));
   auto * capabilityLayout = new QVBoxLayout(modelCapabilityGroup_);
   capabilityLayout->setContentsMargins(12, 16, 12, 12);  // 顶部为 QGroupBox 标题留空
   capabilityLayout->setSpacing(8);
   capabilityLayout->addWidget(makeLabel(
                                 QStringLiteral("modelCapabilityHint"),
-                                QStringLiteral("覆盖 Provider 自报的模型元信息；留 0 / 留空表示沿用内置默认。"
-                                               "窗口与输出上限的单位是 token。"),
+                                QCoreApplication::translate("ui::SettingsDialog",
+                                                            "Overrides the metadata the provider reports. Leave 0 or empty to keep the built-in default. Context window and output limit are in tokens."),
                                 FontRole::UiXs, ColorToken::ForegroundSubtlest, modelCapabilityGroup_));
 
   modelCapabilityTable_ = new QTableWidget(0, 5, modelCapabilityGroup_);
@@ -726,7 +743,7 @@ QWidget * SettingsDialog::buildProviderPage()
 
   modelCapabilityEmptyHint_ =
     makeLabel(QStringLiteral("modelCapabilityEmptyHint"),
-              QStringLiteral("请先在上方填写模型列表"), FontRole::UiXs,
+              QCoreApplication::translate("ui::SettingsDialog", "Fill in the model list above first"), FontRole::UiXs,
               ColorToken::ForegroundSubtlest, modelCapabilityGroup_);
   capabilityLayout->addWidget(modelCapabilityEmptyHint_);
 
@@ -746,7 +763,7 @@ QWidget * SettingsDialog::buildProviderPage()
 
   providerAccountCaptionLabel_ = makeLabel(
                                    QStringLiteral("formFieldCaption"),
-                                   QStringLiteral("账号状态（运行时字段，本对话框只读展示）"), FontRole::UiSm,
+                                   QCoreApplication::translate("ui::SettingsDialog", "Account status (a runtime field; read-only here)"), FontRole::UiSm,
                                    ColorToken::ForegroundSubtle, providerForm_);
   form->addWidget(providerAccountCaptionLabel_);
 
@@ -860,24 +877,24 @@ void SettingsDialog::loadProviderForm(int row)
     // 已配置时用占位文案表达"留空 = 不修改"。
     providerApiKeyEdit_->clear();
     providerApiKeyEdit_->setPlaceholderText(config.apiKey.isEmpty()
-                                            ? QStringLiteral("未配置")
-                                            : QStringLiteral("已配置，留空表示不修改"));
+                                            ? QCoreApplication::translate("ui::SettingsDialog", "Not configured")
+                                            : QCoreApplication::translate("ui::SettingsDialog", "Configured; leave empty to keep it unchanged"));
     providerShowKeyCheck_->setChecked(false);
     providerApiKeyEdit_->setEchoMode(QLineEdit::Password);
     providerModelsEdit_->setPlainText(config.models.join(QLatin1Char('\n')));
     providerEnabledCheck_->setChecked(config.enabled);
-    providerAvailabilityLabel_->setText(QStringLiteral("可用性：") +
+    providerAvailabilityLabel_->setText(QCoreApplication::translate("ui::SettingsDialog", "Availability: ") +
                                         availabilityDisplay(config.availability));
     const QString reason = unavailableReasonDisplay(config.unavailableReason);
     providerReasonLabel_->setText(reason.isEmpty() ? QString()
-                                  : QStringLiteral("原因：") + reason);
+                                  : QCoreApplication::translate("ui::SettingsDialog", "Reason: ") + reason);
     providerReasonLabel_->setVisible(!reason.isEmpty());
   }
   else {
     providerNameEdit_->clear();
     providerBaseUrlEdit_->clear();
     providerApiKeyEdit_->clear();
-    providerApiKeyEdit_->setPlaceholderText(QStringLiteral("未配置"));
+    providerApiKeyEdit_->setPlaceholderText(QCoreApplication::translate("ui::SettingsDialog", "Not configured"));
     providerModelsEdit_->clear();
     providerEnabledCheck_->setChecked(false);
     providerAvailabilityLabel_->clear();
@@ -936,10 +953,10 @@ void SettingsDialog::updateProviderState()
   QString baseUrlError;
   if(hasProvider) {
     if(providerNameEdit_->text().trimmed().isEmpty()) {
-      nameError = QStringLiteral("名称不能为空");
+      nameError = QCoreApplication::translate("ui::SettingsDialog", "Name cannot be empty");
     }
     if(providerBaseUrlEdit_->text().trimmed().isEmpty()) {
-      baseUrlError = QStringLiteral("Base URL 不能为空");
+      baseUrlError = QCoreApplication::translate("ui::SettingsDialog", "Base URL cannot be empty");
     }
   }
   providerNameErrorLabel_->setText(nameError);
@@ -987,7 +1004,7 @@ void SettingsDialog::addProvider()
 {
   ProviderConfig config;
   config.id = newId(QStringLiteral("provider"));
-  config.name = QStringLiteral("新 Provider");
+  config.name = QCoreApplication::translate("ui::SettingsDialog", "New provider");
   config.kind = ProviderKind::OpenAICompatible;
   // baseUrl 留空：由占位符按协议提示默认值，避免"选了 Anthropic 却留着 OpenAI 的 URL"。
   config.enabled = true;
@@ -1033,8 +1050,8 @@ void SettingsDialog::applyCapabilityHeaderLabels()
 {
   // 集中在一处：构造与 reload 都必须调用它，否则表头会被 clear() 抹掉。
   modelCapabilityTable_->setHorizontalHeaderLabels({
-    QStringLiteral("模型"), QStringLiteral("上下文窗口"), QStringLiteral("最大输出"),
-    QStringLiteral("思考档位"), QStringLiteral("默认档位")});
+    QCoreApplication::translate("ui::SettingsDialog", "Models"), QCoreApplication::translate("ui::SettingsDialog", "Context window"), QCoreApplication::translate("ui::SettingsDialog", "Max output"),
+    QCoreApplication::translate("ui::SettingsDialog", "Reasoning levels"), QCoreApplication::translate("ui::SettingsDialog", "Default level")});
 }
 
 void SettingsDialog::reloadModelCapabilityTable()
@@ -1104,9 +1121,10 @@ void SettingsDialog::addCapabilityRow(int row, const QString & modelId,
   // 不加 " tokens" 后缀：五列要挤在右栏里，后缀会把「模型」列压到看不出模型名。
   // 单位写在分组提示里，单元格里只留数字。
   // 0 是"不覆盖"的哨兵值：显示成「默认」而不是一个会让人以为窗口只有 0 的 0。
-  contextSpin->setSpecialValueText(QStringLiteral("默认"));
+  contextSpin->setSpecialValueText(QCoreApplication::translate("ui::SettingsDialog", "Default"));
   contextSpin->setToolTip(
-    QStringLiteral("留 0 表示沿用内置默认（通常 128000，Claude 系列 200000）"));
+    QCoreApplication::translate("ui::SettingsDialog",
+                                "0 keeps the built-in default (usually 128000; 200000 for Claude models)"));
   contextSpin->setValue(std::clamp(override.contextWindow, 0, kMaxContextWindow));
   modelCapabilityTable_->setCellWidget(row, CapabilityContextColumn, contextSpin);
 
@@ -1116,8 +1134,9 @@ void SettingsDialog::addCapabilityRow(int row, const QString & modelId,
   outputSpin->setSingleStep(256);
   // 不加 " tokens" 后缀：五列要挤在右栏里，后缀会把「模型」列压到看不出模型名。
   // 单位写在分组提示里，单元格里只留数字。
-  outputSpin->setSpecialValueText(QStringLiteral("默认"));
-  outputSpin->setToolTip(QStringLiteral("留 0 表示沿用内置默认（通常 8192）"));
+  outputSpin->setSpecialValueText(QCoreApplication::translate("ui::SettingsDialog", "Default"));
+  outputSpin->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                     "0 keeps the built-in default (usually 8192)"));
   outputSpin->setValue(std::clamp(override.maxOutputTokens, 0, kMaxOutputTokens));
   modelCapabilityTable_->setCellWidget(row, CapabilityOutputColumn, outputSpin);
 
@@ -1133,7 +1152,8 @@ void SettingsDialog::addCapabilityRow(int row, const QString & modelId,
 
   auto * defaultCombo = new QComboBox(modelCapabilityTable_);
   defaultCombo->setObjectName(QStringLiteral("modelDefaultReasoningCombo_%1").arg(row));
-  defaultCombo->setToolTip(QStringLiteral("新建会话时默认选中的思考档位"));
+  defaultCombo->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                       "Reasoning level selected by default in new sessions"));
   modelCapabilityTable_->setCellWidget(row, CapabilityDefaultColumn, defaultCombo);
   // 下拉的选项必须由同一行的「思考档位」推导，所以先建输入框再建下拉。
   rebuildDefaultReasoningCombo(row, override.defaultReasoningLevel);
@@ -1179,7 +1199,7 @@ void SettingsDialog::rebuildDefaultReasoningCombo(int row, const QString & prefe
   syncing_ = true;
 
   combo->clear();
-  combo->addItem(QStringLiteral("（不指定）"), QString());
+  combo->addItem(QCoreApplication::translate("ui::SettingsDialog", "(unspecified)"), QString());
   const QStringList valid = validReasoningIdsForRow(row, nullptr);
   for(const QString & id : valid) {
     combo->addItem(QStringLiteral("%1 %2").arg(id, reasoningLevelLabel(id)), id);
@@ -1265,7 +1285,7 @@ void SettingsDialog::refreshCapabilityValidation()
     if(unknown.isEmpty()) {
       continue;
     }
-    messages.append(QStringLiteral("未知档位 id：%1（模型 %2）")
+    messages.append(QCoreApplication::translate("ui::SettingsDialog", "Unknown reasoning level id: %1 (model %2)")
                     .arg(unknown.join(QStringLiteral("、")), capabilityModelIdAt(row)));
   }
   const QString text = messages.join(QStringLiteral("；"));
@@ -1364,8 +1384,8 @@ namespace
 bool editServerDialog(QWidget * parent, lycode::mcp::ServerConfig * server, bool isNew)
 {
   QDialog dialog(parent);
-  dialog.setWindowTitle(isNew ? QStringLiteral("添加 MCP 服务器")
-                        : QStringLiteral("编辑 MCP 服务器"));
+  dialog.setWindowTitle(isNew ? QCoreApplication::translate("ui::SettingsDialog", "Add MCP server")
+                        : QCoreApplication::translate("ui::SettingsDialog", "Edit MCP server"));
   dialog.setStyleSheet(Theme::instance().styleSheet());
   dialog.resize(560, 420);
 
@@ -1373,32 +1393,35 @@ bool editServerDialog(QWidget * parent, lycode::mcp::ServerConfig * server, bool
   auto * form = new QFormLayout;
 
   auto * idEdit = new QLineEdit(server->id);
-  idEdit->setPlaceholderText(QStringLiteral("例如 github（会出现在工具名前缀里）"));
-  form->addRow(QStringLiteral("名称"), idEdit);
+  idEdit->setPlaceholderText(QCoreApplication::translate("ui::SettingsDialog",
+                                                         "For example github (it becomes the tool name prefix)"));
+  form->addRow(QCoreApplication::translate("ui::SettingsDialog", "Name"), idEdit);
 
   auto * commandEdit = new QLineEdit(server->command);
-  commandEdit->setPlaceholderText(QStringLiteral("例如 npx / python3 / /abs/path/server"));
-  form->addRow(QStringLiteral("命令"), commandEdit);
+  commandEdit->setPlaceholderText(QCoreApplication::translate("ui::SettingsDialog",
+                                                              "For example npx / python3 / /abs/path/server"));
+  form->addRow(QCoreApplication::translate("ui::SettingsDialog", "Command"), commandEdit);
 
   auto * argsEdit = new QPlainTextEdit(server->args.join(QLatin1Char('\n')));
-  argsEdit->setPlaceholderText(QStringLiteral("每行一个参数，例如\n-y\n@modelcontextprotocol/server-github"));
+  argsEdit->setPlaceholderText(QCoreApplication::translate("ui::SettingsDialog",
+                                                           "One argument per line, for example\n-y\n@modelcontextprotocol/server-github"));
   argsEdit->setFixedHeight(90);
-  form->addRow(QStringLiteral("参数"), argsEdit);
+  form->addRow(QCoreApplication::translate("ui::SettingsDialog", "Arguments"), argsEdit);
 
   auto * envEdit = new QPlainTextEdit(server->env.join(QLatin1Char('\n')));
-  envEdit->setPlaceholderText(QStringLiteral("每行一个 KEY=VALUE；会叠加在继承的环境之上"));
+  envEdit->setPlaceholderText(QCoreApplication::translate("ui::SettingsDialog",
+                                                          "One KEY=VALUE per line; layered on top of the inherited environment"));
   envEdit->setFixedHeight(70);
-  form->addRow(QStringLiteral("环境变量"), envEdit);
+  form->addRow(QCoreApplication::translate("ui::SettingsDialog", "Environment"), envEdit);
 
-  auto * enabledCheck = new QCheckBox(QStringLiteral("启用"));
+  auto * enabledCheck = new QCheckBox(QCoreApplication::translate("ui::SettingsDialog", "Enabled"));
   enabledCheck->setChecked(server->enabled);
   form->addRow(QString(), enabledCheck);
 
   layout->addLayout(form);
 
-  auto * hint = new QLabel(QStringLiteral(
-                             "工具的权限默认是保守的：服务器没声明只读的工具，每次调用都会请你确认。\n"
-                             "「服务器自述只读」只在放宽方向采信——那是它的说法，不是可信信息。"));
+  auto * hint = new QLabel(QCoreApplication::translate("ui::SettingsDialog",
+                                                       "Tool permissions are conservative by default: a tool the server does not mark read-only asks for your approval on every call.\nA server's \"read-only\" claim is only trusted in the permissive direction — it is the server's word, not a verified fact."));
   hint->setWordWrap(true);
   hint->setFont(Theme::instance().font(FontRole::UiXs));
   layout->addWidget(hint);
@@ -1436,9 +1459,8 @@ bool editServerDialog(QWidget * parent, lycode::mcp::ServerConfig * server, bool
     if(!line.trimmed().isEmpty()) {
       // 顺手校验格式：写错的行会被运行时忽略，用户会以为已经生效。
       if(!line.contains(QLatin1Char('='))) {
-        QMessageBox::warning(&dialog, QStringLiteral("环境变量格式错误"),
-                             QStringLiteral("这一行缺少 '='：%1\n"
-                                            "应当写成 KEY=VALUE。")
+        QMessageBox::warning(&dialog, QCoreApplication::translate("ui::SettingsDialog", "Malformed environment variable"),
+                             QCoreApplication::translate("ui::SettingsDialog", "This line is missing '=': %1\nIt should be written as KEY=VALUE.")
                              .arg(line.trimmed()));
         return false;
       }
@@ -1456,9 +1478,9 @@ void SettingsDialog::pickModelsFromCatalog()
   QString error;
   const QList<model::CatalogProvider> providers = model::ModelCatalog::load(&error);
   if(providers.isEmpty()) {
-    QMessageBox::warning(this, QStringLiteral("模型目录不可用"),
+    QMessageBox::warning(this, QCoreApplication::translate("ui::SettingsDialog", "Model catalog unavailable"),
                          error.isEmpty()
-                         ? QStringLiteral("内置模型目录为空。")
+                         ? QCoreApplication::translate("ui::SettingsDialog", "The built-in model catalog is empty.")
                          : error);
     return;
   }
@@ -1476,8 +1498,9 @@ void SettingsDialog::pickModelsFromCatalog()
 
   bool accepted = false;
   const QString chosen = QInputDialog::getItem(
-                           this, QStringLiteral("从列表选择模型"),
-                           QStringLiteral("内置目录里的模型（选择后会加入当前 Provider）："), labels, 0, false,
+                           this, QCoreApplication::translate("ui::SettingsDialog", "Pick a model from the list"),
+                           QCoreApplication::translate("ui::SettingsDialog",
+                                                       "Models from the built-in catalog (selected ones are added to the current provider):"), labels, 0, false,
                            &accepted, Qt::Popup | Qt::WindowCloseButtonHint);
   if(!accepted || chosen.isEmpty()) {
     return;
@@ -1536,21 +1559,20 @@ QWidget * SettingsDialog::buildIntegrationsPage()
   layout->setSpacing(10);
 
   // ── MCP 服务器 ──────────────────────────────────────────────────────────
-  auto * mcpTitle = new QLabel(QStringLiteral("MCP 服务器"));
+  auto * mcpTitle = new QLabel(QCoreApplication::translate("ui::SettingsDialog", "MCP servers"));
   mcpTitle->setFont(Theme::instance().font(FontRole::UiLg));
   layout->addWidget(mcpTitle);
 
-  auto * mcpHint = new QLabel(QStringLiteral(
-                                "应用启动时按下面的配置把这些服务器作为子进程拉起，它们提供的工具会注册成"
-                                "普通工具供模型调用。改完需要重新打开应用才会重连（退出时会终止这些子进程）。"));
+  auto * mcpHint = new QLabel(QCoreApplication::translate("ui::SettingsDialog",
+                                                          "At startup these servers are launched as child processes. The tools they provide are registered as regular tools the model can call. Reopen the app for changes to reconnect (the child processes are terminated on exit)."));
   mcpHint->setWordWrap(true);
   mcpHint->setFont(Theme::instance().font(FontRole::UiXs));
   layout->addWidget(mcpHint);
 
   mcpTable_ = new QTableWidget(0, 4, page);
   mcpTable_->setObjectName(QStringLiteral("mcpTable"));
-  mcpTable_->setHorizontalHeaderLabels({QStringLiteral("名称"), QStringLiteral("命令"),
-                                        QStringLiteral("参数"), QStringLiteral("启用")});
+  mcpTable_->setHorizontalHeaderLabels({QCoreApplication::translate("ui::SettingsDialog", "Name"), QCoreApplication::translate("ui::SettingsDialog", "Command"),
+                                        QCoreApplication::translate("ui::SettingsDialog", "Arguments"), QCoreApplication::translate("ui::SettingsDialog", "Enabled")});
   mcpTable_->verticalHeader()->setVisible(false);
   mcpTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
   mcpTable_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -1563,14 +1585,14 @@ QWidget * SettingsDialog::buildIntegrationsPage()
   layout->addWidget(mcpTable_, 1);
 
   auto * mcpButtons = new QHBoxLayout;
-  auto * addServer = new QPushButton(QStringLiteral("添加…"));
+  auto * addServer = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Add…"));
   addServer->setObjectName(QStringLiteral("addMcpServer"));
   connect(addServer, &QPushButton::clicked, this, [this]() {
     editMcpServer(-1);
   });
   mcpButtons->addWidget(addServer);
 
-  auto * editServer = new QPushButton(QStringLiteral("编辑…"));
+  auto * editServer = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Edit…"));
   editServer->setObjectName(QStringLiteral("editMcpServer"));
   connect(editServer, &QPushButton::clicked, this,
   [this]() {
@@ -1578,7 +1600,7 @@ QWidget * SettingsDialog::buildIntegrationsPage()
   });
   mcpButtons->addWidget(editServer);
 
-  auto * removeServer = new QPushButton(QStringLiteral("删除"));
+  auto * removeServer = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Delete"));
   removeServer->setObjectName(QStringLiteral("removeMcpServer"));
   connect(removeServer, &QPushButton::clicked, this, [this]() {
     const int row = mcpTable_->currentRow();
@@ -1593,13 +1615,12 @@ QWidget * SettingsDialog::buildIntegrationsPage()
   layout->addLayout(mcpButtons);
 
   // ── Skills 目录 ─────────────────────────────────────────────────────────
-  auto * skillsTitle = new QLabel(QStringLiteral("Skills 目录"));
+  auto * skillsTitle = new QLabel(QCoreApplication::translate("ui::SettingsDialog", "Skill directories"));
   skillsTitle->setFont(Theme::instance().font(FontRole::UiLg));
   layout->addWidget(skillsTitle);
 
-  auto * skillsHint = new QLabel(QStringLiteral(
-                                   "在这些目录下发现 <名称>/SKILL.md 或 <名称>.md。留空表示使用默认目录："
-                                   "用户级 <数据目录>/skills，以及当前工作区的 .lycode/skills。"));
+  auto * skillsHint = new QLabel(QCoreApplication::translate("ui::SettingsDialog",
+                                                             "Looks for <name>/SKILL.md or <name>.md in these directories. Empty means the default directories: the user-level <data dir>/skills and the current workspace's .lycode/skills."));
   skillsHint->setWordWrap(true);
   skillsHint->setFont(Theme::instance().font(FontRole::UiXs));
   layout->addWidget(skillsHint);
@@ -1616,18 +1637,18 @@ QWidget * SettingsDialog::buildIntegrationsPage()
   layout->addWidget(skillPreview_);
 
   auto * skillButtons = new QHBoxLayout;
-  auto * addDir = new QPushButton(QStringLiteral("添加目录…"));
+  auto * addDir = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Add directory…"));
   addDir->setObjectName(QStringLiteral("addSkillDir"));
   connect(addDir, &QPushButton::clicked, this, &SettingsDialog::addSkillDirectory);
   skillButtons->addWidget(addDir);
 
-  auto * removeDir = new QPushButton(QStringLiteral("移除"));
+  auto * removeDir = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Remove"));
   removeDir->setObjectName(QStringLiteral("removeSkillDir"));
   connect(removeDir, &QPushButton::clicked, this,
           &SettingsDialog::removeSelectedSkillDirectory);
   skillButtons->addWidget(removeDir);
 
-  auto * resetDirs = new QPushButton(QStringLiteral("恢复默认目录"));
+  auto * resetDirs = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Restore default directories"));
   resetDirs->setObjectName(QStringLiteral("resetSkillDirs"));
   connect(resetDirs, &QPushButton::clicked, this, [this]() {
     settings_.skillDirectories.clear();  // 空 = 用内置默认
@@ -1651,8 +1672,8 @@ void SettingsDialog::refreshMcpTable()
     mcpTable_->setItem(row, 1, new QTableWidgetItem(server.command));
     mcpTable_->setItem(row, 2,
                        new QTableWidgetItem(server.args.join(QLatin1Char(' '))));
-    auto * enabled = new QTableWidgetItem(server.enabled ? QStringLiteral("是")
-                                          : QStringLiteral("否"));
+    auto * enabled = new QTableWidgetItem(server.enabled ? QCoreApplication::translate("ui::SettingsDialog", "Yes")
+                                          : QCoreApplication::translate("ui::SettingsDialog", "No"));
     enabled->setTextAlignment(Qt::AlignCenter);
     mcpTable_->setItem(row, 3, enabled);
   }
@@ -1676,8 +1697,8 @@ void SettingsDialog::editMcpServer(int row)
   // 名称唯一：重名会导致工具名前缀撞车，注册表里互相覆盖。
   for(int index = 0; index < settings_.mcpServers.size(); ++index) {
     if(index != row && settings_.mcpServers.at(index).id == server.id) {
-      QMessageBox::warning(this, QStringLiteral("名称重复"),
-                           QStringLiteral("已经有一个叫「%1」的服务器了。")
+      QMessageBox::warning(this, QCoreApplication::translate("ui::SettingsDialog", "Duplicate name"),
+                           QCoreApplication::translate("ui::SettingsDialog", "A server named \"%1\" already exists.")
                            .arg(server.id));
       refreshMcpTable();
       return;
@@ -1703,7 +1724,8 @@ void SettingsDialog::refreshSkillDirectories()
   for(const QString & directory : directories) {
     auto * item = new QListWidgetItem(directory);
     if(usingDefaults) {
-      item->setToolTip(QStringLiteral("默认目录（要改成自定义列表就点「添加目录…」）"));
+      item->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                   "Default directories (click \"Add directory…\" to use a custom list)"));
     }
     skillDirList_->addItem(item);
   }
@@ -1713,14 +1735,14 @@ void SettingsDialog::refreshSkillDirectories()
   skills::Library preview;
   preview.rescan(directories);
   if(preview.isEmpty()) {
-    skillPreview_->setText(QStringLiteral("当前没有发现任何技能。"));
+    skillPreview_->setText(QCoreApplication::translate("ui::SettingsDialog", "No skills found."));
     return;
   }
   QStringList names;
   for(const skills::Skill & skill : preview.skills()) {
     names.append(skill.id);
   }
-  skillPreview_->setText(QStringLiteral("已发现 %1 个技能：%2")
+  skillPreview_->setText(QCoreApplication::translate("ui::SettingsDialog", "Found %1 skill(s): %2")
                          .arg(preview.skills().size())
                          .arg(names.join(QStringLiteral("、"))));
 }
@@ -1728,7 +1750,7 @@ void SettingsDialog::refreshSkillDirectories()
 void SettingsDialog::addSkillDirectory()
 {
   const QString directory = QFileDialog::getExistingDirectory(
-                              this, QStringLiteral("选择技能目录"));
+                              this, QCoreApplication::translate("ui::SettingsDialog", "Select skill directory"));
   if(directory.isEmpty()) {
     return;
   }
@@ -1788,21 +1810,25 @@ QWidget * SettingsDialog::buildSessionPage()
   }
   sessionModeCombo_->setCurrentIndex(std::max(modeIndex, 0));
 
-  persistSessionsCheck_ = new QCheckBox(QStringLiteral("持久化会话"), page);
+  persistSessionsCheck_ = new QCheckBox(QCoreApplication::translate("ui::SettingsDialog", "Persist sessions"), page);
   persistSessionsCheck_->setObjectName(QStringLiteral("persistSessionsCheck"));
   persistSessionsCheck_->setChecked(settings_.persistSessions);
 
   // 这个开关值得单独给出来：模型生成标题意味着**每个新会话多一次模型调用**。
   // 不想花这次调用的用户可以关掉，标题会退回"取首条输入的前 40 字符"。
-  titleGenerationCheck_ = new QCheckBox(QStringLiteral("用模型生成会话标题"), page);
+  titleGenerationCheck_ = new QCheckBox(QCoreApplication::translate("ui::SettingsDialog",
+                                                                    "Generate session titles with the model"), page);
   titleGenerationCheck_->setObjectName(QStringLiteral("titleGenerationCheck"));
   titleGenerationCheck_->setChecked(settings_.generateSessionTitles);
   titleGenerationCheck_->setToolTip(
-    QStringLiteral("关闭后标题取首条输入的前 40 字符，不额外消耗模型调用"));
+    QCoreApplication::translate("ui::SettingsDialog",
+                                "When off, the title is the first 40 characters of your first input, with no extra model call"));
   persistSessionsCheck_->setToolTip(
-    QStringLiteral("关闭后新建会话仅存在于内存中（当前版本仍会落盘，保留开关以便后续演进）"));
+    QCoreApplication::translate("ui::SettingsDialog",
+                                "When off, new sessions would exist only in memory (this version still persists them; the switch is kept for future evolution)"));
 
-  addFormField(layout, QStringLiteral("默认会话模式"), sessionModeCombo_, page);
+  addFormField(layout, QCoreApplication::translate("ui::SettingsDialog", "Default session mode"), sessionModeCombo_,
+               page);
   layout->addWidget(persistSessionsCheck_);
   layout->addWidget(titleGenerationCheck_);
 
@@ -1814,11 +1840,12 @@ QWidget * SettingsDialog::buildSessionPage()
   auto * captionRow = new QHBoxLayout;
   captionRow->setSpacing(8);
   captionRow->addWidget(makeLabel(QStringLiteral("formFieldCaption"),
-                                  QStringLiteral("最近工作区"), FontRole::UiSm,
+                                  QCoreApplication::translate("ui::SettingsDialog", "Recent workspaces"), FontRole::UiSm,
                                   ColorToken::ForegroundSubtle, page));
   captionRow->addStretch(1);
-  clearRecentButton_ = new QPushButton(QStringLiteral("清空记录"), page);
-  clearRecentButton_->setToolTip(QStringLiteral("清空最近工作区列表（点「确定」后生效）"));
+  clearRecentButton_ = new QPushButton(QCoreApplication::translate("ui::SettingsDialog", "Clear the list"), page);
+  clearRecentButton_->setToolTip(QCoreApplication::translate("ui::SettingsDialog",
+                                                             "Clear the recent workspace list (applies when you click OK)"));
   captionRow->addWidget(clearRecentButton_);
   layout->addLayout(captionRow);
 
@@ -1830,7 +1857,7 @@ QWidget * SettingsDialog::buildSessionPage()
   layout->addWidget(recentList_, 1);
 
   recentEmptyLabel_ =
-    makeLabel(QStringLiteral("formHint"), QStringLiteral("暂无最近工作区记录。"),
+    makeLabel(QStringLiteral("formHint"), QCoreApplication::translate("ui::SettingsDialog", "No recent workspaces yet."),
               FontRole::UiXs, ColorToken::ForegroundSubtlest, page);
   layout->addWidget(recentEmptyLabel_);
 
@@ -1892,11 +1919,12 @@ void SettingsDialog::clearRecentWorkspaces()
 void SettingsDialog::buildButtonBox(QVBoxLayout * root)
 {
   auto * box = new QDialogButtonBox(this);
-  okButton_ = box->addButton(QStringLiteral("确定"), QDialogButtonBox::AcceptRole);
+  okButton_ = box->addButton(QCoreApplication::translate("ui::SettingsDialog", "OK"), QDialogButtonBox::AcceptRole);
   okButton_->setObjectName(QStringLiteral("settingsOkButton"));
   okButton_->setProperty("accent", true);  // 整个对话框只有这一个主按钮
   okButton_->setDefault(true);
-  auto * cancelButton = box->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
+  auto * cancelButton = box->addButton(QCoreApplication::translate("ui::SettingsDialog", "Cancel"),
+                                       QDialogButtonBox::RejectRole);
   cancelButton->setAutoDefault(false);
   connect(box, &QDialogButtonBox::accepted, this, &SettingsDialog::accept);
   connect(box, &QDialogButtonBox::rejected, this, &SettingsDialog::reject);

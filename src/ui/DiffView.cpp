@@ -7,6 +7,7 @@
 #include <QLoggingCategory>
 #include <QScrollBar>
 #include <QTextBlock>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -176,8 +177,8 @@ void DiffView::rebuild()
   }
 
   if(truncatedLines_ > 0) {
-    html += QStringLiteral("<div style=\"color:%1;\">… 还有 %2 行未显示"
-                           "（单次最多渲染 %3 行）</div>")
+    html += QCoreApplication::translate("ui::DiffView",
+                                        "<div style=\"color:%1;\">… %2 more lines not shown (at most %3 lines are rendered at once)</div>")
             .arg(muted)
             .arg(truncatedLines_)
             .arg(kMaxRenderedLines);

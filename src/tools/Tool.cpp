@@ -40,6 +40,7 @@
 #include "tools/TaskTools.h"
 #include "tools/TodoTool.h"
 #include "tools/WriteTool.h"
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -345,9 +346,10 @@ QString Tool::permissionDescription(const QJsonObject & input) const
   const ToolMetadata meta = metadata();
   const QString subject = ruleSubject(input);
   if(subject.isEmpty()) {
-    return QStringLiteral("工具 %1 需要执行权限。").arg(meta.name);
+    return QCoreApplication::translate("tools::Tool", "Tool %1 requires execute permission.").arg(meta.name);
   }
-  return QStringLiteral("工具 %1 将要操作：%2").arg(meta.name, toolutil::redactForLog(subject, 200));
+  return QCoreApplication::translate("tools::Tool", "Tool %1 will operate on: %2").arg(meta.name,
+                                                                                       toolutil::redactForLog(subject, 200));
 }
 
 QList<PermissionRule> Tool::permissionRules(const QJsonObject & input) const
@@ -394,7 +396,7 @@ QString Tool::validateInput(const QJsonObject & input) const
     }
     if(!json::has(input, key)) {
       // 文案面向模型：明确指出缺哪个字段，模型下一轮才能自我修正。
-      return QStringLiteral("缺少必填参数 `%1`").arg(key);
+      return QCoreApplication::translate("tools::Tool", "Missing required argument `%1`").arg(key);
     }
   }
   return {};
@@ -953,9 +955,8 @@ bool shouldRejectForReadOnly(const ToolMetadata & metadata, const ToolContext & 
 ToolResult readOnlyModeFailure(const ToolMetadata & metadata)
 {
   ToolResult result = ToolResult::failure(
-                        QStringLiteral("当前处于只读模式（plan/ask），工具 %1 具有写入副作用"
-                                       "（sideEffectScope=%2），已被拒绝执行。"
-                                       "请先请求用户退出只读模式。")
+                        QCoreApplication::translate("tools::Tool",
+                                                    "This session is in read-only mode (plan/ask) and tool %1 has write side effects (sideEffectScope=%2), so it was denied. Ask the user to leave read-only mode first.")
                         .arg(metadata.name, toToken(metadata.sideEffectScope)),
                         QStringLiteral("read_only_mode"));
   result.metadata.insert(QStringLiteral("readOnly"), true);
@@ -974,7 +975,7 @@ bool writeFileAtomic(const QString & absolutePath, const QByteArray & bytes, QSt
   const qint64 written = file.write(bytes);
   if(written != bytes.size()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("写入字节数不符（期望 %1，实际 %2）")
+      *errorOut = QCoreApplication::translate("tools::Tool", "Bytes written do not match (expected %1, wrote %2)")
                   .arg(bytes.size())
                   .arg(written);
     }
@@ -1089,7 +1090,7 @@ QString OutputBudget::text() const
 {
   QString result = QString::fromUtf8(trimIncompleteUtf8(kept_));
   if(truncated_) {
-    result += QStringLiteral("\n…[输出被截断：超过 %1 字节预算]").arg(maxBytes_);
+    result += QCoreApplication::translate("tools::Tool", "\n…[output truncated: over the %1 byte budget]").arg(maxBytes_);
   }
   return result;
 }

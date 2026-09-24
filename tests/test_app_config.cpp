@@ -259,7 +259,8 @@ void TestAppConfig::integrationsPageReflectsAndEditsConfig()
   QCOMPARE(table->rowCount(), 1);
   QCOMPARE(table->item(0, 0)->text(), QStringLiteral("github"));
   QCOMPARE(table->item(0, 1)->text(), QStringLiteral("npx"));
-  QCOMPARE(table->item(0, 3)->text(), QStringLiteral("是"));
+  // 源文案是英文：测试环境不装 translator，界面就是英文。
+  QCOMPARE(table->item(0, 3)->text(), QStringLiteral("Yes"));
 
   auto * dirList = dialog.findChild<QListWidget *>(QStringLiteral("skillDirList"));
   QVERIFY2(dirList != nullptr, "设置页必须有技能目录列表");
@@ -271,7 +272,7 @@ void TestAppConfig::integrationsPageReflectsAndEditsConfig()
   auto * preview = dialog.findChild<QLabel *>(QStringLiteral("skillPreview"));
   QVERIFY(preview != nullptr);
   QVERIFY2(preview->text().contains(QStringLiteral("pdf")), qPrintable(preview->text()));
-  QVERIFY(preview->text().contains(QStringLiteral("1 个技能")));
+  QVERIFY(preview->text().contains(QStringLiteral("1 skill")));
 
   // 删除 MCP 服务器后，对话框返回的设置里也要没有它。
   table->setCurrentCell(0, 0);

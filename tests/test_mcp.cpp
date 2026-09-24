@@ -139,7 +139,7 @@ QString probeFakeServer(int timeoutMs = 5000)
 
   const bool answered = out.contains("serverInfo");
   lines << QStringLiteral("  收到 initialize 响应: %1")
-        .arg(answered ? QStringLiteral("是") : QStringLiteral("否"));
+        .arg(answered ? QStringLiteral("Yes") : QStringLiteral("No"));
   lines << QStringLiteral("  stdout: %1").arg(oneLine(out));
   lines << QStringLiteral("  stderr: %1").arg(oneLine(err));
 
@@ -174,8 +174,8 @@ QString mcpDiagnostics(Manager & manager, const QString & serverId)
   lines << QStringLiteral("──────── MCP 失败诊断 ────────");
   lines << QStringLiteral("假服务器路径: %1").arg(path);
   lines << QStringLiteral("  存在: %1；可执行: %2；大小: %3 字节；最后修改: %4")
-        .arg(info.exists() ? QStringLiteral("是") : QStringLiteral("否"),
-             info.isExecutable() ? QStringLiteral("是") : QStringLiteral("否"))
+        .arg(info.exists() ? QStringLiteral("Yes") : QStringLiteral("No"),
+             info.isExecutable() ? QStringLiteral("Yes") : QStringLiteral("No"))
         .arg(info.size())
         .arg(info.lastModified().toString(Qt::ISODate));
   lines << QStringLiteral("Manager 侧状态: %1（ready=%2 pending=%3）")

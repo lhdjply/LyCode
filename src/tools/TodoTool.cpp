@@ -9,6 +9,7 @@
 #include <QJsonValue>
 #include <QLoggingCategory>
 #include <QStringList>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -128,25 +129,25 @@ bool parseTodos(const QJsonArray & array, QList<TodoItem> * itemsOut, QString * 
   for(int i = 0; i < array.size(); ++i) {
     const QJsonValue value = array.at(i);
     if(!value.isObject()) {
-      *errorOut = QStringLiteral("todos[%1] 不是对象").arg(i);
+      *errorOut = QCoreApplication::translate("tools::TodoTool", "todos[%1] is not an object").arg(i);
       return false;
     }
     const QJsonObject object = value.toObject();
 
     const QString content = json::str(object, QStringLiteral("content")).trimmed();
     if(content.isEmpty()) {
-      *errorOut = QStringLiteral("todos[%1].content 不能为空").arg(i);
+      *errorOut = QCoreApplication::translate("tools::TodoTool", "todos[%1].content cannot be empty").arg(i);
       return false;
     }
     const QString status = json::str(object, QStringLiteral("status")).trimmed();
     if(status.isEmpty()) {
-      *errorOut = QStringLiteral("todos[%1].status 缺失（可选值：%2）")
+      *errorOut = QCoreApplication::translate("tools::TodoTool", "todos[%1].status is missing (allowed values: %2)")
                   .arg(i)
                   .arg(statusList().join(QStringLiteral(" | ")));
       return false;
     }
     if(!isValidStatus(status)) {
-      *errorOut = QStringLiteral("todos[%1].status 非法：%2（可选值：%3）")
+      *errorOut = QCoreApplication::translate("tools::TodoTool", "todos[%1].status is invalid: %2 (allowed values: %3)")
                   .arg(i)
                   .arg(status, statusList().join(QStringLiteral(" | ")));
       return false;
@@ -156,7 +157,7 @@ bool parseTodos(const QJsonArray & array, QList<TodoItem> * itemsOut, QString * 
       priority = QStringLiteral("medium");
     }
     else if(!isValidPriority(priority)) {
-      *errorOut = QStringLiteral("todos[%1].priority 非法：%2（可选值：%3）")
+      *errorOut = QCoreApplication::translate("tools::TodoTool", "todos[%1].priority is invalid: %2 (allowed values: %3)")
                   .arg(i)
                   .arg(priority, priorityList().join(QStringLiteral(" | ")));
       return false;
@@ -175,8 +176,8 @@ bool parseTodos(const QJsonArray & array, QList<TodoItem> * itemsOut, QString * 
 ToolResult storeUnavailable()
 {
   return ToolResult::failure(
-           QStringLiteral("会话 todo 存储不可用（ToolContext::todoStore 为空）。"
-                          "这是运行时装配错误，不是模型参数问题。"),
+           QCoreApplication::translate("tools::TodoTool",
+                                       "The session todo store is unavailable (ToolContext::todoStore is null). This is a runtime wiring error, not a problem with the model arguments."),
            QStringLiteral("todo_store_unavailable"));
 }
 
@@ -242,7 +243,8 @@ void TodoReadTool::execute(const QJsonObject & input, const ToolContext & contex
   };
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::TodoTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(context.todoStore == nullptr) {
@@ -251,7 +253,8 @@ void TodoReadTool::execute(const QJsonObject & input, const ToolContext & contex
     return;
   }
   if(context.sessionId.isEmpty()) {
-    finish(ToolResult::failure(QStringLiteral("会话 id 为空，无法读取 todo"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::TodoTool",
+                                                           "The session id is empty, so todos cannot be read"),
                                QStringLiteral("missing_session")));
     return;
   }
@@ -377,7 +380,7 @@ QString TodoWriteTool::validateInput(const QJsonObject & input) const
   }
   const QJsonValue value = input.value(QStringLiteral("todos"));
   if(!value.isArray()) {
-    return QStringLiteral("todos 必须是数组");
+    return QCoreApplication::translate("tools::TodoTool", "todos must be an array");
   }
   QList<TodoItem> items;
   QString error;
@@ -406,7 +409,8 @@ void TodoWriteTool::execute(const QJsonObject & input, const ToolContext & conte
   };
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::TodoTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   if(context.todoStore == nullptr) {
@@ -415,7 +419,8 @@ void TodoWriteTool::execute(const QJsonObject & input, const ToolContext & conte
     return;
   }
   if(context.sessionId.isEmpty()) {
-    finish(ToolResult::failure(QStringLiteral("会话 id 为空，无法写入 todo"),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::TodoTool",
+                                                           "The session id is empty, so todos cannot be written"),
                                QStringLiteral("missing_session")));
     return;
   }

@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonObject>
 #include <QLoggingCategory>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -31,14 +32,15 @@ bool readExisting(const QString & path, QString * contentOut, bool * existedOut,
     return true;
   }
   if(info.isDir()) {
-    *errorOut = QStringLiteral("%1 是目录，不能用 Write 覆盖。").arg(path);
+    *errorOut = QCoreApplication::translate("tools::WriteTool", "%1 is a directory; Write cannot overwrite it.").arg(path);
     return false;
   }
   QFile file(path);
   if(!file.open(QIODevice::ReadOnly)) {
     // 为了生成正确的 diff，必须先读到原文；读不到就拒绝覆盖，
     // 否则会把用户的内容无声地替换掉。
-    *errorOut = QStringLiteral("无法读取原文件（%1），拒绝覆盖。").arg(file.errorString());
+    *errorOut = QCoreApplication::translate("tools::WriteTool",
+                                            "Could not read the original file (%1), so the overwrite was refused.").arg(file.errorString());
     return false;
   }
   *contentOut = QString::fromUtf8(file.readAll());
@@ -118,12 +120,12 @@ QString WriteTool::validateInput(const QJsonObject & input) const
     return base;
   }
   if(json::str(input, QStringLiteral("file_path")).trimmed().isEmpty()) {
-    return QStringLiteral("file_path 不能为空");
+    return QCoreApplication::translate("tools::WriteTool", "file_path cannot be empty");
   }
   // content 允许是空字符串（用于清空文件），但必须是字符串类型。
   const QJsonValue content = input.value(QStringLiteral("content"));
   if(!content.isString()) {
-    return QStringLiteral("content 必须是字符串");
+    return QCoreApplication::translate("tools::WriteTool", "content must be a string");
   }
   return {};
 }
@@ -142,7 +144,8 @@ void WriteTool::execute(const QJsonObject & input, const ToolContext & context, 
                << "contentPreview=" << toolutil::redactForLog(content, 200);
 
   if(context.isCancelled()) {
-    finish(ToolResult::failure(QStringLiteral("执行已取消"), QStringLiteral("cancelled")));
+    finish(ToolResult::failure(QCoreApplication::translate("tools::WriteTool", "Execution cancelled"),
+                               QStringLiteral("cancelled")));
     return;
   }
   // 只读模式：metadata 的 sideEffectScope 属于写入集，直接拒绝执行。
@@ -155,7 +158,8 @@ void WriteTool::execute(const QJsonObject & input, const ToolContext & context, 
   const QString path = context.resolvePath(rawPath);
   if(path.isEmpty()) {
     finish(ToolResult::failure(
-             QStringLiteral("路径非法或超出工作区范围：%1").arg(toolutil::redactForLog(rawPath)),
+             QCoreApplication::translate("tools::WriteTool",
+                                         "Invalid path, or outside the workspace: %1").arg(toolutil::redactForLog(rawPath)),
              QStringLiteral("path_outside_workspace")));
     return;
   }
@@ -173,14 +177,16 @@ void WriteTool::execute(const QJsonObject & input, const ToolContext & context, 
   // mkpath 是必要的：模型经常写 `<新目录>/file.cpp`，而它并不知道目录不存在。
   const QString parent = QFileInfo(path).absolutePath();
   if(!parent.isEmpty() && !QDir().mkpath(parent)) {
-    finish(ToolResult::failure(QStringLiteral("无法创建父目录：%1").arg(parent),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::WriteTool",
+                                                           "Could not create the parent directory: %1").arg(parent),
                                QStringLiteral("mkdir_failed")));
     return;
   }
   QString writeError;
   if(!toolutil::writeFileAtomic(path, bytes, &writeError)) {
     qCCritical(log) << "写入失败; path=" << path << "error=" << writeError;
-    finish(ToolResult::failure(QStringLiteral("写入文件失败：%1").arg(writeError),
+    finish(ToolResult::failure(QCoreApplication::translate("tools::WriteTool",
+                                                           "Failed to write the file: %1").arg(writeError),
                                QStringLiteral("write_failed")));
     return;
   }

@@ -4,6 +4,7 @@
 #include <QLoggingCategory>
 
 #include "tools/SubagentHost.h"
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -31,14 +32,14 @@ const QList<SubagentProfile> & subagentProfiles()
   // "能把结论讲清楚"，不是"给一份计划"。
   static const QList<SubagentProfile> profiles = {
     {
-      QStringLiteral("general-purpose"), QStringLiteral("通用"),
+      QStringLiteral("general-purpose"), QCoreApplication::translate("tools::AgentTool", "General purpose"),
       QStringLiteral("You are a general-purpose subagent. You can read and edit files and "
                      "run commands. Work autonomously on the task you were given; do not ask "
                      "the user questions. Finish by reporting what you found or changed."),
       false, {}
     },
     {
-      QStringLiteral("Explore"), QStringLiteral("只读调研"),
+      QStringLiteral("Explore"), QCoreApplication::translate("tools::AgentTool", "Read-only research"),
       QStringLiteral("You are a read-only exploration subagent. You must not modify files or "
                      "run commands that change state — your tool set does not allow it. "
                      "Investigate the codebase and report findings with concrete file paths "
@@ -175,15 +176,15 @@ QString AgentTool::title(const QJsonObject & input) const
 QString AgentTool::permissionDescription(const QJsonObject & input) const
 {
   Q_UNUSED(input)
-  return QStringLiteral("派生子代理。子代理拥有独立的上下文，"
-                        "其内部的工具调用会各自向你请求确认。");
+  return QCoreApplication::translate("tools::AgentTool",
+                                     "Spawns a subagent. It has its own context, and its tool calls ask you for approval individually.");
 }
 
 QString AgentTool::formatResultForModel(const SubagentHost::LaunchResult & result)
 {
   QString output = result.output.trimmed();
   if(output.isEmpty()) {
-    output = QStringLiteral("(子代理没有产出任何内容)");
+    output = QCoreApplication::translate("tools::AgentTool", "(the subagent produced no output)");
   }
 
   QStringList lines;
@@ -195,8 +196,8 @@ QString AgentTool::formatResultForModel(const SubagentHost::LaunchResult & resul
         .arg(result.toolUseCount)
         .arg(result.durationMs);
   if(result.truncated) {
-    lines << QStringLiteral("<warning>子代理触及步数上限被提前结束，"
-                            "其结论可能不完整。</warning>");
+    lines << QCoreApplication::translate("tools::AgentTool",
+                                         "<warning>The subagent hit its model-step limit and was stopped early; its conclusion may be incomplete.</warning>");
   }
   return lines.join(QLatin1Char('\n'));
 }
@@ -211,7 +212,8 @@ void AgentTool::execute(const QJsonObject & input, const ToolContext & context, 
   // 禁止递归派生：否则一个任务可以无限自我复制。
   if(context.subagentHost == nullptr || !context.subagentHost->subagentsEnabled()) {
     qCWarning(log) << "拒绝派生：当前运行时不允许子代理";
-    done(ToolResult::failure(QStringLiteral("子代理不能再派生子代理。请自己完成该任务。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::AgentTool",
+                                                         "A subagent cannot spawn another subagent. Do the task yourself."),
                              QStringLiteral("subagent_disabled")));
     return;
   }
@@ -219,12 +221,12 @@ void AgentTool::execute(const QJsonObject & input, const ToolContext & context, 
   const QString description = stringArg(input, QStringLiteral("description")).trimmed();
   const QString prompt = stringArg(input, QStringLiteral("prompt")).trimmed();
   if(description.isEmpty()) {
-    done(ToolResult::failure(QStringLiteral("description 不能为空。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::AgentTool", "description cannot be empty."),
                              QStringLiteral("invalid_input")));
     return;
   }
   if(prompt.isEmpty()) {
-    done(ToolResult::failure(QStringLiteral("prompt 不能为空。"),
+    done(ToolResult::failure(QCoreApplication::translate("tools::AgentTool", "prompt cannot be empty."),
                              QStringLiteral("invalid_input")));
     return;
   }
@@ -233,8 +235,8 @@ void AgentTool::execute(const QJsonObject & input, const ToolContext & context, 
   // 假装成功会让模型以为任务已经在跑，进而去读一个不存在的输出文件。
   if(boolArg(input, QStringLiteral("run_in_background"), false)) {
     done(ToolResult::failure(
-           QStringLiteral("后台子代理尚未实现（run_in_background 暂不支持），"
-                          "请改为前台运行。"),
+           QCoreApplication::translate("tools::AgentTool",
+                                       "Background subagents are not implemented yet (run_in_background is unsupported); run it in the foreground instead."),
            QStringLiteral("unsupported")));
     return;
   }
@@ -248,7 +250,8 @@ void AgentTool::execute(const QJsonObject & input, const ToolContext & context, 
       known.append(candidate.id);
     }
     done(ToolResult::failure(
-           QStringLiteral("未知的 subagent_type：%1（可用：%2）").arg(typeId, known.join(QStringLiteral(", "))),
+           QCoreApplication::translate("tools::AgentTool", "Unknown subagent_type: %1 (available: %2)").arg(typeId,
+                                                                                                            known.join(QStringLiteral(", "))),
            QStringLiteral("invalid_input")));
     return;
   }
@@ -272,7 +275,7 @@ void AgentTool::execute(const QJsonObject & input, const ToolContext & context, 
     if(!result.ok) {
       qCWarning(log) << "子代理失败:" << result.error;
       ToolResult failure = ToolResult::failure(
-                             QStringLiteral("子代理执行失败：%1").arg(result.error), result.errorCode);
+                             QCoreApplication::translate("tools::AgentTool", "The subagent failed: %1").arg(result.error), result.errorCode);
       failure.metadata.insert(QStringLiteral("subagentType"), profileId);
       done(failure);
       return;

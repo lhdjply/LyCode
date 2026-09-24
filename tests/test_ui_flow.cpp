@@ -62,6 +62,7 @@
 #include "ui/ConversationView.h"
 #include "model/ModelCatalog.h"
 #include "ui/MainWindow.h"
+#include "ui/Translator.h"
 #include "ui/PermissionDialog.h"
 #include "ui/AppConfig.h"
 #include "ui/SettingsDialog.h"
@@ -125,6 +126,8 @@ class TestUiFlow : public QObject
     void staleRememberedModelFallsBackToAUsableOne();
     /// 打开一条"记着已失效模型"的旧会话时同样要自动纠正（并把纠正结果写回该会话）。
     void openingSessionWithStaleModelHealsItself();
+    /// 切成中文后界面必须真的是中文（防止 zh_CN.qm 缺失时静默退回英文）。
+    void chineseTranslationsReachTheUi();
 
   private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -165,10 +168,14 @@ void TestUiFlow::initTestCase()
   provider.insert(QStringLiteral("availability"), QStringLiteral("available"));
 
   QJsonObject settings;
+  // 语言显式固定为英文：源码是英文源文案，而"没选过语言"时界面跟随系统 locale
+  //（见 MainWindow 的初始化）。不固定的话，同一份测试在中文机器上会看到中文界面、
+  // 在英文机器上看到英文界面——断言两边都过不了或都过，测试就没意义了。
+  // 中文界面另有专门测试（chineseTranslationsReachTheUi）验证。
+  settings.insert(QStringLiteral("language"), QStringLiteral("en-US"));
   settings.insert(QStringLiteral("themeMode"), QStringLiteral("dark"));
   settings.insert(QStringLiteral("uiFontSize"), 14);
   settings.insert(QStringLiteral("codeFontSize"), 14);
-  settings.insert(QStringLiteral("language"), QStringLiteral("zh-CN"));
   settings.insert(QStringLiteral("providers"), QJsonArray{provider});
   settings.insert(QStringLiteral("lastModel"), QStringLiteral("smoke/smoke-model"));
   // 关掉模型生成标题：它会额外发一次模型请求，吃掉假网关队列里的响应，
@@ -321,7 +328,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
       continue;
     }
     for(QAction * action : menuAction->menu()->actions()) {
-      if(action->text().contains(QStringLiteral("工作区"))) {
+      if(action->text().contains(QStringLiteral("Workspace"))) {
         menuText = action->text();
         break;
       }
@@ -463,13 +470,13 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
   auto * usageLabel = window.findChild<QLabel *>(QStringLiteral("usageLabel"));
   QVERIFY2(usageLabel != nullptr, "状态栏应当有用量明细标签");
   QCOMPARE(usageLabel->text(),
-           QStringLiteral("缓存 71% · 未缓存 300 · 缓存读 750 · 输出 50"));
+           QStringLiteral("Cached 71% · uncached 300 · cache read 750 · output 50"));
 
   // 悬浮说明要给出精确数字与口径，避免缩写的歧义。
-  QVERIFY(usageLabel->toolTip().contains(QStringLiteral("缓存命中率")));
-  QVERIFY2(usageLabel->toolTip().contains(QStringLiteral("分母不含缓存写入")),
+  QVERIFY(usageLabel->toolTip().contains(QStringLiteral("Cache hit rate")));
+  QVERIFY2(usageLabel->toolTip().contains(QStringLiteral("denominator excludes cache writes")),
            "tooltip 应当解释命中率的分母口径");
-  QVERIFY(usageLabel->toolTip().contains(QStringLiteral("最近一轮")));
+  QVERIFY(usageLabel->toolTip().contains(QStringLiteral("Last turn")));
 
   const QPixmap windowShot = window.grab();
   const QString chatShot = screenshotDir() + QStringLiteral("/03-conversation.png");
@@ -533,7 +540,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
   for(int index = 0; index < tree->topLevelItemCount() && !foundSubagentRow; ++index) {
     QTreeWidgetItem * parent = tree->topLevelItem(index);
     for(int child = 0; child < parent->childCount(); ++child) {
-      if(parent->child(child)->text(0).contains(QStringLiteral("子代理"))) {
+      if(parent->child(child)->text(0).contains(QStringLiteral("Subagent"))) {
         foundSubagentRow = true;
         break;
       }
@@ -590,12 +597,12 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
 
   auto * backgroundLabel = window.findChild<QLabel *>(QStringLiteral("backgroundLabel"));
   QVERIFY2(backgroundLabel != nullptr, "状态栏应当有后台任务提示标签");
-  QCOMPARE(backgroundLabel->text(), QStringLiteral("· 后台任务 1"));
+  QCOMPARE(backgroundLabel->text(), QStringLiteral("· Background tasks 1"));
   // 必须检查**可见性**，不能只查 text()：状态栏的普通控件会被 showMessage()
   // 隐藏，只查文本的话这个缺陷会漏过去（实测漏过一次）。
   QVERIFY2(backgroundLabel->isVisible(),
            "后台任务提示必须始终可见——状态栏消息不得把它藏起来");
-  QVERIFY2(backgroundLabel->toolTip().contains(QStringLiteral("正在运行")),
+  QVERIFY2(backgroundLabel->toolTip().contains(QStringLiteral("running")),
            "提示的悬浮说明应当解释怎么查看/终止");
 
   const QString backgroundShot =
@@ -684,9 +691,9 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
 
   // 表头必须是中文列名而不是列号 1/2/3：QTableWidget::clear() 会把表头一起
   // 清空，只在构造里设一次的话 reload 之后就会退化成列号（实测踩到）。
-  QCOMPARE(capabilityTable->horizontalHeaderItem(0)->text(), QStringLiteral("模型"));
-  QCOMPARE(capabilityTable->horizontalHeaderItem(1)->text(), QStringLiteral("上下文窗口"));
-  QCOMPARE(capabilityTable->horizontalHeaderItem(3)->text(), QStringLiteral("思考档位"));
+  QCOMPARE(capabilityTable->horizontalHeaderItem(0)->text(), QStringLiteral("Models"));
+  QCOMPARE(capabilityTable->horizontalHeaderItem(1)->text(), QStringLiteral("Context window"));
+  QCOMPARE(capabilityTable->horizontalHeaderItem(3)->text(), QStringLiteral("Reasoning levels"));
   QCOMPARE(capabilityTable->columnCount(), 5);
 
   // 五列必须能塞进可视宽度，否则用户一打开就看不到最右边的"默认档位"。
@@ -723,7 +730,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
       continue;
     }
     for(QAction * action : menu->actions()) {
-      if(action->text().contains(QStringLiteral("设置"))) {
+      if(action->text().contains(QStringLiteral("Settings"))) {
         settingsAction = action;
         break;
       }
@@ -813,7 +820,7 @@ void TestUiFlow::drivesFullToolAndPermissionFlow()
     QVERIFY(reopenedBackground != nullptr);
     QVERIFY2(waitFor(
     [&]() {
-      return reopenedBackground->text().contains(QStringLiteral("后台任务"));
+      return reopenedBackground->text().contains(QStringLiteral("Background tasks"));
     },
     5000),
     qPrintable(QStringLiteral("重启后应当认领遗留的后台任务，实际标签=%1")
@@ -924,14 +931,14 @@ void TestUiFlow::workspacePurgeDeletesSessionsButKeepsFiles()
   QVERIFY2(nodeRect.isValid() && nodeRect.height() > 0, "工作区节点应当已经布局");
   emit treeForMenu->customContextMenuRequested(
     QPoint(8, nodeRect.center().y()));
-  QVERIFY2(menuTexts.contains(QStringLiteral("从最近列表移除")),
+  QVERIFY2(menuTexts.contains(QStringLiteral("Remove from the recent list")),
            qPrintable(QStringLiteral("菜单里应当有「从最近列表移除」，实际：%1")
                       .arg(menuTexts.join(QStringLiteral(" / ")))));
-  QVERIFY2(menuTexts.contains(QStringLiteral("删除该工作区的全部会话…")),
+  QVERIFY2(menuTexts.contains(QStringLiteral("Delete all sessions in this workspace…")),
            qPrintable(QStringLiteral("菜单里应当有「删除该工作区的全部会话…」，实际：%1")
                       .arg(menuTexts.join(QStringLiteral(" / ")))));
   // 展开/折叠只是界面收起，不是"打开/关闭工作区"，所以不该有"打开"这一项。
-  QVERIFY2(!menuTexts.contains(QStringLiteral("打开")),
+  QVERIFY2(!menuTexts.contains(QStringLiteral("Open Workspace")),
            qPrintable(QStringLiteral("工作区菜单不该有「打开」，实际：%1")
                       .arg(menuTexts.join(QStringLiteral(" / ")))));
 
@@ -1310,7 +1317,7 @@ void TestUiFlow::topButtonCreatesWorkspaceNotSession()
   auto * button = panel.findChild<QPushButton *>(QStringLiteral("newWorkspaceButton"));
   QVERIFY2(button != nullptr, "顶部应当有新建工作区按钮");
   // 措辞必须与菜单栏的同一个动作一致（同一个动作不该有两个名字）。
-  QVERIFY2(button->text().startsWith(QStringLiteral("打开工作区")),
+  QVERIFY2(button->text().startsWith(QStringLiteral("Open Workspace")),
            qPrintable(QStringLiteral("侧边栏按钮措辞应当与菜单一致，实际：%1")
                       .arg(button->text())));
 
@@ -1420,7 +1427,7 @@ void TestUiFlow::removingCurrentWorkspaceActuallyWorks()
   QVERIFY2(!sendButton->isEnabled(), "没有工作区时不该能发送");
   bool hintFound = false;
   for(const QLabel * label : sidebar->findChildren<QLabel *>()) {
-    if(label->isVisible() && label->text().contains(QStringLiteral("打开工作区"))) {
+    if(label->isVisible() && label->text().contains(QStringLiteral("Open Workspace"))) {
       hintFound = true;
       break;
     }
@@ -1628,6 +1635,7 @@ void TestUiFlow::choiceButtonsFillTheComposer()
 
   buttons.at(1)->click();
   // 填进输入框而不是直接发送：用户还能改一改，也避免误点直接发出。
+  // 这里是**模型输出的选项文本**，不是界面文案：它原样填进输入框，不该被翻译。
   QCOMPARE(composer->toPlainText(), QStringLiteral("同时改 Read 与 Grep"));
   QVERIFY2(!bar->isVisible(), "选完之后按钮条应当收起");
 }
@@ -1715,7 +1723,7 @@ void TestUiFlow::slashCommandNeverReachesTheModel()
   sendButton->click();
   QTest::qWait(200);
   QCOMPARE(gateway_->requestCount(), requestsBefore);
-  QVERIFY2(window.statusBar()->currentMessage().contains(QStringLiteral("未知命令")),
+  QVERIFY2(window.statusBar()->currentMessage().contains(QStringLiteral("Unknown command")),
            qPrintable(window.statusBar()->currentMessage()));
 
   // /help：同样不发请求。
@@ -1755,22 +1763,22 @@ void TestUiFlow::contextBarShowsCompactionThreshold()
 
   // 初始化时已经算过一次用量（见 setModelRefreshesContextWindow 的同类断言）。
   QVERIFY2(waitFor([&]() {
-    return contextLabel->text().contains(QStringLiteral("上下文"));
+    return contextLabel->text().contains(QStringLiteral("Context"));
   }), qPrintable(QStringLiteral("上下文标签为空; 状态栏=%1")
                  .arg(window.statusBar()->currentMessage())));
   // 分母与阈值都必须是**具体数字**：只写"上下文"而不给分母等于没告诉用户
   // 还剩多少余地。具体数字取决于按模型覆盖是否还在（别的测试会重写
   // settings.json），所以这里断言"三段都在"，不去比对某一个数字。
   const QString text = contextLabel->text();
-  QVERIFY2(text.contains(QStringLiteral("上下文")), qPrintable(text));
+  QVERIFY2(text.contains(QStringLiteral("Context")), qPrintable(text));
   QVERIFY2(text.contains(QStringLiteral("/")), qPrintable(text));
-  QVERIFY2(text.contains(QStringLiteral("自动压缩于")), qPrintable(text));
+  QVERIFY2(text.contains(QStringLiteral("auto-compacts at")), qPrintable(text));
 
   // 关键：用户必须能看到"什么时候会自动压缩"，不能只看到用量。
-  QVERIFY2(text.contains(QStringLiteral("自动压缩")), qPrintable(text));
+  QVERIFY2(text.contains(QStringLiteral("auto-compacts")), qPrintable(text));
   const QString tooltip = contextLabel->toolTip();
-  QVERIFY2(tooltip.contains(QStringLiteral("裁剪旧工具输出")), qPrintable(tooltip));
-  QVERIFY2(tooltip.contains(QStringLiteral("摘要")), qPrintable(tooltip));
+  QVERIFY2(tooltip.contains(QStringLiteral("tool output is trimmed")), qPrintable(tooltip));
+  QVERIFY2(tooltip.contains(QStringLiteral("summary")), qPrintable(tooltip));
   QVERIFY2(tooltip.contains(QStringLiteral("/compact")), qPrintable(tooltip));
 }
 
@@ -1834,7 +1842,7 @@ void TestUiFlow::staleRememberedModelFallsBackToAUsableOne()
   const QString requestedModel = body.value(QStringLiteral("model")).toString();
   QVERIFY2(requestedModel == QStringLiteral("smoke-model"),
            qPrintable(QStringLiteral("请求用了错误的模型: %1").arg(requestedModel)));
-  QVERIFY2(!window.statusBar()->currentMessage().contains(QStringLiteral("不可用")),
+  QVERIFY2(!window.statusBar()->currentMessage().contains(QStringLiteral("unavailable")),
            qPrintable(window.statusBar()->currentMessage()));
 
   // 纠正后的选择要写回设置，否则每次启动都要重新回退一次。
@@ -1903,7 +1911,7 @@ void TestUiFlow::openingSessionWithStaleModelHealsItself()
   auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
   QVERIFY(composer != nullptr && sendButton != nullptr);
 
-  composer->setPlainText(QStringLiteral("继续"));
+  composer->setPlainText(QStringLiteral("Continue"));
   sendButton->click();
   QVERIFY2(waitFor([&]() {
     return gateway_->requestCount() > requestsBefore;
@@ -1918,6 +1926,59 @@ void TestUiFlow::openingSessionWithStaleModelHealsItself()
   QCOMPARE(healed.providerId, QStringLiteral("smoke"));
   QCOMPARE(healed.modelId, QStringLiteral("smoke-model"));
   reread.close();
+
+  // 还原设置，别把后面的测试带偏。
+  QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  file.write(original);
+  file.close();
+}
+
+/// 中文界面的端到端验证。
+///
+/// 源码是英文源文案，中文**完全依赖** zh_CN.qm。它缺失或漏译时界面会静默退回英文，
+/// 中文用户只会觉得"软件怎么变英文了"，从测试里完全看不出来（其他测试都固定英文）。
+/// 所以这里显式切到中文，断言界面上真的出现中文。
+void TestUiFlow::chineseTranslationsReachTheUi()
+{
+  const QString settingsPath = dataDir_->path() + QStringLiteral("/settings.json");
+  QFile file(settingsPath);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  const QByteArray original = file.readAll();
+  file.close();
+
+  QJsonObject settings = QJsonDocument::fromJson(original).object();
+  settings.insert(QStringLiteral("language"), QStringLiteral("zh-CN"));
+  QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
+  file.close();
+
+  {
+    MainWindow window;
+    window.resize(1280, 820);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+    QVERIFY(sendButton != nullptr);
+    // "Send" -> "发送"。这条同时证明三件事：zh_CN.qm 在资源里、被装上了、
+    // 且上下文/源文案与源码逐字一致（任一处不对都取不到译文，只会剩英文）。
+    QVERIFY2(sendButton->text().contains(QStringLiteral("发送")),
+             qPrintable(QStringLiteral("中文界面没生效，按钮文案=%1").arg(sendButton->text())));
+
+    // 菜单项也必须是中文（菜单是最容易漏掉重译/漏译的地方）。
+    QStringList menuTexts;
+    for(QAction * top : window.menuBar()->actions()) {
+      if(top->menu() == nullptr) {
+        continue;
+      }
+      for(QAction * action : top->menu()->actions()) {
+        menuTexts.append(action->text());
+      }
+    }
+    QVERIFY2(menuTexts.contains(QStringLiteral("新建会话")),
+             qPrintable(QStringLiteral("中文菜单里应当有「新建会话」，实际：%1")
+                        .arg(menuTexts.join(QStringLiteral(" / ")))));
+  }
 
   // 还原设置，别把后面的测试带偏。
   QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));

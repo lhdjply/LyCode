@@ -19,6 +19,7 @@
 #include <QTextBlock>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -239,7 +240,7 @@ FileViewerDialog::FileViewerDialog(QWidget * parent, const QString & path,
   : QDialog(parent), path_(path), bytes_(bytes)
 {
   setObjectName(QStringLiteral("fileViewer"));
-  setWindowTitle(QFileInfo(path).fileName().isEmpty() ? QStringLiteral("查看")
+  setWindowTitle(QFileInfo(path).fileName().isEmpty() ? QCoreApplication::translate("ui::FileViewerDialog", "View")
                  : QFileInfo(path).fileName());
   setStyleSheet(Theme::instance().styleSheet());
   resize(880, 620);
@@ -258,7 +259,7 @@ FileViewerDialog::FileViewerDialog(QWidget * parent, const QString & path,
   root->setSpacing(8);
 
   auto * title = new QLabel(QFileInfo(path).fileName().isEmpty()
-                            ? QStringLiteral("查看内容")
+                            ? QCoreApplication::translate("ui::FileViewerDialog", "View contents")
                             : QFileInfo(path).fileName());
   title->setFont(Theme::instance().font(FontRole::UiLg));
   root->addWidget(title);
@@ -287,7 +288,8 @@ FileViewerDialog::FileViewerDialog(QWidget * parent, const QString & path,
     buildImageBody(payload);
   }
   else if(payload.isEmpty()) {
-    auto * empty = new QLabel(QStringLiteral("无法读取内容：文件不存在或没有权限。\n%1")
+    auto * empty = new QLabel(QCoreApplication::translate("ui::FileViewerDialog",
+                                                          "Cannot read the file: it does not exist or you lack permission.\n%1")
                               .arg(path));
     empty->setAlignment(Qt::AlignCenter);
     empty->setWordWrap(true);
@@ -295,7 +297,8 @@ FileViewerDialog::FileViewerDialog(QWidget * parent, const QString & path,
   }
   else if(payload.size() > kMaxTextViewBytes) {
     auto * tooBig = new QLabel(
-      QStringLiteral("文件过大（%1 MB），不在窗口内展示。\n请用系统程序打开。")
+      QCoreApplication::translate("ui::FileViewerDialog",
+                                  "File is too large (%1 MB) to display here.\nOpen it with the system application instead.")
       .arg(QString::number(payload.size() / 1024.0 / 1024.0, 'f', 1)));
     tooBig->setAlignment(Qt::AlignCenter);
     tooBig->setWordWrap(true);
@@ -308,12 +311,14 @@ FileViewerDialog::FileViewerDialog(QWidget * parent, const QString & path,
   root->addStretch(0);
 
   auto * buttons = new QDialogButtonBox;
-  auto * closeButton = buttons->addButton(QStringLiteral("关闭"), QDialogButtonBox::RejectRole);
+  auto * closeButton = buttons->addButton(QCoreApplication::translate("ui::FileViewerDialog", "Close"),
+                                          QDialogButtonBox::RejectRole);
   connect(closeButton, &QPushButton::clicked, this, &QDialog::reject);
   if(!path.isEmpty() && QFileInfo::exists(path)) {
     // 只读查看器不该是唯一出口：想编辑或想用专门的图片工具看时，
     // 交给系统默认程序。仅在文件确实存在时才给这个入口。
-    auto * openButton = buttons->addButton(QStringLiteral("用系统程序打开"),
+    auto * openButton = buttons->addButton(QCoreApplication::translate("ui::FileViewerDialog",
+                                                                       "Open with system application"),
                                            QDialogButtonBox::ActionRole);
     connect(openButton, &QPushButton::clicked, this, [this]() {
       if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path_))) {
@@ -328,7 +333,7 @@ void FileViewerDialog::buildImageBody(const QByteArray & bytes)
 {
   QPixmap pixmap;
   if(!pixmap.loadFromData(bytes)) {
-    auto * failed = new QLabel(QStringLiteral("图片无法解码。"));
+    auto * failed = new QLabel(QCoreApplication::translate("ui::FileViewerDialog", "The image could not be decoded."));
     failed->setAlignment(Qt::AlignCenter);
     layout()->addWidget(failed);
     return;
@@ -391,7 +396,7 @@ void FileViewerDialog::buildTextBody(const QString & text)
     lineList.removeLast();
   }
   const int lines = lineList.size();
-  subtitle_->setText(QStringLiteral("%1  ·  %2 行  ·  %3 KB")
+  subtitle_->setText(QCoreApplication::translate("ui::FileViewerDialog", "%1  ·  %2 lines  ·  %3 KB")
                      .arg(path_)
                      .arg(lines)
                      .arg(QString::number(bytes_.size() / 1024.0, 'f', 1)));

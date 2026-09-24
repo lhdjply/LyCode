@@ -92,7 +92,7 @@ void TestFileViewer::showsTextWithLineNumbers()
   // 打开时定位到开头：否则长文件会停在末尾，用户以为内容不对。
   QCOMPARE(dialog->codeView()->textCursor().position(), 0);
   // 4 行内容。末尾换行不该被算成第 5 行。
-  QVERIFY2(dialog->subtitleText().contains(QStringLiteral("4 行")),
+  QVERIFY2(dialog->subtitleText().contains(QStringLiteral("4 lines")),
            qPrintable(QStringLiteral("行数统计错误，实际副标题：%1")
                       .arg(dialog->subtitleText())));
   QVERIFY2(!dialog->subtitleText().contains(QStringLiteral("5 行")),
@@ -138,7 +138,7 @@ void TestFileViewer::reportsMissingFileInsteadOfBlankWindow()
 
   bool foundHint = false;
   for(const QLabel * label : dialog->findChildren<QLabel *>()) {
-    if(label->text().contains(QStringLiteral("无法读取内容"))) {
+    if(label->text().contains(QStringLiteral("Cannot read the file"))) {
       foundHint = true;
       break;
     }

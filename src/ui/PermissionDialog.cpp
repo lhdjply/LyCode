@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -76,15 +77,15 @@ QString riskText(RiskLevel level)
 {
   switch(level) {
     case RiskLevel::Low:
-      return QStringLiteral("低");
+      return QCoreApplication::translate("ui::PermissionDialog", "Low");
     case RiskLevel::Medium:
-      return QStringLiteral("中");
+      return QCoreApplication::translate("ui::PermissionDialog", "Medium");
     case RiskLevel::High:
-      return QStringLiteral("高");
+      return QCoreApplication::translate("ui::PermissionDialog", "High");
     case RiskLevel::Critical:
-      return QStringLiteral("严重");
+      return QCoreApplication::translate("ui::PermissionDialog", "Critical");
   }
-  return QStringLiteral("中");
+  return QCoreApplication::translate("ui::PermissionDialog", "Medium");
 }
 
 /// 风险 → 语义令牌色。Low/Medium/High 依次 success/warning/destructive；
@@ -108,17 +109,17 @@ QString kindText(PermissionKind kind)
 {
   switch(kind) {
     case PermissionKind::Read:
-      return QStringLiteral("读取");
+      return QCoreApplication::translate("ui::PermissionDialog", "Read");
     case PermissionKind::Write:
-      return QStringLiteral("写入");
+      return QCoreApplication::translate("ui::PermissionDialog", "Write");
     case PermissionKind::Execute:
-      return QStringLiteral("执行");
+      return QCoreApplication::translate("ui::PermissionDialog", "Execute");
     case PermissionKind::Network:
-      return QStringLiteral("网络");
+      return QCoreApplication::translate("ui::PermissionDialog", "Network");
     case PermissionKind::Other:
-      return QStringLiteral("其它");
+      return QCoreApplication::translate("ui::PermissionDialog", "Other");
   }
-  return QStringLiteral("其它");
+  return QCoreApplication::translate("ui::PermissionDialog", "Other");
 }
 
 /// 选项文案兜底：正常走工具给出的 option.label；为空时用词表文案，
@@ -127,15 +128,15 @@ QString optionFallbackLabel(PermissionOptionKind kind)
 {
   switch(kind) {
     case PermissionOptionKind::AllowOnce:
-      return QStringLiteral("允许一次");
+      return QCoreApplication::translate("ui::PermissionDialog", "Allow once");
     case PermissionOptionKind::AllowAlways:
-      return QStringLiteral("始终允许");
+      return QCoreApplication::translate("ui::PermissionDialog", "Always allow");
     case PermissionOptionKind::Deny:
-      return QStringLiteral("拒绝");
+      return QCoreApplication::translate("ui::PermissionDialog", "Deny");
     case PermissionOptionKind::Custom:
-      return QStringLiteral("自定义");
+      return QCoreApplication::translate("ui::PermissionDialog", "Custom");
   }
-  return QStringLiteral("继续");
+  return QCoreApplication::translate("ui::PermissionDialog", "Continue");
 }
 
 /// 构造一个拒绝裁决。逐字段赋值：既可读，也避开聚合初始化漏字段的
@@ -300,7 +301,8 @@ QString truncateForDisplay(const QString & text)
     return text;
   }
   return text.left(kMaxInputChars) +
-         QStringLiteral("\n… 内容过长，已截断（共 %1 字符）").arg(text.size());
+         QCoreApplication::translate("ui::PermissionDialog",
+                                     "\n… content too long, truncated (%1 characters total)").arg(text.size());
 }
 
 /// JSON 入参块：只读、等宽、surface 底、无边框、限高可滚动。
@@ -322,10 +324,11 @@ QPlainTextEdit * makeJsonBlock(const QString & objectName, const QJsonObject & o
 PermissionDialog::PermissionDialog(const PermissionRequest & request, QWidget * parent)
   : QDialog(parent), request_(request)
 {
-  response_ = denyResponse(QStringLiteral("用户关闭了确认窗口"));
+  response_ = denyResponse(QCoreApplication::translate("ui::PermissionDialog",
+                                                       "The user closed the confirmation dialog"));
 
   setObjectName(QStringLiteral("PermissionDialog"));
-  setWindowTitle(QStringLiteral("权限确认 — ") + resolvedTitle());
+  setWindowTitle(QCoreApplication::translate("ui::PermissionDialog", "Permission request — ") + resolvedTitle());
   // 长标题/长描述要能换行，但对话框本身不能被撑到屏幕外。
   setMinimumWidth(480);
   setMaximumWidth(720);
@@ -353,7 +356,7 @@ void PermissionDialog::present(QWidget * parent, const PermissionRequest & reque
     // 没有可选项时绝不弹空壳对话框：UI 不得自造选项，唯一诚实且安全的收尾是按拒绝回调。
     qCWarning(log) << "权限请求没有可选项，按拒绝直接收尾:" << request.toolName;
     if(onResolved) {
-      onResolved(denyResponse(QStringLiteral("权限请求没有可选项")));
+      onResolved(denyResponse(QCoreApplication::translate("ui::PermissionDialog", "The permission request has no options")));
     }
     return;
   }
@@ -421,12 +424,14 @@ void PermissionDialog::addHeader(QVBoxLayout * root)
 
   auto * riskBadge = makeBadge(QStringLiteral("riskBadge"), riskText(request_.riskLevel),
                                QStringLiteral("risk"), request_.riskLevel, this);
-  riskBadge->setToolTip(QStringLiteral("风险等级：") + riskText(request_.riskLevel));
+  riskBadge->setToolTip(QCoreApplication::translate("ui::PermissionDialog",
+                                                    "Risk level: ") + riskText(request_.riskLevel));
   badges->addWidget(riskBadge);
 
   auto * kindBadge = makeBadge(QStringLiteral("categoryBadge"), kindText(request_.kind),
                                QStringLiteral("outline"), request_.riskLevel, this);
-  kindBadge->setToolTip(QStringLiteral("权限类别：") + kindText(request_.kind));
+  kindBadge->setToolTip(QCoreApplication::translate("ui::PermissionDialog",
+                                                    "Permission type: ") + kindText(request_.kind));
   badges->addWidget(kindBadge);
 
   badges->addStretch(1);
@@ -435,7 +440,7 @@ void PermissionDialog::addHeader(QVBoxLayout * root)
     auto * toolLabel = makeLabel(QStringLiteral("permissionToolName"), request_.toolName,
                                  FontRole::MonoSm, ColorToken::ForegroundSubtlest,
                                  /*bold=*/false, this);
-    toolLabel->setToolTip(QStringLiteral("发起本次请求的工具"));
+    toolLabel->setToolTip(QCoreApplication::translate("ui::PermissionDialog", "Tool that made this request"));
     badges->addWidget(toolLabel);
   }
 
@@ -445,7 +450,8 @@ void PermissionDialog::addHeader(QVBoxLayout * root)
 void PermissionDialog::addInputSection(QVBoxLayout * root)
 {
   if(request_.input.isEmpty()) {
-    root->addWidget(makeLabel(QStringLiteral("emptyInputHint"), QStringLiteral("（无入参）"),
+    root->addWidget(makeLabel(QStringLiteral("emptyInputHint"), QCoreApplication::translate("ui::PermissionDialog",
+                                                                                            "(no arguments)"),
                               FontRole::UiSm, ColorToken::ForegroundSubtle, /*bold=*/false,
                               this));
     return;
@@ -455,14 +461,15 @@ void PermissionDialog::addInputSection(QVBoxLayout * root)
   if(command.isString() && !command.toString().isEmpty()) {
     // 命令块：QPlainTextEdit 而不是 QLabel —— 只有它能同时做到等宽、可选中、
     // 横向滚动且不自动换行（换行会歪曲命令原貌）。
-    root->addWidget(makeLabel(QStringLiteral("commandCaption"), QStringLiteral("命令"),
+    root->addWidget(makeLabel(QStringLiteral("commandCaption"), QCoreApplication::translate("ui::PermissionDialog",
+                                                                                            "Command"),
                               FontRole::UiSm, ColorToken::ForegroundSubtle, /*bold=*/false,
                               this));
 
     auto * commandBlock = makeCodeBlock(QStringLiteral("commandBlock"), FontRole::Mono,
                                         /*wrap=*/false, /*minLines=*/1, kCommandBlockMaxLines,
                                         QStringLiteral("command"), this);
-    commandBlock->setToolTip(QStringLiteral("即将执行的命令（可选中复制）"));
+    commandBlock->setToolTip(QCoreApplication::translate("ui::PermissionDialog", "Command about to run (selectable)"));
     commandBlock->setPlainText(truncateForDisplay(command.toString()));
     applyCodeBlockStyle(commandBlock);  // 有文本后才能按行数定高
     root->addWidget(commandBlock);
@@ -472,7 +479,8 @@ void PermissionDialog::addInputSection(QVBoxLayout * root)
     QJsonObject rest = request_.input;
     rest.remove(QStringLiteral("command"));
     if(!rest.isEmpty()) {
-      root->addWidget(makeLabel(QStringLiteral("extraCaption"), QStringLiteral("其它入参"),
+      root->addWidget(makeLabel(QStringLiteral("extraCaption"), QCoreApplication::translate("ui::PermissionDialog",
+                                                                                            "Other arguments"),
                                 FontRole::UiSm, ColorToken::ForegroundSubtle,
                                 /*bold=*/false, this));
       root->addWidget(makeJsonBlock(QStringLiteral("extraJson"), rest, this));
@@ -481,7 +489,8 @@ void PermissionDialog::addInputSection(QVBoxLayout * root)
   }
 
   // 没有字符串 command（或它根本不是字符串）时退回完整 JSON 展示。
-  root->addWidget(makeLabel(QStringLiteral("inputCaption"), QStringLiteral("入参"),
+  root->addWidget(makeLabel(QStringLiteral("inputCaption"), QCoreApplication::translate("ui::PermissionDialog",
+                                                                                        "Arguments"),
                             FontRole::UiSm, ColorToken::ForegroundSubtle, /*bold=*/false, this));
   root->addWidget(makeJsonBlock(QStringLiteral("inputJson"), request_.input, this));
 }
@@ -606,7 +615,7 @@ QString PermissionDialog::resolvedTitle() const
   if(!request_.toolName.trimmed().isEmpty()) {
     return request_.toolName.trimmed();
   }
-  return QStringLiteral("需要确认的操作");
+  return QCoreApplication::translate("ui::PermissionDialog", "Operation awaiting approval");
 }
 
 const PermissionOption * PermissionDialog::findOption(PermissionOptionKind kind) const

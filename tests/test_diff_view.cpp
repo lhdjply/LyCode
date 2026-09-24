@@ -136,7 +136,7 @@ void TestDiffView::truncatesHugePatches()
   QCOMPARE(view.truncatedLines(), total - DiffView::kMaxRenderedLines);
   // 统计仍然要按**完整**补丁算：被截断的是显示，不是事实。
   QCOMPARE(view.additions(), total);
-  QVERIFY2(view.toHtml().contains(QStringLiteral("未显示")),
+  QVERIFY2(view.toHtml().contains(QStringLiteral("not shown")),
            "截断必须如实告知，不能悄悄丢内容");
 }
 

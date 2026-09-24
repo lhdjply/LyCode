@@ -27,6 +27,8 @@ jobs:
             ninja-build \
             g++ \
             qt6-base-dev \
+            qt6-tools-dev \
+            qt6-l10n-tools \
             libqt6sql6-sqlite \
             libgl1-mesa-dev \
             libxkbcommon-dev \
@@ -59,7 +61,7 @@ jobs:
           version: "6.8.0"
           arch: win64_msvc2022_64
           cache: true
-          modules: ""
+          modules: "qttools"
 
       - name: 配置
         run: >

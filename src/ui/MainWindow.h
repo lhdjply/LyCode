@@ -105,6 +105,8 @@ class MainWindow : public QMainWindow
     void forgetWorkspaceRecords(const QString & path);
     /// 重新扫描技能目录并注入运行时。
     void rescanSkills();
+    /// 语言改变后询问是否立即重启（本窗口不做逐控件重译，见 .cpp 说明）。
+    void offerRestartForLanguageChange();
     /// 处理以 `/` 开头的斜杠命令（不发给模型）。
     void handleSlashCommand(const QString & rawText);
 

@@ -14,6 +14,7 @@
 #include "ui/SettingsDialog.h"
 #include "ui/SidebarPanel.h"
 #include "ui/Theme.h"
+#include "ui/Translator.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -38,12 +39,14 @@
 #include <QMimeDatabase>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QCoreApplication>
 
 namespace lycode::ui
 {
@@ -70,19 +73,19 @@ QString runStateText(RunState state)
 {
   switch(state) {
     case RunState::Idle:
-      return QStringLiteral("就绪");
+      return QCoreApplication::translate("ui::MainWindow", "Ready");
     case RunState::Streaming:
-      return QStringLiteral("正在生成…");
+      return QCoreApplication::translate("ui::MainWindow", "Generating…");
     case RunState::ExecutingTools:
-      return QStringLiteral("正在执行工具…");
+      return QCoreApplication::translate("ui::MainWindow", "Running tools…");
     case RunState::WaitingPermission:
-      return QStringLiteral("等待你确认…");
+      return QCoreApplication::translate("ui::MainWindow", "Waiting for your approval…");
     case RunState::Cancelling:
-      return QStringLiteral("正在中断…");
+      return QCoreApplication::translate("ui::MainWindow", "Interrupting…");
     case RunState::Failed:
-      return QStringLiteral("出错");
+      return QCoreApplication::translate("ui::MainWindow", "Error");
   }
-  return QStringLiteral("就绪");
+  return QCoreApplication::translate("ui::MainWindow", "Ready");
 }
 
 /// 状态栏用的紧凑 token 数：用 k/M 缩写，原始数字在 tooltip 里给全。
@@ -111,10 +114,10 @@ QString contextUsageText(const QJsonObject & usage)
   }
   const int threshold = json::integer(usage, QStringLiteral("autoCompactThresholdTokens"));
   if(threshold > 0) {
-    return QStringLiteral("上下文 %1 / %2 · 自动压缩于 %3")
+    return QCoreApplication::translate("ui::MainWindow", "Context %1 / %2 · auto-compacts at %3")
            .arg(compactTokens(used), compactTokens(max), compactTokens(threshold));
   }
-  return QStringLiteral("上下文 %1 / %2").arg(compactTokens(used), compactTokens(max));
+  return QCoreApplication::translate("ui::MainWindow", "Context %1 / %2").arg(compactTokens(used), compactTokens(max));
 }
 
 /// 上下文进度的悬浮说明：把两个阈值与"当前做过压缩"讲清楚。
@@ -129,17 +132,20 @@ QString contextTooltipText(const QJsonObject & usage)
   const int full = json::integer(usage, QStringLiteral("fullCompactThresholdTokens"));
 
   QStringList lines;
-  lines.append(QStringLiteral("已用 %1 / %2 tokens").arg(used).arg(max));
+  lines.append(QCoreApplication::translate("ui::MainWindow", "%1 / %2 tokens used").arg(used).arg(max));
   if(micro > 0) {
-    lines.append(QStringLiteral("· 达到 %1 起：下发时裁剪旧工具输出（不调模型）").arg(micro));
+    lines.append(QCoreApplication::translate("ui::MainWindow",
+                                             "· At %1 or more: old tool output is trimmed on the way out (no model call)").arg(micro));
   }
   if(full > 0) {
-    lines.append(QStringLiteral("· 达到 %1 起：调用模型生成摘要，替换较早的历史").arg(full));
+    lines.append(QCoreApplication::translate("ui::MainWindow",
+                                             "· At %1 or more: the model writes a summary that replaces earlier history").arg(full));
   }
   if(json::boolean(usage, QStringLiteral("compacted"))) {
-    lines.append(QStringLiteral("· 本会话已经压缩过上下文，原始消息保存在归档里"));
+    lines.append(QCoreApplication::translate("ui::MainWindow",
+                                             "· This session has been compacted; the original messages are kept in the archive"));
   }
-  lines.append(QStringLiteral("输入 /compact 可立即压缩。"));
+  lines.append(QCoreApplication::translate("ui::MainWindow", "Type /compact to compact now."));
   return lines.join(QLatin1Char('\n'));
 }
 
@@ -148,7 +154,7 @@ QString contextTooltipText(const QJsonObject & usage)
 ///   输出 = 生成的 token；命中率分母不含"写入缓存"（那部分本来没机会命中）。
 QString usageBreakdownText(const Usage & usage)
 {
-  return QStringLiteral("缓存 %1% · 未缓存 %2 · 缓存读 %3 · 输出 %4")
+  return QCoreApplication::translate("ui::MainWindow", "Cached %1% · uncached %2 · cache read %3 · output %4")
          .arg(qRound(usage.cacheHitRate() * 100.0))
          .arg(compactTokens(usage.inputTokens), compactTokens(usage.cacheReadTokens),
               compactTokens(usage.outputTokens));
@@ -158,12 +164,8 @@ QString usageBreakdownText(const Usage & usage)
 QString usageTooltipText(const Usage & cumulative, const Usage & lastTurn)
 {
   const auto block = [](const QString & title, const Usage & usage) {
-    return QStringLiteral("%1\n"
-                          "  未缓存输入  %2\n"
-                          "  缓存读取    %3\n"
-                          "  缓存写入    %4\n"
-                          "  输出        %5\n"
-                          "  缓存命中率  %6%")
+    return QCoreApplication::translate("ui::MainWindow",
+                                       "%1\n  Uncached input  %2\n  Cache read      %3\n  Cache write     %4\n  Output          %5\n  Cache hit rate  %6%")
            .arg(title)
            .arg(usage.inputTokens)
            .arg(usage.cacheReadTokens)
@@ -172,10 +174,10 @@ QString usageTooltipText(const Usage & cumulative, const Usage & lastTurn)
            .arg(qRound(usage.cacheHitRate() * 100.0));
   };
 
-  return QStringLiteral("缓存命中率 = 缓存读取 /（缓存读取 + 未缓存输入）。\n"
-                        "分母不含缓存写入：首次写入的部分本来就没有机会命中。\n\n%1\n\n%2")
-         .arg(block(QStringLiteral("本次会话累计"), cumulative),
-              block(QStringLiteral("最近一轮"), lastTurn));
+  return QCoreApplication::translate("ui::MainWindow",
+                                     "Cache hit rate = cache read / (cache read + uncached input).\nThe denominator excludes cache writes: a first write never had a chance to hit.\n\n%1\n\n%2")
+         .arg(block(QCoreApplication::translate("ui::MainWindow", "This session (cumulative)"), cumulative),
+              block(QCoreApplication::translate("ui::MainWindow", "Last turn"), lastTurn));
 }
 
 }  // namespace
@@ -191,19 +193,33 @@ MainWindow::MainWindow(QWidget * parent) : QMainWindow(parent)
   if(!AppConfig::load(&settings_, &configError)) {
     // 配置损坏不是致命错误：用默认值继续，让用户能在设置里修回来。
     qCWarning(log) << "配置载入失败，使用默认值:" << configError;
-    statusBar()->showMessage(QStringLiteral("配置载入失败，已使用默认设置：") + configError, 8000);
+    statusBar()->showMessage(QCoreApplication::translate("ui::MainWindow",
+                                                         "Failed to load settings; defaults are in use: ") + configError, 8000);
   }
 
   Theme::instance().setMode(settings_.themeMode);
   Theme::instance().setUiFontSize(settings_.uiFontSize);
   Theme::instance().setCodeFontSize(settings_.codeFontSize);
 
+  // ── 界面语言 ────────────────────────────────────────────────────────────
+  // ⚠ 必须在 buildUi() 之前。控件一旦建好，文案就在构造期写死了，之后再装
+  // translator 只能等 LanguageChange 事件来重译——第一屏会是错误的语言。
+  //
+  // 设置里没有语言值 = 用户还没选过 → **跟随系统**。这是首装用户唯一合理的默认：
+  // 源文案是英文，写死中文会让英文用户一进来就面对中文界面。
+  {
+    const UiLanguage wanted = settings_.language.isEmpty()
+                              ? systemLanguage()
+                              : languageFromToken(settings_.language);
+    Translator::instance().switchTo(wanted);
+  }
+
   // ── 存储与运行时 ────────────────────────────────────────────────────────
   if(!store_.open()) {
     qCCritical(log) << "会话数据库打开失败:" << store_.lastError();
-    QMessageBox::warning(this, QStringLiteral("会话存储不可用"),
-                         QStringLiteral("无法打开会话数据库：\n%1\n\n"
-                                        "本次运行不会保存历史记录。")
+    QMessageBox::warning(this, QCoreApplication::translate("ui::MainWindow", "Session storage unavailable"),
+                         QCoreApplication::translate("ui::MainWindow",
+                                                     "Cannot open the session database:\n%1\n\nHistory will not be saved during this run.")
                          .arg(store_.lastError()));
   }
 
@@ -236,7 +252,7 @@ MainWindow::MainWindow(QWidget * parent) : QMainWindow(parent)
   connect(mcp_.get(), &mcp::Manager::serverFailed, this,
   [this](const QString & serverId, const QString & reason) {
     qCWarning(log) << "MCP 服务器失败; id=" << serverId << "reason=" << reason;
-    setStatusMessage(QStringLiteral("MCP 服务器「%1」不可用：%2")
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "MCP server \"%1\" unavailable: %2")
                      .arg(serverId, reason));
     onMcpChanged();
   });
@@ -395,8 +411,8 @@ void MainWindow::buildUi()
   composer_ = new QPlainTextEdit;
   composer_->setObjectName(QStringLiteral("composer"));
   composer_->setPlaceholderText(
-    QStringLiteral("描述你想完成的任务…（Enter 发送，Shift+Enter 换行，可粘贴图片）\n"
-                   "输入 /compact 压缩上下文，/help 查看命令"));
+    QCoreApplication::translate("ui::MainWindow",
+                                "Describe what you want to get done… (Enter to send, Shift+Enter for a newline, paste images)\nType /compact to compact the context, /help for commands"));
   composer_->setFixedHeight(96);
   composer_->installEventFilter(this);
   // 拖入图片文件即可附加。
@@ -413,17 +429,22 @@ void MainWindow::buildUi()
   modeCombo_ = new QComboBox;
   modeCombo_->setObjectName(QStringLiteral("modeCombo"));
   modeCombo_->setToolTip(
-    QStringLiteral("会话模式：plan 只读规划 / build 默认 / edit 编辑 / yolo 免确认"));
-  modeCombo_->addItem(QStringLiteral("plan 只读规划"), static_cast<int>(SessionMode::Plan));
-  modeCombo_->addItem(QStringLiteral("build 默认"), static_cast<int>(SessionMode::Build));
-  modeCombo_->addItem(QStringLiteral("edit 编辑"), static_cast<int>(SessionMode::Edit));
-  modeCombo_->addItem(QStringLiteral("yolo 免确认"), static_cast<int>(SessionMode::Yolo));
+    QCoreApplication::translate("ui::MainWindow",
+                                "Session mode: plan is read-only, build is the default, edit edits, yolo skips approvals"));
+  modeCombo_->addItem(QCoreApplication::translate("ui::MainWindow", "plan · read-only"),
+                      static_cast<int>(SessionMode::Plan));
+  modeCombo_->addItem(QCoreApplication::translate("ui::MainWindow", "build · default"),
+                      static_cast<int>(SessionMode::Build));
+  modeCombo_->addItem(QCoreApplication::translate("ui::MainWindow", "edit · edit"), static_cast<int>(SessionMode::Edit));
+  modeCombo_->addItem(QCoreApplication::translate("ui::MainWindow", "yolo · no approvals"),
+                      static_cast<int>(SessionMode::Yolo));
   connect(modeCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModeChanged);
   actionRow->addWidget(modeCombo_);
 
-  attachButton_ = new QPushButton(QStringLiteral("图片"));
+  attachButton_ = new QPushButton(QCoreApplication::translate("ui::MainWindow", "Image"));
   attachButton_->setObjectName(QStringLiteral("attachButton"));
-  attachButton_->setToolTip(QStringLiteral("附加图片（也可以直接 Ctrl+V 粘贴或拖入）"));
+  attachButton_->setToolTip(QCoreApplication::translate("ui::MainWindow",
+                                                        "Attach an image (you can also paste with Ctrl+V or drag one in)"));
   connect(attachButton_, &QPushButton::clicked, this, &MainWindow::onAttachImagesRequested);
   actionRow->addWidget(attachButton_);
 
@@ -433,7 +454,7 @@ void MainWindow::buildUi()
   // objectName 供样式表与 UI 级测试定位控件；改名要同步更新测试。
   modelCombo_->setObjectName(QStringLiteral("modelCombo"));
   modelCombo_->setMinimumWidth(180);
-  modelCombo_->setToolTip(QStringLiteral("选择本会话使用的模型"));
+  modelCombo_->setToolTip(QCoreApplication::translate("ui::MainWindow", "Choose the model for this session"));
   connect(modelCombo_, &QComboBox::currentIndexChanged, this, &MainWindow::onModelChanged);
   actionRow->addWidget(modelCombo_);
 
@@ -442,18 +463,18 @@ void MainWindow::buildUi()
   reasoningCombo_ = new QComboBox;
   reasoningCombo_->setObjectName(QStringLiteral("reasoningCombo"));
   reasoningCombo_->setToolTip(
-    QStringLiteral("思考等级：越高推理越充分，消耗的 token 也越多"));
+    QCoreApplication::translate("ui::MainWindow", "Reasoning level: higher means more thorough reasoning and more tokens"));
   connect(reasoningCombo_, &QComboBox::currentIndexChanged, this,
           &MainWindow::onReasoningLevelChanged);
   actionRow->addWidget(reasoningCombo_);
 
-  stopButton_ = new QPushButton(QStringLiteral("停止"));
+  stopButton_ = new QPushButton(QCoreApplication::translate("ui::MainWindow", "Stop"));
   stopButton_->setObjectName(QStringLiteral("stopButton"));
   stopButton_->setEnabled(false);
   connect(stopButton_, &QPushButton::clicked, this, &MainWindow::onStopRequested);
   actionRow->addWidget(stopButton_);
 
-  sendButton_ = new QPushButton(QStringLiteral("发送"));
+  sendButton_ = new QPushButton(QCoreApplication::translate("ui::MainWindow", "Send"));
   sendButton_->setObjectName(QStringLiteral("sendButton"));
   sendButton_->setProperty("accent", true);
   connect(sendButton_, &QPushButton::clicked, this, &MainWindow::onSendRequested);
@@ -500,7 +521,7 @@ void MainWindow::buildUi()
   // 这样界面字号变化也仍然够用。
   contextLabel_->setMinimumWidth(
     QFontMetrics(contextLabel_->font())
-    .horizontalAdvance(QStringLiteral("上下文 000.0 / 2000.0M")) +
+    .horizontalAdvance(QCoreApplication::translate("ui::MainWindow", "Context 000.0 / 2000.0M")) +
     8);
   statusBar()->addPermanentWidget(contextLabel_);
 
@@ -519,35 +540,36 @@ void MainWindow::buildUi()
   // sizeHint 以下）。用字体度量而不是写死像素，界面字号变化也仍然够用。
   usageLabel_->setMinimumWidth(
     QFontMetrics(usageLabel_->font())
-    .horizontalAdvance(QStringLiteral("缓存 100% · 未缓存 000.0M · 缓存读 000.0M · 输出 000.0M")) +
+    .horizontalAdvance(QCoreApplication::translate("ui::MainWindow",
+                                                   "Cached 100% · uncached 000.0M · cache read 000.0M · output 000.0M")) +
     12);
   statusBar()->addPermanentWidget(usageLabel_);
 }
 
 void MainWindow::buildMenus()
 {
-  QMenu * fileMenu = menuBar()->addMenu(QStringLiteral("文件"));
+  QMenu * fileMenu = menuBar()->addMenu(QCoreApplication::translate("ui::MainWindow", "File"));
 
-  QAction * newSession = fileMenu->addAction(QStringLiteral("新建会话"));
+  QAction * newSession = fileMenu->addAction(QCoreApplication::translate("ui::MainWindow", "New session"));
   newSession->setShortcut(QKeySequence::New);
   connect(newSession, &QAction::triggered, this, &MainWindow::onNewSessionRequested);
 
-  QAction * openWorkspace = fileMenu->addAction(QStringLiteral("打开工作区…"));
+  QAction * openWorkspace = fileMenu->addAction(QCoreApplication::translate("ui::MainWindow", "Open Workspace…"));
   openWorkspace->setShortcut(QKeySequence::Open);
   connect(openWorkspace, &QAction::triggered, this, &MainWindow::onWorkspaceChangeRequested);
 
   fileMenu->addSeparator();
-  QAction * settings = fileMenu->addAction(QStringLiteral("设置…"));
+  QAction * settings = fileMenu->addAction(QCoreApplication::translate("ui::MainWindow", "Settings…"));
   settings->setObjectName(QStringLiteral("settingsAction"));
   settings->setShortcut(QKeySequence::Preferences);
   connect(settings, &QAction::triggered, this, &MainWindow::onSettingsRequested);
 
   fileMenu->addSeparator();
-  QAction * quit = fileMenu->addAction(QStringLiteral("退出"));
+  QAction * quit = fileMenu->addAction(QCoreApplication::translate("ui::MainWindow", "Quit"));
   quit->setShortcut(QKeySequence::Quit);
   connect(quit, &QAction::triggered, this, &QWidget::close);
 
-  QMenu * viewMenu = menuBar()->addMenu(QStringLiteral("视图"));
+  QMenu * viewMenu = menuBar()->addMenu(QCoreApplication::translate("ui::MainWindow", "View"));
 
   // 主题切换做成互斥项，当前项打勾，避免用户不知道现在是哪一档。
   auto * themeGroup = new QActionGroup(this);
@@ -574,7 +596,7 @@ void MainWindow::buildMenus()
   }
 
   viewMenu->addSeparator();
-  QAction * zoomIn = viewMenu->addAction(QStringLiteral("增大字号"));
+  QAction * zoomIn = viewMenu->addAction(QCoreApplication::translate("ui::MainWindow", "Increase font size"));
   zoomIn->setShortcut(QKeySequence::ZoomIn);
   connect(zoomIn, &QAction::triggered, this, [this]() {
     settings_.uiFontSize = qMin(24, settings_.uiFontSize + 1);
@@ -582,7 +604,7 @@ void MainWindow::buildMenus()
     saveSettings();
   });
 
-  QAction * zoomOut = viewMenu->addAction(QStringLiteral("减小字号"));
+  QAction * zoomOut = viewMenu->addAction(QCoreApplication::translate("ui::MainWindow", "Decrease font size"));
   zoomOut->setShortcut(QKeySequence::ZoomOut);
   connect(zoomOut, &QAction::triggered, this, [this]() {
     settings_.uiFontSize = qMax(10, settings_.uiFontSize - 1);
@@ -590,14 +612,13 @@ void MainWindow::buildMenus()
     saveSettings();
   });
 
-  QMenu * helpMenu = menuBar()->addMenu(QStringLiteral("帮助"));
-  QAction * about = helpMenu->addAction(QStringLiteral("关于 LyCode"));
+  QMenu * helpMenu = menuBar()->addMenu(QCoreApplication::translate("ui::MainWindow", "Help"));
+  QAction * about = helpMenu->addAction(QCoreApplication::translate("ui::MainWindow", "About LyCode"));
   connect(about, &QAction::triggered, this, [this]() {
     QMessageBox::about(
-      this, QStringLiteral("关于 LyCode"),
-      QStringLiteral("<b>LyCode</b> %1<br/><br/>"
-                     "AI 编程工作台 —— Qt6 / C++ 原生实现。<br/>"
-                     "基于 LyCode 的设计规范与 Agent 语义重写。")
+      this, QCoreApplication::translate("ui::MainWindow", "About LyCode"),
+      QCoreApplication::translate("ui::MainWindow",
+                                  "<b>LyCode</b> %1<br/><br/>An AI coding workbench — native Qt6 / C++.<br/>Rewritten from the LyCode design spec and agent semantics.")
       .arg(QStringLiteral(LYCODE_QT_VERSION)));
   });
 }
@@ -758,13 +779,14 @@ void MainWindow::refreshModelCombo()
     QString label = model.displayName.isEmpty() ? model.modelId : model.displayName;
     if(!model.supportsTools) {
       // 不支持工具调用的模型对本产品基本不可用，明确标注而不是隐藏。
-      label += QStringLiteral("（不支持工具）");
+      label += QCoreApplication::translate("ui::MainWindow", " (no tool support)");
     }
     modelCombo_->addItem(label, selection.displayValue());
   }
 
   if(models.isEmpty()) {
-    modelCombo_->addItem(QStringLiteral("（未配置模型，请在设置中添加）"), QString());
+    modelCombo_->addItem(QCoreApplication::translate("ui::MainWindow", "(no model configured — add one in Settings)"),
+                         QString());
     modelCombo_->setEnabled(false);
   }
   else {
@@ -818,7 +840,7 @@ void MainWindow::refreshReasoningCombo()
   currentModel_.reasoningLevel = desired;
 
   for(const QString & id : levelIds) {
-    reasoningCombo_->addItem(QStringLiteral("思考 ") + reasoningLevelLabel(id), id);
+    reasoningCombo_->addItem(QCoreApplication::translate("ui::MainWindow", "Reasoning ") + reasoningLevelLabel(id), id);
   }
   const int index = reasoningCombo_->findData(desired);
   if(index >= 0) {
@@ -988,8 +1010,9 @@ void MainWindow::onNewSessionRequested()
 
   if(runtime_.isRunning()) {
     const auto answer = QMessageBox::question(
-                          this, QStringLiteral("会话正在运行"),
-                          QStringLiteral("当前会话仍在运行。新建会话会中断它，是否继续？"),
+                          this, QCoreApplication::translate("ui::MainWindow", "Session is running"),
+                          QCoreApplication::translate("ui::MainWindow",
+                                                      "The current session is still running. Starting a new session will interrupt it. Continue?"),
                           QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if(answer != QMessageBox::Yes) {
       return;
@@ -1000,16 +1023,17 @@ void MainWindow::onNewSessionRequested()
   if(!workspace_.isValid()) {
     // ⚠ 用状态栏提示而不是模态框：没有工作区是一个**合法状态**，
     // 而模态框会让任何走到这里的路径都停下来等人点确定（实测把测试卡死）。
-    setStatusMessage(QStringLiteral("还没有工作区：先用「打开工作区…」选择一个目录。"));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                                 "No workspace yet — use \"Open Workspace…\" to pick a directory first."));
     return;
   }
 
   ModelSelection selection = currentModel_.isValid() ? currentModel_ : effectiveModelSelection();
   if(!selection.isValid()) {
     QMessageBox::information(
-      this, QStringLiteral("需要配置模型"),
-      QStringLiteral("还没有可用的模型。请在「设置 → Provider」中添加一个 Provider "
-                     "并填写模型列表。"));
+      this, QCoreApplication::translate("ui::MainWindow", "Model required"),
+      QCoreApplication::translate("ui::MainWindow",
+                                  "No usable model yet. Add a provider under Settings → Provider and fill in its model list."));
     onSettingsRequested();
     return;
   }
@@ -1019,7 +1043,7 @@ void MainWindow::onNewSessionRequested()
 
   QString error;
   if(!runtime_.startSession(workspace_, mode, selection, &error)) {
-    QMessageBox::warning(this, QStringLiteral("无法新建会话"), error);
+    QMessageBox::warning(this, QCoreApplication::translate("ui::MainWindow", "Cannot create session"), error);
     return;
   }
 
@@ -1106,8 +1130,8 @@ void MainWindow::onSessionSelected(const Id & sessionId)
 void MainWindow::onSessionDeleteRequested(const Id & sessionId)
 {
   const auto answer = QMessageBox::question(
-                        this, QStringLiteral("删除会话"),
-                        QStringLiteral("确定要删除这个会话及其全部消息吗？此操作不可撤销。"),
+                        this, QCoreApplication::translate("ui::MainWindow", "Delete session"),
+                        QCoreApplication::translate("ui::MainWindow", "Delete this session and all of its messages? This cannot be undone."),
                         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
   if(answer != QMessageBox::Yes) {
     return;
@@ -1123,12 +1147,12 @@ void MainWindow::onSessionDeleteRequested(const Id & sessionId)
   }
 
   if(!store_.deleteSession(sessionId)) {
-    setStatusMessage(QStringLiteral("删除失败：") + store_.lastError());
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Delete failed: ") + store_.lastError());
     return;
   }
 
   loadWorkspaceSessions();
-  setStatusMessage(QStringLiteral("会话已删除。"));
+  setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Session deleted."));
 
   if(activeSessionId_.isEmpty()) {
     openSessionOrCreate();
@@ -1161,14 +1185,15 @@ void MainWindow::onWorkspaceRemoveRequested(const QString & path)
 
   if(!isCurrent) {
     if(removed == 0) {
-      setStatusMessage(QStringLiteral("该工作区不在列表里。"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "That workspace is not in the list."));
       return;
     }
     forgetWorkspaceRecords(path);
     saveSettings();
     sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
     qCInfo(log) << "已从最近工作区移除:" << path;
-    setStatusMessage(QStringLiteral("已从列表移除：%1（会话与文件都还在）").arg(path));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                                 "Removed from the list: %1 (sessions and files are untouched)").arg(path));
     return;
   }
 
@@ -1200,7 +1225,8 @@ void MainWindow::onWorkspaceRemoveRequested(const QString & path)
     applySettingsToUi();
     refreshRunState();
     setStatusMessage(
-      QStringLiteral("已移除最后一个工作区。用「打开工作区…」选择目录即可继续。"));
+      QCoreApplication::translate("ui::MainWindow",
+                                  "The last workspace was removed. Use \"Open Workspace…\" to pick a directory and continue."));
     return;
   }
 
@@ -1215,7 +1241,8 @@ void MainWindow::onWorkspaceRemoveRequested(const QString & path)
     saveSettings();
     sidebar_->setRecentWorkspaces(settings_.recentWorkspaces);
   }
-  setStatusMessage(QStringLiteral("已从列表移除：%1（工作区文件未被改动）").arg(path));
+  setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                               "Removed from the list: %1 (workspace files are untouched)").arg(path));
 }
 
 void MainWindow::onWorkspacePurgeRequested(const QString & path)
@@ -1229,17 +1256,16 @@ void MainWindow::onWorkspacePurgeRequested(const QString & path)
   const QList<SessionSummary> sessions =
     store_.isOpen() ? store_.listSessions(key) : QList<SessionSummary> {};
   if(sessions.isEmpty()) {
-    setStatusMessage(QStringLiteral("该工作区没有可删除的会话。"));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "This workspace has no sessions to delete."));
     return;
   }
 
   // 二次确认必须说清"删什么"与"不删什么"：用户对"删除工作区"的直觉
   // 往往是删磁盘目录，而我们只删数据库里的会话记录。
   const auto answer = QMessageBox::warning(
-                        this, QStringLiteral("删除工作区的会话"),
-                        QStringLiteral("将删除「%1」下的全部 %2 个会话及其消息。\n\n"
-                                       "此操作不可撤销。\n"
-                                       "工作区目录本身和其中的文件**不会**被删除。")
+                        this, QCoreApplication::translate("ui::MainWindow", "Delete workspace sessions"),
+                        QCoreApplication::translate("ui::MainWindow",
+                                                    "This deletes all %2 sessions under \"%1\" and their messages.\n\nThis cannot be undone.\nThe workspace directory itself and the files inside it will **not** be deleted.")
                         .arg(target.path)
                         .arg(sessions.size()),
                         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
@@ -1260,7 +1286,7 @@ void MainWindow::onWorkspacePurgeRequested(const QString & path)
   }
 
   if(!store_.deleteSessionsForWorkspace(key)) {
-    setStatusMessage(QStringLiteral("删除失败：") + store_.lastError());
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Delete failed: ") + store_.lastError());
     return;
   }
 
@@ -1270,7 +1296,8 @@ void MainWindow::onWorkspacePurgeRequested(const QString & path)
   if(activeSessionId_.isEmpty() && target.path == workspace_.path) {
     openSessionOrCreate();  // 当前工作区被清空 → 直接开一个新的空会话
   }
-  setStatusMessage(QStringLiteral("已删除「%1」的 %2 个会话（工作区文件未受影响）。")
+  setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                               "Deleted %2 sessions under \"%1\" (workspace files are untouched).")
                    .arg(QDir(target.path).dirName())
                    .arg(sessions.size()));
 }
@@ -1278,7 +1305,7 @@ void MainWindow::onWorkspacePurgeRequested(const QString & path)
 void MainWindow::onWorkspaceChangeRequested()
 {
   const QString directory = QFileDialog::getExistingDirectory(
-                              this, QStringLiteral("选择工作区目录"), workspace_.path);
+                              this, QCoreApplication::translate("ui::MainWindow", "Select workspace directory"), workspace_.path);
   if(!directory.isEmpty()) {
     onOpenWorkspacePath(directory);
   }
@@ -1292,7 +1319,7 @@ void MainWindow::onOpenWorkspacePath(const QString & path)
 void MainWindow::openWorkspacePath(const QString & path, bool remember)
 {
   if(path.isEmpty() || !QDir(path).exists()) {
-    setStatusMessage(QStringLiteral("目录不存在：") + path);
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Directory does not exist: ") + path);
     return;
   }
   if(runtime_.isRunning()) {
@@ -1330,7 +1357,7 @@ void MainWindow::openWorkspacePath(const QString & path, bool remember)
 
   rescanSkills();  // 项目级技能目录跟着工作区走
   qCInfo(log) << "切换工作区:" << workspace_.path;
-  setStatusMessage(QStringLiteral("已切换工作区：") + workspace_.path);
+  setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Switched to workspace: ") + workspace_.path);
 
   activeSessionId_.clear();
   openSessionOrCreate();
@@ -1404,7 +1431,7 @@ void MainWindow::onTurnFinished(TurnResult result)
   switch(result) {
     case TurnResult::Success:
       // 正常结束不打扰用户，状态栏一句话足够。
-      setStatusMessage(QStringLiteral("完成。"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Done."));
       // 会话有内容之后才值得生成标题（空会话没有素材）。
       // 幂等由运行时的 titleGenerated 保证，这里只管"要不要发起"。
       if(settings_.generateSessionTitles) {
@@ -1414,12 +1441,12 @@ void MainWindow::onTurnFinished(TurnResult result)
       refreshChoices();
       break;
     case TurnResult::Interrupted:
-      setStatusMessage(QStringLiteral("已中断。"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Interrupted."));
       break;
     case TurnResult::Failed:
       break;  // 失败由 onFailed 给出具体原因，避免双重提示
     case TurnResult::Skipped:
-      setStatusMessage(QStringLiteral("本次回合未执行。"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "This turn was not executed."));
       break;
     case TurnResult::None:
       break;
@@ -1446,8 +1473,9 @@ void MainWindow::onSubagentSessionChanged(const Session & session)
 void MainWindow::onSubagentFinished(const Id & childSessionId, bool ok)
 {
   qCInfo(log) << "子代理结束; child=" << childSessionId << "ok=" << ok;
-  setStatusMessage(ok ? QStringLiteral("子代理已完成，可在左侧列表查看它的完整过程。")
-                   : QStringLiteral("子代理执行失败，详见左侧列表中的该会话。"));
+  setStatusMessage(ok ? QCoreApplication::translate("ui::MainWindow",
+                                                    "The subagent finished; see the sidebar list for its full run.")
+                   : QCoreApplication::translate("ui::MainWindow", "The subagent failed; see that session in the sidebar list."));
 
   // 重新拉一次列表让标题/状态与库一致；同时把选中项还原回当前会话，
   // 避免 loadWorkspaceSessions() 的刷新动作影响用户的当前视图。
@@ -1465,12 +1493,12 @@ void MainWindow::onBackgroundTasksChanged(int runningCount)
     backgroundLabel_->setToolTip(QString());
     return;
   }
-  backgroundLabel_->setText(QStringLiteral("· 后台任务 %1").arg(runningCount));
+  backgroundLabel_->setText(QCoreApplication::translate("ui::MainWindow", "· Background tasks %1").arg(runningCount));
   backgroundLabel_->setStyleSheet(
     QStringLiteral("color: %1;").arg(Theme::css(palette.warning)));
   backgroundLabel_->setToolTip(
-    QStringLiteral("有 %1 个后台任务正在运行。用 TaskOutput 查看它们的输出，"
-                   "或在工具卡片里用 TaskStop 终止。")
+    QCoreApplication::translate("ui::MainWindow",
+                                "%1 background task(s) running. Use TaskOutput to read their output, or TaskStop on a tool card to stop them.")
     .arg(runningCount));
 }
 
@@ -1502,8 +1530,8 @@ void MainWindow::onMcpChanged()
   mcpLabel_->setText(QStringLiteral("· MCP %1").arg(ready));
   mcpLabel_->setStyleSheet(
     QStringLiteral("color: %1;").arg(Theme::css(Theme::instance().palette().success)));
-  mcpLabel_->setToolTip(QStringLiteral("已连接 %1 个 MCP 服务器；它们提供的工具"
-                                       "已注册为普通工具，模型可以直接调用。")
+  mcpLabel_->setToolTip(QCoreApplication::translate("ui::MainWindow",
+                                                    "Connected to %1 MCP server(s); the tools they provide are registered as regular tools the model can call.")
                         .arg(ready));
 }
 
@@ -1586,8 +1614,8 @@ void MainWindow::onPermissionResolved(const Id & requestId)
 void MainWindow::onAttachImagesRequested()
 {
   const QStringList paths = QFileDialog::getOpenFileNames(
-                              this, QStringLiteral("附加图片"), QString(),
-                              QStringLiteral("图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;所有文件 (*)"));
+                              this, QCoreApplication::translate("ui::MainWindow", "Attach image"), QString(),
+                              QCoreApplication::translate("ui::MainWindow", "Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;All files (*)"));
   if(paths.isEmpty()) {
     return;
   }
@@ -1599,7 +1627,7 @@ void MainWindow::attachImages(const QStringList & paths)
   for(const QString & path : paths) {
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly)) {
-      setStatusMessage(QStringLiteral("无法读取：%1").arg(path));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Cannot read: %1").arg(path));
       continue;
     }
     const QByteArray bytes = file.readAll();
@@ -1621,21 +1649,22 @@ void MainWindow::attachImageData(const QByteArray & bytes, const QString & mimeT
     return;
   }
   if(!mimeType.startsWith(QStringLiteral("image/"), Qt::CaseInsensitive)) {
-    setStatusMessage(QStringLiteral("只支持图片附件，收到的是 %1。").arg(mimeType));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                                 "Only image attachments are supported; got %1.").arg(mimeType));
     return;
   }
 
   // 单张上限：base64 之后还要进 SQLite 与 HTTP body，过大既慢又容易失败。
   constexpr qint64 kMaxImageBytes = 8 * 1024 * 1024;
   if(bytes.size() > kMaxImageBytes) {
-    setStatusMessage(QStringLiteral("图片过大（%1 MB），上限 8 MB。")
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Image too large (%1 MB); the limit is 8 MB.")
                      .arg(QString::number(bytes.size() / 1024.0 / 1024.0, 'f', 1)));
     return;
   }
 
   FilePart part;
   part.mimeType = mimeType;
-  part.fileName = suggestedName.isEmpty() ? QStringLiteral("粘贴的图片") : suggestedName;
+  part.fileName = suggestedName.isEmpty() ? QCoreApplication::translate("ui::MainWindow", "Pasted image") : suggestedName;
   part.sizeBytes = bytes.size();
   part.base64 = QString::fromLatin1(bytes.toBase64());
   // 粘贴来的图片没有磁盘路径，留空即可——provider 只用 base64。
@@ -1699,7 +1728,7 @@ void MainWindow::refreshAttachmentStrip()
     auto * remove = new QPushButton(QStringLiteral("×"));
     remove->setObjectName(QStringLiteral("attachmentRemove"));
     remove->setFixedSize(20, 20);
-    remove->setToolTip(QStringLiteral("移除这张图片"));
+    remove->setToolTip(QCoreApplication::translate("ui::MainWindow", "Remove this image"));
     remove->setCursor(Qt::PointingHandCursor);
     connect(remove, &QPushButton::clicked, this, [this, index]() {
       if(index >= 0 && index < pendingAttachments_.size()) {
@@ -1752,7 +1781,8 @@ void MainWindow::refreshChoices()
     auto * button = new QPushButton(choice.label);
     button->setObjectName(QStringLiteral("choiceButton"));
     button->setCursor(Qt::PointingHandCursor);
-    button->setToolTip(QStringLiteral("点击填入输入框：%1").arg(choice.text));
+    button->setToolTip(QCoreApplication::translate("ui::MainWindow",
+                                                   "Click to put it in the input box: %1").arg(choice.text));
     connect(button, &QPushButton::clicked, this, [this, choice]() {
       // 填进输入框而不是直接发送：用户可以改一改再发，也避免误点直接发出。
       composer_->setPlainText(choice.text);
@@ -1773,7 +1803,7 @@ void MainWindow::handleSlashCommand(const QString & rawText)
 
   if(verb == QStringLiteral("/compact")) {
     if(!runtime_.hasSession()) {
-      setStatusMessage(QStringLiteral("还没有会话，无法压缩上下文。"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "No session yet, so there is nothing to compact."));
       return;
     }
     // 用户敲下命令就意味着"立刻做"：不看阈值，也不等下一个模型步。
@@ -1786,19 +1816,21 @@ void MainWindow::handleSlashCommand(const QString & rawText)
     composer_->clear();
     pendingAttachments_.clear();
     refreshAttachmentStrip();
-    setStatusMessage(QStringLiteral("正在压缩上下文…"));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Compacting the context…"));
     return;
   }
 
   if(verb == QStringLiteral("/help")) {
     composer_->clear();
-    setStatusMessage(QStringLiteral("命令：/compact 压缩上下文，/help 查看这条说明。"));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                                 "Commands: /compact compacts the context, /help shows this note."));
     return;
   }
 
   // 未知命令：**不发给模型**。把它当普通文本发出去只会浪费一次调用，
   // 而且用户会以为自己敲的命令生效了。
-  setStatusMessage(QStringLiteral("未知命令：%1（可用 /compact、/help）").arg(verb));
+  setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                               "Unknown command: %1 (available: /compact, /help)").arg(verb));
 }
 
 void MainWindow::onSendRequested()
@@ -1825,7 +1857,7 @@ void MainWindow::onSendRequested()
      mcpWaitElapsed_.elapsed() < kMcpWaitTimeoutMs) {
     if(!mcpWaitPending_) {
       mcpWaitPending_ = true;
-      setStatusMessage(QStringLiteral("正在连接 MCP 服务器…"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Connecting to MCP servers…"));
       // 一次性订阅：就绪或超时后自动重试这一次发送。
       auto * timer = new QTimer(this);
       timer->setSingleShot(true);
@@ -1872,7 +1904,7 @@ void MainWindow::onSendRequested()
 void MainWindow::onStopRequested()
 {
   runtime_.abort();
-  setStatusMessage(QStringLiteral("正在中断…"));
+  setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Interrupting…"));
 }
 
 void MainWindow::onModelChanged(int index)
@@ -1977,23 +2009,68 @@ void MainWindow::onSettingsRequested()
     onMcpChanged();
     if(mcp_->isSettling()) {
       // 就绪后把工具补进注册表——否则要等下一次改设置才生效。
-      setStatusMessage(QStringLiteral("正在连接 MCP 服务器…"));
+      setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Connecting to MCP servers…"));
     }
   }
 
   if(!providers_.hasUsableProvider()) {
-    setStatusMessage(QStringLiteral("当前没有可用的 Provider，请检查 Base URL 与 API Key。"));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow",
+                                                 "No usable provider right now — check the Base URL and API key."));
   }
   else {
-    setStatusMessage(QStringLiteral("设置已保存。"));
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Settings saved."));
   }
+
+  // 语言：立刻装上新语言的 translator，但**已建好的控件不会自己重译**——
+  // Qt 只在收到 LanguageChange 事件时才会重取文案，而这个窗口的控件是构造期
+  // 一次性写死的。所以这里如实告知"重启后完全生效"，而不是假装已经生效
+  //（假装的话，用户会看到中英混杂的界面，比明确说要重启更糟）。
+  const UiLanguage wantedLanguage = languageFromToken(settings_.language);
+  if(wantedLanguage != Translator::instance().language()) {
+    Translator::instance().switchTo(wantedLanguage);
+    setStatusMessage(QCoreApplication::translate(
+                       "ui::MainWindow",
+                       "Interface language changed. Reopen the app for it to take full effect."));
+    // 直接问"要不要现在重启"，而不是让用户自己去关掉再打开。
+    // 为什么不做"当场整体重译"：本窗口几十个控件的文案是在 buildUi() 里一次性
+    // 写死的，Qt 的重译机制只在 LanguageChange 事件里重取——要支持就得把每一处
+    // 文案赋值搬进 retranslateUi()，那是一百多处机械改动，风险高于收益。
+    // 重启一次是确定正确的：所有控件都用新语言重新构造。
+    offerRestartForLanguageChange();
+  }
+}
+
+void MainWindow::offerRestartForLanguageChange()
+{
+  const auto answer = QMessageBox::question(
+                        this,
+                        QCoreApplication::translate("ui::MainWindow", "Interface language"),
+                        QCoreApplication::translate(
+                          "ui::MainWindow",
+                          "The interface language has been changed. Restart now to apply it?"),
+                        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+  if(answer != QMessageBox::Yes) {
+    return;
+  }
+  // 用同一个可执行文件与同样的参数重启。startDetached 让新进程脱离本进程，
+  // 这样退出时不会把它一起带走。
+  const QString program = QCoreApplication::applicationFilePath();
+  const QStringList arguments = QCoreApplication::arguments().mid(1);
+  if(!QProcess::startDetached(program, arguments)) {
+    // 起不来就如实说，不要静默什么都不做（用户会以为重启按钮坏了）。
+    setStatusMessage(QCoreApplication::translate(
+                       "ui::MainWindow",
+                       "Could not restart automatically. Please close and reopen the app."));
+    return;
+  }
+  QCoreApplication::quit();
 }
 
 void MainWindow::saveSettings()
 {
   QString error;
   if(!AppConfig::save(settings_, &error)) {
-    setStatusMessage(QStringLiteral("设置保存失败：") + error);
+    setStatusMessage(QCoreApplication::translate("ui::MainWindow", "Failed to save settings: ") + error);
   }
 }
 
@@ -2046,7 +2123,7 @@ bool MainWindow::eventFilter(QObject * watched, QEvent * event)
           // 直接声明 image/png 并转码，避免 media_type 与实际字节不符。
           image.save(&buffer, "PNG");
           attachImageData(bytes, QStringLiteral("image/png"),
-                          QStringLiteral("粘贴的图片.png"));
+                          QCoreApplication::translate("ui::MainWindow", "pasted-image.png"));
           return true;  // 吃掉这次粘贴，不要把二进制塞进输入框
         }
       }

@@ -116,7 +116,7 @@ jobs:
         cache: true
         update: true
         install: zip
-        pacboy: cmake:p gcc:p ninja:p qt6-base:p
+        pacboy: cmake:p gcc:p ninja:p qt6-base:p qt6-tools:p
 
     - name: 用 CMake 构建
       run: |

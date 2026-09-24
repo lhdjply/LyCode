@@ -15,6 +15,7 @@
 #include <QTimer>
 
 #include <utility>
+#include <QCoreApplication>
 
 namespace lycode
 {
@@ -177,11 +178,13 @@ void AgentRuntime::launchSubagent(const LaunchRequest & request, Completion done
   };
 
   if(!subagentsEnabled()) {
-    fail(QStringLiteral("子代理不能再派生子代理。"), QStringLiteral("subagent_disabled"));
+    fail(QCoreApplication::translate("agent::AgentRuntime", "A subagent cannot spawn another subagent."),
+         QStringLiteral("subagent_disabled"));
     return;
   }
   if(request.prompt.trimmed().isEmpty()) {
-    fail(QStringLiteral("子代理的 prompt 不能为空。"), QStringLiteral("invalid_input"));
+    fail(QCoreApplication::translate("agent::AgentRuntime", "The subagent prompt cannot be empty."),
+         QStringLiteral("invalid_input"));
     return;
   }
 
@@ -220,7 +223,7 @@ void AgentRuntime::launchSubagent(const LaunchRequest & request, Completion done
 
   // 登记父子关系。放在 startSession 之后：startSession 会重置整个 Session。
   child->adoptAsChild(session_.id, SessionKind::SubagentChild,
-                      request.description.isEmpty() ? QStringLiteral("子代理")
+                      request.description.isEmpty() ? QCoreApplication::translate("agent::AgentRuntime", "Subagent")
                       : request.description);
 
   // ── 让 UI 看到子会话，但不让它抢走当前会话 ──────────────────────────────
@@ -284,13 +287,14 @@ void AgentRuntime::launchSubagent(const LaunchRequest & request, Completion done
           // 触及步数上限是最常见也最需要区分的一种失败。
           if(child->modelStepCount() >= child->maxModelStepsPerTurn()) {
             launch.truncated = true;
-            launch.error = QStringLiteral("子代理触及模型步数上限（%1）被中止。")
+            launch.error = QCoreApplication::translate("agent::AgentRuntime",
+                                                       "The subagent hit its model-step limit (%1) and was stopped.")
                            .arg(child->maxModelStepsPerTurn());
           }
           else {
             launch.error = child->session().contextUsage.isEmpty()
-                           ? QStringLiteral("子代理运行失败。")
-                           : QStringLiteral("子代理运行失败。");
+                           ? QCoreApplication::translate("agent::AgentRuntime", "The subagent failed.")
+                           : QCoreApplication::translate("agent::AgentRuntime", "The subagent failed.");
           }
           break;
         }
@@ -298,7 +302,7 @@ void AgentRuntime::launchSubagent(const LaunchRequest & request, Completion done
       case TurnResult::None:
         launch.ok = false;
         launch.errorCode = QStringLiteral("subagent_not_run");
-        launch.error = QStringLiteral("子代理未执行。");
+        launch.error = QCoreApplication::translate("agent::AgentRuntime", "The subagent did not run.");
         break;
     }
 
@@ -408,13 +412,14 @@ bool AgentRuntime::startSession(const Workspace & workspace, SessionMode mode,
 {
   if(!workspace.isValid()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("工作区路径为空。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "The workspace path is empty.");
     }
     return false;
   }
   if(!model.isValid()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("未选择模型，请先在设置中配置 Provider 与模型。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime",
+                                              "No model selected. Configure a provider and a model in Settings first.");
     }
     return false;
   }
@@ -452,7 +457,7 @@ bool AgentRuntime::loadSession(const Id & sessionId, QString * errorOut)
 {
   if(store_ == nullptr) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("会话存储未初始化。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "Session storage is not initialized.");
     }
     return false;
   }
@@ -460,7 +465,7 @@ bool AgentRuntime::loadSession(const Id & sessionId, QString * errorOut)
   Session loaded;
   if(!store_->loadSession(sessionId, &loaded)) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("找不到会话：") + sessionId;
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "Session not found: ") + sessionId;
     }
     return false;
   }
@@ -509,7 +514,7 @@ void AgentRuntime::closeSession()
   }
   // 这里**不终止**后台任务。它们已经脱离工具调用的生命周期，而且设计目标
   // 就是活过会话切换与宿主退出（下次启动由账本认领）。要停下它们请用 TaskStop。
-  permissionGate()->cancelAll(QStringLiteral("会话已关闭"));
+  permissionGate()->cancelAll(QCoreApplication::translate("agent::AgentRuntime", "Session closed"));
   permissionGate()->reset();
 
   // 压缩摘要可能还在飞：不显式收掉的话，回调会落到**新会话**的消息列表上
@@ -557,25 +562,26 @@ bool AgentRuntime::submitMessage(const QString & text, const QList<FilePart> & a
   // 只发图片、不写文字是合法用法（"这张图里是什么？"）。
   if(trimmed.isEmpty() && attachments.isEmpty()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("输入为空。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "Input is empty.");
     }
     return false;
   }
   if(!hasSession()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("没有活动会话。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "No active session.");
     }
     return false;
   }
   if(isRunning()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("正在运行中，请先等待当前回合结束或中断。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime",
+                                              "A turn is already running. Wait for it to finish, or interrupt it.");
     }
     return false;
   }
   if(providers_ == nullptr || !model_.isValid()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("未配置可用的模型。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "No usable model is configured.");
     }
     return false;
   }
@@ -663,7 +669,7 @@ void AgentRuntime::abort()
   setPhase(TurnPhase::Completing);
 
   // 等待中的权限请求必须先收口，否则回调悬挂会让状态机停住。
-  permissionGate()->cancelAll(QStringLiteral("用户中断了本次运行"));
+  permissionGate()->cancelAll(QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
 
   if(activeStream_ != nullptr) {
     ModelStream * stream = activeStream_;
@@ -674,7 +680,7 @@ void AgentRuntime::abort()
     QTimer::singleShot(0, this, [this, stream]() {
       if(phase_ == TurnPhase::Completing && session_.status == SessionStatus::Running) {
         stream->deleteLater();
-        completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+        completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
       }
     });
     return;
@@ -682,7 +688,7 @@ void AgentRuntime::abort()
 
   // 没有活跃的流：可能停在工具执行或权限等待上，直接收尾。
   teardownAfterAbort();
-  completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+  completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -693,7 +699,7 @@ void AgentRuntime::runModelStep()
 {
   if(abortRequested_) {
     teardownAfterAbort();
-    completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+    completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
     return;
   }
 
@@ -702,15 +708,17 @@ void AgentRuntime::runModelStep()
                    << "limit=" << maxModelStepsPerTurn_ << "subagent=" << isSubagent();
     completeTurn(TurnResult::Failed,
                  isSubagent()
-                 ? QStringLiteral("子代理的模型步数超过上限（%1），已中止。")
+                 ? QCoreApplication::translate("agent::AgentRuntime", "The subagent exceeded its model-step limit (%1) and was stopped.")
                  .arg(maxModelStepsPerTurn_)
-                 : QStringLiteral("单次回合的模型步数超过安全上限（%1），已中止。")
+                 : QCoreApplication::translate("agent::AgentRuntime",
+                                               "This turn exceeded the safety limit of %1 model steps and was stopped.")
                  .arg(maxModelStepsPerTurn_));
     return;
   }
 
   if(providers_ == nullptr) {
-    completeTurn(TurnResult::Failed, QStringLiteral("Provider 注册表未初始化。"));
+    completeTurn(TurnResult::Failed, QCoreApplication::translate("agent::AgentRuntime",
+                                                                 "The provider registry is not initialized."));
     return;
   }
 
@@ -721,8 +729,8 @@ void AgentRuntime::runModelStep()
     // provider（用户删掉/重建过 Provider，而持久化的选择还留在配置里），把那个
     // 内部 id 摆给用户看只会把人引向一个不存在的东西。给出可行动的下一步。
     completeTurn(TurnResult::Failed,
-                 QStringLiteral("当前会话用的模型已不可用（Provider 被删除或未配置完整）。"
-                                "请在底部模型下拉框里重新选一个模型后再发送。"));
+                 QCoreApplication::translate("agent::AgentRuntime",
+                                             "The model this session uses is no longer available (the provider was deleted or is not fully configured). Pick another model in the picker at the bottom, then send again."));
     return;
   }
 
@@ -772,7 +780,8 @@ void AgentRuntime::runModelStep()
 
   ModelStream * stream = provider->stream(request);
   if(stream == nullptr) {
-    completeTurn(TurnResult::Failed, QStringLiteral("模型请求创建失败。"));
+    completeTurn(TurnResult::Failed, QCoreApplication::translate("agent::AgentRuntime",
+                                                                 "Failed to create the model request."));
     return;
   }
   activeStream_ = stream;
@@ -1018,7 +1027,7 @@ void AgentRuntime::handleStreamEvent(const StreamEvent & event)
         persistMessage(*assistant);
         emit messageFinished(*assistant);
         teardownAfterAbort();
-        completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+        completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
         return;
       }
 
@@ -1028,7 +1037,7 @@ void AgentRuntime::handleStreamEvent(const StreamEvent & event)
       persistMessage(*assistant);
       emit messageFinished(*assistant);
       completeTurn(TurnResult::Failed,
-                   event.errorMessage.isEmpty() ? QStringLiteral("模型请求失败。")
+                   event.errorMessage.isEmpty() ? QCoreApplication::translate("agent::AgentRuntime", "The model request failed.")
                    : event.errorMessage);
       break;
   }
@@ -1040,7 +1049,8 @@ void AgentRuntime::finishModelStep(const QString & finishReason)
 
   Message * assistant = currentAssistantMessage();
   if(assistant == nullptr) {
-    completeTurn(TurnResult::Failed, QStringLiteral("模型响应没有对应消息。"));
+    completeTurn(TurnResult::Failed, QCoreApplication::translate("agent::AgentRuntime",
+                                                                 "The model response has no matching message."));
     return;
   }
 
@@ -1053,7 +1063,7 @@ void AgentRuntime::finishModelStep(const QString & finishReason)
     persistMessage(*assistant);
     emit messageFinished(*assistant);
     teardownAfterAbort();
-    completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+    completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
     return;
   }
 
@@ -1136,7 +1146,7 @@ void AgentRuntime::runToolQueue()
 {
   if(abortRequested_) {
     teardownAfterAbort();
-    completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+    completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
     return;
   }
 
@@ -1428,19 +1438,20 @@ bool AgentRuntime::compactContextNow(QString * errorOut)
 {
   if(!hasSession()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("没有活动会话。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "No active session.");
     }
     return false;
   }
   if(providers_ == nullptr || !model_.isValid()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("未配置可用的模型，无法生成压缩摘要。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime",
+                                              "No usable model is configured, so no summary can be generated.");
     }
     return false;
   }
   if(compactionInFlight_) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("压缩已在进行中。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "Compaction is already in progress.");
     }
     return false;
   }
@@ -1448,7 +1459,8 @@ bool AgentRuntime::compactContextNow(QString * errorOut)
   // 也不该被摘要覆盖。
   if(isRunning()) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("正在运行中，请等本轮结束或中断后再压缩。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime",
+                                              "A turn is running. Compact after it finishes or after you interrupt it.");
     }
     return false;
   }
@@ -1473,7 +1485,8 @@ void AgentRuntime::autoCompactIfNeeded()
   // "已经进入压缩区"告诉用户一次，免得他们以为界面卡住了。
   if(used >= microThreshold && !compactionWarned_) {
     compactionWarned_ = true;
-    emit compactionNotice(QStringLiteral("上下文已用 %1%，旧工具输出将在下发时裁剪。")
+    emit compactionNotice(QCoreApplication::translate("agent::AgentRuntime",
+                                                      "Context is %1% full; old tool output will be trimmed on the way out.")
                           .arg(window > 0 ? used * 100 / window : 0));
   }
 
@@ -1494,7 +1507,8 @@ bool AgentRuntime::startCompactionSummary(bool force, QString * errorOut)
   const FullCompaction plan = buildFullCompaction(messages_, compactionPolicy_);
   if(!plan.applied) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("没有可压缩的历史（消息太少或都还在保护窗口内）。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime",
+                                              "There is no history to compact (too few messages, or all of them are still inside the protected window).");
     }
     return false;
   }
@@ -1502,7 +1516,7 @@ bool AgentRuntime::startCompactionSummary(bool force, QString * errorOut)
   ModelProvider * provider = providers_->resolve(model_);
   if(provider == nullptr) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("找不到可用的模型。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "No usable model found.");
     }
     return false;
   }
@@ -1530,7 +1544,7 @@ bool AgentRuntime::startCompactionSummary(bool force, QString * errorOut)
   ModelStream * stream = provider->stream(request);
   if(stream == nullptr) {
     if(errorOut != nullptr) {
-      *errorOut = QStringLiteral("摘要请求创建失败。");
+      *errorOut = QCoreApplication::translate("agent::AgentRuntime", "Failed to create the summary request.");
     }
     return false;
   }
@@ -1557,7 +1571,8 @@ bool AgentRuntime::startCompactionSummary(bool force, QString * errorOut)
     compactionInFlight_ = false;
     const QString summary = collected->trimmed();
     if(summary.isEmpty()) {
-      abortCompactionSummary(QStringLiteral("摘要模型没有返回内容，已跳过本次压缩。"));
+      abortCompactionSummary(QCoreApplication::translate("agent::AgentRuntime",
+                                                         "The summary model returned nothing, so this compaction was skipped."));
       return;
     }
     // 流还活着（调用工具时流会短暂停止，随后同一轮还会再起一次）就先只记录：
@@ -1571,7 +1586,8 @@ bool AgentRuntime::startCompactionSummary(bool force, QString * errorOut)
   });
 
   if(force) {
-    emit compactionNotice(QStringLiteral("正在压缩上下文（生成摘要）…"));
+    emit compactionNotice(QCoreApplication::translate("agent::AgentRuntime",
+                                                      "Compacting the context (generating a summary)…"));
   }
   qCInfo(log) << "已请求上下文压缩摘要; session=" << session_.id
               << "待归档消息=" << plan.replacedMessageCount
@@ -1592,7 +1608,8 @@ void AgentRuntime::applyCompactionSummary(const QString & summary)
   if(store_ != nullptr && store_->isOpen()) {
     if(!store_->archiveMessages(plan.headMessages)) {
       qCWarning(log) << "压缩归档失败，放弃本次压缩:" << store_->lastError();
-      abortCompactionSummary(QStringLiteral("压缩未能完成：历史归档失败。"));
+      abortCompactionSummary(QCoreApplication::translate("agent::AgentRuntime",
+                                                         "Compaction could not complete: archiving the history failed."));
       return;
     }
   }
@@ -1629,8 +1646,8 @@ void AgentRuntime::applyCompactionSummary(const QString & summary)
   // 整体替换没法用增量信号表达，让界面重建对话流。
   emit conversationReplaced();
   emit sessionChanged(session_);
-  emit compactionNotice(QStringLiteral("已压缩上下文：%1 条较早消息已归档为摘要，"
-                                       "当前约 %2 tokens。")
+  emit compactionNotice(QCoreApplication::translate("agent::AgentRuntime",
+                                                    "Context compacted: %1 earlier messages were archived into a summary; now about %2 tokens.")
                         .arg(plan.replacedMessageCount)
                         .arg(contextTokens()));
 }
@@ -1793,7 +1810,7 @@ void AgentRuntime::executeToolAt(int index)
 
   PermissionOption allowOnce;
   allowOnce.optionId = QStringLiteral("allowOnce");
-  allowOnce.label = QStringLiteral("允许一次");
+  allowOnce.label = QCoreApplication::translate("agent::AgentRuntime", "Allow once");
   allowOnce.kind = PermissionOptionKind::AllowOnce;
   allowOnce.response.decision = PermissionDecision::Allow;
   request.options.append(allowOnce);
@@ -1804,7 +1821,7 @@ void AgentRuntime::executeToolAt(int index)
     }
     PermissionOption allowAlways;
     allowAlways.optionId = QStringLiteral("allowAlways");
-    allowAlways.label = QStringLiteral("始终允许：") + rule.toolName +
+    allowAlways.label = QCoreApplication::translate("agent::AgentRuntime", "Always allow: ") + rule.toolName +
                         (rule.ruleContent.isEmpty() ? QString()
                          : QStringLiteral(" (") + rule.ruleContent +
                          QStringLiteral(")"));
@@ -1817,7 +1834,7 @@ void AgentRuntime::executeToolAt(int index)
 
   PermissionOption deny;
   deny.optionId = QStringLiteral("deny");
-  deny.label = QStringLiteral("拒绝");
+  deny.label = QCoreApplication::translate("agent::AgentRuntime", "Deny");
   deny.kind = PermissionOptionKind::Deny;
   deny.response.decision = PermissionDecision::Deny;
   request.options.append(deny);
@@ -1911,7 +1928,7 @@ void AgentRuntime::afterToolQueue()
 {
   if(abortRequested_) {
     teardownAfterAbort();
-    completeTurn(TurnResult::Interrupted, QStringLiteral("用户中断了本次运行"));
+    completeTurn(TurnResult::Interrupted, QCoreApplication::translate("agent::AgentRuntime", "Interrupted by the user"));
     return;
   }
 
