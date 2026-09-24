@@ -34,6 +34,10 @@
 #ifndef MyRepoRoot
   #define MyRepoRoot "..\.."
 #endif
+; 中文翻译文件路径。SourcePath 是含文件名的完整路径，取目录要用 ExtractFileDir。
+#ifndef MyChineseIsl
+  #define MyChineseIsl ExtractFileDir(SourcePath) + "\ChineseSimplified.isl"
+#endif
 
 #define MyAppName "LyCode"
 #define MyAppExeName "lycode.exe"
@@ -71,9 +75,8 @@ WizardStyle=modern
 MinVersion=10.0
 
 [Languages]
-; 只有英文向导。要中文向导需另加非官方翻译文件（Inno Setup 不自带
-; ChineseSimplified.isl），放到 assets/windows/ 后再加一行：
-;   Name: "chinese"; MessagesFile: "compiler:Default.isl,{#MyRepoRoot}\assets\windows\ChineseSimplified.isl"
+; 中文放首位 = 默认语言。ChineseSimplified.isl 需要 Inno Setup 6.5.0+。
+Name: "chinese"; MessagesFile: "compiler:Default.isl,{#MyChineseIsl}"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

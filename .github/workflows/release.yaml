@@ -206,21 +206,77 @@ jobs:
       if: matrix.config.installer
       shell: pwsh
       run: |
-        # Inno Setup 用 6.3+ 才有 x64compatible / arm64 这两个架构约束值。
         $ver = (Get-Content VERSION -First 1).Trim()
         $src = Join-Path $env:GITHUB_WORKSPACE 'build\lycode'
         $out = Join-Path $env:GITHUB_WORKSPACE 'dist'
         New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-        # GitHub 的 Windows runner 镜像自带 Inno Setup（x64 与 arm64 都有），
-        # 直接调 ISCC 即可，不需要额外的安装步骤。
-        # 目标架构写在脚本里（ArchitecturesAllowed=arm64，需 Inno Setup 6.3+），
-        # 与 ISCC 自身的架构无关，所以 x86 的编译器也能产出 arm64 安装包。
-        $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
-        if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
-        if (-not (Test-Path $iscc)) {
-          throw "找不到 ISCC.exe：这个 runner 镜像里应当自带 Inno Setup，确实没有就装一个（choco install innosetup）"
+        # runner 镜像不再自带 Inno Setup（2025-09 起移除），且 ChineseSimplified.isl
+        # 要求 6.5.0+，所以这里自行探测并保证版本。
+        #
+        # 只查 PATH 和固定路径不够：预装的 Inno 没有 choco 的 shim（Install-BinFile
+        # 只在走 choco 包脚本时装），Get-Command 找不到。所以按注册表 → PATH → 有界搜索。
+        function Find-Iscc {
+          $found = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+          if ($found) { return $found }
+
+          $roots = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          )
+          foreach ($root in $roots) {
+            $entries = Get-ItemProperty $root -ErrorAction SilentlyContinue |
+                       Where-Object { $_.DisplayName -like 'Inno Setup*' }
+            foreach ($entry in $entries) {
+              if ($entry.InstallLocation) {
+                $candidate = Join-Path $entry.InstallLocation 'ISCC.exe'
+                if (Test-Path $candidate) { return $candidate }
+              }
+            }
+          }
+
+          foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+            if (-not $base -or -not (Test-Path $base)) { continue }
+            $hit = Get-ChildItem -Path $base -Filter 'ISCC.exe' -Recurse -Depth 3 `
+                                 -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) { return $hit.FullName }
+          }
+          return $null
         }
+
+        function Get-IsccVersion([string] $path) {
+          if (-not $path -or -not (Test-Path $path)) { return $null }
+          $text = (& $path /? 2>&1 | Out-String)
+          if($text -match '(\d+)\.(\d+)\.(\d+)') {
+            return [version] "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+          }
+          return $null
+        }
+
+        $minVersion = [version] '6.5.0'
+        $iscc = Find-Iscc
+        $current = Get-IsccVersion $iscc
+        Write-Host "ISCC 探测结果：$(if($iscc){$iscc}else{'未找到'})，版本 $(if($current){$current}else{'未知'})"
+
+        if (-not $current -or $current -lt $minVersion) {
+          Write-Host "安装/升级 Inno Setup 6…"
+          # 已装但版本过低时 choco 会拒绝重装，所以要 --force。
+          choco install innosetup -y --no-progress --force
+          # 1641/3010 = 装好了但需要重启，不算失败。
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1641 -and $LASTEXITCODE -ne 3010) {
+            throw "choco install innosetup 失败，退出码 $LASTEXITCODE"
+          }
+          $iscc = Find-Iscc
+          $current = Get-IsccVersion $iscc
+        }
+
+        if (-not $iscc) {
+          throw "找不到 ISCC.exe（PATH、注册表、Program Files 都没找到）。"
+        }
+        if (-not $current -or $current -lt $minVersion) {
+          throw "ISCC 版本 $(if($current){$current}else{'未知'}) 低于要求的 $minVersion（ChineseSimplified.isl 需要 6.5.0+）。"
+        }
+        Write-Host "使用 ISCC：$iscc（版本 $current）"
 
         & $iscc "/DMyAppVersion=$ver" `
                 "/DMyArch=${{ matrix.config.arch }}" `
@@ -228,6 +284,7 @@ jobs:
                 "/DMySourceDir=$src" `
                 "/DMyOutputDir=$out" `
                 "/DMyRepoRoot=$env:GITHUB_WORKSPACE" `
+                "/DMyChineseIsl=$env:GITHUB_WORKSPACE\assets\windows\ChineseSimplified.isl" `
                 "assets\windows\lycode.iss"
         if ($LASTEXITCODE -ne 0) { throw "ISCC 编译失败，退出码 $LASTEXITCODE" }
         Get-ChildItem $out
