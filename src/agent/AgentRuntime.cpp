@@ -27,9 +27,6 @@ Q_LOGGING_CATEGORY(log, "lycode.agent")
 /// 超出部分留在 ToolPart::output 里供 UI 展示，但下发时截断，
 /// 避免一次 `cat` 撑爆上下文。
 constexpr int kToolOutputModelBudgetChars = 30000;
-/// 估算 token 用的字符/token 比。英文约 4，中英混排更接近 2.5；
-/// 取 3 作为折中，宁可高估（高估只会更早压缩，不会超窗）。
-constexpr double kCharsPerToken = 3.0;
 
 }  // namespace
 
@@ -488,6 +485,13 @@ bool AgentRuntime::loadSession(const Id & sessionId, QString * errorOut)
     message.cancelPendingTools();
   }
 
+  // 历史上做过压缩的话，把摘要认回来：合成消息本身就在消息列表里（会随请求
+  // 下发），这里恢复的是"当前摘要是什么"，供界面展示与日志使用。
+  compactionSummary_ = restoreContextSummary(messages_);
+  if(!compactionSummary_.isEmpty()) {
+    qCInfo(log) << "已恢复压缩摘要; 长度=" << compactionSummary_.size();
+  }
+
   qCInfo(log) << "载入会话; id=" << session_.id << "消息数=" << messages_.size();
 
   refreshContextUsage();
@@ -507,6 +511,18 @@ void AgentRuntime::closeSession()
   // 就是活过会话切换与宿主退出（下次启动由账本认领）。要停下它们请用 TaskStop。
   permissionGate()->cancelAll(QStringLiteral("会话已关闭"));
   permissionGate()->reset();
+
+  // 压缩摘要可能还在飞：不显式收掉的话，回调会落到**新会话**的消息列表上
+  // （那时 session_ 已经换人），把上一个会话的摘要塞进新会话。
+  if(compactionStream_ != nullptr) {
+    compactionStream_->abort();
+    compactionStream_->deleteLater();
+    compactionStream_ = nullptr;
+  }
+  compactionInFlight_ = false;
+  deferredCompactionSummary_.clear();
+  compactionSummary_.clear();
+  compactionWarned_ = false;
 
   session_ = Session{};
   messages_.clear();
@@ -710,6 +726,19 @@ void AgentRuntime::runModelStep()
   // 模型不会自己知道，必须由运行时注入。
   drainBackgroundNotifications();
 
+  // 上一个模型步里生成的摘要在这里落地：此刻还没有本步的 assistant 占位消息，
+  // 替换消息列表是安全的（放在流式期间替换会把占位消息一起换掉，见 header 说明）。
+  if(!deferredCompactionSummary_.isEmpty()) {
+    const QString summary = deferredCompactionSummary_;
+    deferredCompactionSummary_.clear();
+    applyCompactionSummary(summary);
+  }
+
+  // 再检查上下文压力（通知也算进去了）：每个模型步开始前收敛一次，
+  // 这样长 turn 内部也不会等到超窗才发现。检查是**非阻塞**的——
+  // 需要模型摘要时它只发起请求，本步照常用当前上下文发出去。
+  autoCompactIfNeeded();
+
   setPhase(TurnPhase::AwaitingModelResponse);
 
   // 先建 assistant 占位消息，再发起请求：
@@ -751,6 +780,18 @@ void AgentRuntime::runModelStep()
       activeStream_ = nullptr;
     }
     stream->deleteLater();
+    // 流收尾时补应用暂存的摘要：completeTurn() 往往在终态事件处理里就同步跑完了，
+    // 那时 activeStream_ 还不是空，补应用的条件不成立——只靠 completeTurn 里的
+    // 那次检查会漏掉这最后一轮。这里再兜一次，且不会重复（暂存已清）。
+    if(deferredCompactionSummary_.isEmpty()) {
+      return;
+    }
+    if(activeStream_ != nullptr || compactionInFlight_) {
+      return;   // 还有别的流在跑（比如同一轮的下一步），留给下一步开始前应用
+    }
+    const QString deferred = deferredCompactionSummary_;
+    deferredCompactionSummary_.clear();
+    applyCompactionSummary(deferred);
   });
 }
 
@@ -783,31 +824,25 @@ ModelRequest AgentRuntime::buildModelRequest() const
   // 温度保持 provider 默认，不主动覆盖——覆盖会改变模型既有行为；
   // 且 Anthropic 在开启 thinking 时不允许同时指定 temperature。
 
-  SystemPromptInput promptInput;
-  promptInput.workspace = session_.workspace;
-  promptInput.cwd = session_.workspace.path;
-  promptInput.mode = session_.mode;
-  promptInput.permissionMode = permissionGate()->mode();
-  promptInput.appVersion = QStringLiteral(LYCODE_QT_VERSION);
-  if(tools_ != nullptr) {
-    // 白名单非空时只声明这些工具：子代理的只读 profile 靠它收窄工具面，
-    // 让模型从一开始就看不到写操作。
-    promptInput.tools = toolAllowlist_.isEmpty() ? tools_->specs()
-                        : tools_->specsFor(toolAllowlist_);
-    request.tools = promptInput.tools;
-  }
-  promptInput.subagentType = subagentType_;
-  // 技能清单每次请求重新生成：用户中途加了 skill 不该要重启应用。
-  if(skills_ != nullptr) {
-    promptInput.skillsSection = skills_->promptSection();
-  }
-  promptInput.subagentDescription = subagentDescription_;
-  request.systemPrompt = SystemPromptBuilder::build(promptInput);
+  // 系统提示词与工具声明都走 effective* 系列：估算与请求必须用同一份，
+  // 否则"估算说还装得下"和"实际发出去超窗"会各说各话。
+  request.tools = effectiveToolSpecs();
+  request.systemPrompt = effectiveSystemPrompt();
 
-  // 只投影 user / assistant：内部 System 角色（压缩摘要等）不进请求。
+  // 微压缩：把**旧**工具输出的体积压下来。真正的输出仍留在 messages_ 里
+  // （工具卡片要显示完整内容），这里改的只是下发副本。放在全压缩之后：
+  // 全压缩已经把早期历史换成了摘要时，这里只会处理剩下的尾部。
+  const int beforeTrim = estimateContextTokens(messages_, request.tools, request.systemPrompt);
+  const QList<Message> outgoing = microcompactedMessages(messages_, compactionPolicy_);
+  const int afterTrim = estimateContextTokens(outgoing, request.tools, request.systemPrompt);
+  if(afterTrim < beforeTrim) {
+    qCInfo(log) << "微压缩已裁剪旧工具输出; 估算" << beforeTrim << "->" << afterTrim << "tokens";
+  }
+
+  // 只投影 user / assistant：内部 System 角色（压缩分隔行等）不进请求。
   // 注意保留 assistant 消息里的 Tool part——provider 需要它们来重建
   // tool_use / tool_calls 块；工具**结果**由单独的 user 消息承载。
-  for(const Message & message : messages_) {
+  for(const Message & message : outgoing) {
     if(message.role == MessageRole::System) {
       continue;
     }
@@ -1368,6 +1403,244 @@ void AgentRuntime::requestTitleFromModel()
   qCDebug(log) << "已请求模型生成会话标题; session=" << session_.id;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 上下文压缩
+// ─────────────────────────────────────────────────────────────────────────────
+
+void AgentRuntime::setCompactionPolicy(const CompactionPolicy & policy)
+{
+  compactionPolicy_ = policy;
+  // 阈值变了，状态栏里的"何时自动压缩"与进度条压力都要立刻反映。
+  remeasureContext();
+}
+
+void AgentRuntime::setContextWindowOverride(int tokens)
+{
+  contextWindowOverride_ = tokens > 0 ? tokens : 0;
+  remeasureContext();
+}
+
+bool AgentRuntime::compactContextNow(QString * errorOut)
+{
+  if(!hasSession()) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("没有活动会话。");
+    }
+    return false;
+  }
+  if(providers_ == nullptr || !model_.isValid()) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("未配置可用的模型，无法生成压缩摘要。");
+    }
+    return false;
+  }
+  if(compactionInFlight_) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("压缩已在进行中。");
+    }
+    return false;
+  }
+  // 只压缩"已经完成"的历史：正在流式的 assistant 占位消息既不完整，
+  // 也不该被摘要覆盖。
+  if(isRunning()) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("正在运行中，请等本轮结束或中断后再压缩。");
+    }
+    return false;
+  }
+  return startCompactionSummary(true, errorOut);
+}
+
+void AgentRuntime::autoCompactIfNeeded()
+{
+  if(compactionInFlight_ || providers_ == nullptr || !model_.isValid()) {
+    return;
+  }
+  if(messages_.size() < static_cast<qsizetype>(compactionPolicy_.minCompactionMessages)) {
+    return;
+  }
+
+  const int used = contextTokens();
+  const int window = effectiveContextWindow();
+  const int microThreshold = compactionPolicy_.microThresholdTokens(window);
+  const int fullThreshold = compactionPolicy_.fullThresholdTokens(window);
+
+  // 一级：微压缩。它在 buildModelRequest() 里每次请求都会做，这里只是把
+  // "已经进入压缩区"告诉用户一次，免得他们以为界面卡住了。
+  if(used >= microThreshold && !compactionWarned_) {
+    compactionWarned_ = true;
+    emit compactionNotice(QStringLiteral("上下文已用 %1%，旧工具输出将在下发时裁剪。")
+                          .arg(window > 0 ? used * 100 / window : 0));
+  }
+
+  if(used < fullThreshold) {
+    return;
+  }
+
+  qCInfo(log) << "上下文触及全压缩阈值; used=" << used << "threshold=" << fullThreshold;
+  if(!startCompactionSummary(false, nullptr)) {
+    // 起不来（消息太少等）不是错误：这一步本来就用当前上下文发出去，
+    // 由 provider 决定是否超窗。
+    qCDebug(log) << "自动压缩未发起; used=" << used;
+  }
+}
+
+bool AgentRuntime::startCompactionSummary(bool force, QString * errorOut)
+{
+  const FullCompaction plan = buildFullCompaction(messages_, compactionPolicy_);
+  if(!plan.applied) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("没有可压缩的历史（消息太少或都还在保护窗口内）。");
+    }
+    return false;
+  }
+
+  ModelProvider * provider = providers_->resolve(model_);
+  if(provider == nullptr) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("找不到可用的模型。");
+    }
+    return false;
+  }
+
+  ModelRequest request;
+  request.modelId = model_.modelId;
+  request.systemPrompt = buildSummaryPrompt();
+  // 摘要是一次"读多写少"的任务：给足输出预算，但不需要工具。
+  request.maxOutputTokens = 4096;
+  request.temperature = 0.2;   // 要忠实的记录，不要发挥
+  request.tools.clear();
+
+  Message user;
+  user.id = newMessageId();
+  user.sessionId = session_.id;
+  user.role = MessageRole::User;
+  user.status = MessageStatus::Complete;
+  user.modelOnly = true;
+  user.createdAtMs = nowMs();
+  user.updatedAtMs = user.createdAtMs;
+  user.parts.append(Part::makeText(
+                      QStringLiteral("以下是需要压缩的对话历史：\n\n") + plan.transcript));
+  request.messages.append(user);
+
+  ModelStream * stream = provider->stream(request);
+  if(stream == nullptr) {
+    if(errorOut != nullptr) {
+      *errorOut = QStringLiteral("摘要请求创建失败。");
+    }
+    return false;
+  }
+
+  pendingCompaction_ = plan;
+  compactionInFlight_ = true;
+  compactionStream_ = stream;
+
+  auto collected = std::make_shared<QString>();
+  connect(stream, &ModelStream::event, this,
+  [collected](const StreamEvent & event) {
+    if(event.kind == StreamEventKind::TextDelta) {
+      *collected += event.text;
+    }
+  });
+  connect(stream, &ModelStream::finished, this, [this, stream, collected]() {
+    if(compactionStream_ == stream) {
+      compactionStream_ = nullptr;
+    }
+    stream->deleteLater();
+    if(!compactionInFlight_) {
+      return;   // closeSession/换会话已经收口过，别再动当前会话
+    }
+    compactionInFlight_ = false;
+    const QString summary = collected->trimmed();
+    if(summary.isEmpty()) {
+      abortCompactionSummary(QStringLiteral("摘要模型没有返回内容，已跳过本次压缩。"));
+      return;
+    }
+    // 流还活着（调用工具时流会短暂停止，随后同一轮还会再起一次）就先只记录：
+    // 现在替换消息列表会把这一轮正在用的消息换掉。
+    if(activeStream_ != nullptr) {
+      deferredCompactionSummary_ = summary;
+      qCInfo(log) << "摘要已就绪，延后到下一个模型步应用; session=" << session_.id;
+      return;
+    }
+    applyCompactionSummary(summary);
+  });
+
+  if(force) {
+    emit compactionNotice(QStringLiteral("正在压缩上下文（生成摘要）…"));
+  }
+  qCInfo(log) << "已请求上下文压缩摘要; session=" << session_.id
+              << "待归档消息=" << plan.replacedMessageCount
+              << "尾部保留=" << plan.tailMessages.size() << "强制=" << force;
+  return true;
+}
+
+void AgentRuntime::applyCompactionSummary(const QString & summary)
+{
+  const FullCompaction plan = pendingCompaction_;
+  pendingCompaction_ = FullCompaction{};
+  if(!plan.applied) {
+    return;   // 状态已被清理过（换会话），丢弃这次结果
+  }
+
+  // 先归档、后替换内存：归档失败时保持内存不变，宁可这次压缩白跑，
+  // 也不能把用户的历史从活动列表里抹掉却没有任何副本。
+  if(store_ != nullptr && store_->isOpen()) {
+    if(!store_->archiveMessages(plan.headMessages)) {
+      qCWarning(log) << "压缩归档失败，放弃本次压缩:" << store_->lastError();
+      abortCompactionSummary(QStringLiteral("压缩未能完成：历史归档失败。"));
+      return;
+    }
+  }
+
+  const Message summaryMessage =
+    makeCompactionSummaryMessage(session_.id, summary, model_.modelId);
+  const Message markerMessage =
+    makeCompactionMarkerMessage(session_.id, summary, plan.replacedMessageCount);
+
+  QList<Message> rebuilt;
+  rebuilt.reserve(plan.tailMessages.size() + 2);
+  rebuilt.append(summaryMessage);
+  rebuilt.append(plan.tailMessages);
+  // 分隔行放在摘要之后、尾部之前：用户翻到压缩点时会先看到"这里压缩过"，
+  // 然后是摘要（对模型可见、对用户隐藏），再往后是继续的对话。
+  rebuilt.insert(1, markerMessage);
+
+  messages_ = rebuilt;
+  compactionSummary_ = summary;
+  compactionWarned_ = false;
+
+  // 新消息也要落盘，否则重开会话时摘要与分隔行就没了
+  // （而活动历史已经被删掉，等于永久丢失）。
+  persistMessage(summaryMessage);
+  persistMessage(markerMessage);
+  refreshContextUsage();
+  persistSession();
+
+  qCInfo(log) << "上下文压缩完成; 归档=" << plan.replacedMessageCount
+              << "尾部=" << plan.tailMessages.size()
+              << "摘要长度=" << summary.size()
+              << "压缩后估算=" << contextTokens();
+
+  // 整体替换没法用增量信号表达，让界面重建对话流。
+  emit conversationReplaced();
+  emit sessionChanged(session_);
+  emit compactionNotice(QStringLiteral("已压缩上下文：%1 条较早消息已归档为摘要，"
+                                       "当前约 %2 tokens。")
+                        .arg(plan.replacedMessageCount)
+                        .arg(contextTokens()));
+}
+
+void AgentRuntime::abortCompactionSummary(const QString & reason)
+{
+  compactionInFlight_ = false;
+  pendingCompaction_ = FullCompaction{};
+  if(!reason.isEmpty()) {
+    qCWarning(log) << "压缩未完成:" << reason;
+    emit compactionNotice(reason);
+  }
+}
+
 void AgentRuntime::drainBackgroundNotifications()
 {
   if(backgroundTasks_ == nullptr || !backgroundTasks_->hasPendingNotification()) {
@@ -1786,6 +2059,15 @@ void AgentRuntime::completeTurn(TurnResult result, const QString & errorMessage)
   session_.providerId = model_.providerId;
   session_.cumulativeUsage += turnUsage_;
 
+  // 本轮里生成、但为了不打断流式而暂存的摘要在这里补上：turn 已经结束，
+  // 不会再建新的占位消息，替换是安全的。不补的话，一次在 turn 中途生成好的
+  // 压缩就白跑了，上下文要一直涨到下一轮才会收敛。
+  if(!deferredCompactionSummary_.isEmpty() && activeStream_ == nullptr) {
+    const QString summary = deferredCompactionSummary_;
+    deferredCompactionSummary_.clear();
+    applyCompactionSummary(summary);
+  }
+
   refreshContextUsage();
   persistSession();
   emit sessionChanged(session_);
@@ -1906,49 +2188,73 @@ void AgentRuntime::persistSession()
 
 void AgentRuntime::refreshContextUsage()
 {
-  const int used = estimatedInputTokens();
-  // 上下文窗口取自**有效**模型元信息（含用户覆盖）；未知时保守取 128k。
-  // resolve 已经把覆盖应用好了，所以这里不需要再查一次设置。
-  int window = 128000;
-  if(providers_ != nullptr && model_.isValid()) {
-    ModelInfo info;
-    if(providers_->resolve(model_, &info) != nullptr && info.contextWindow > 0) {
-      window = info.contextWindow;
-    }
-  }
+  const int used = contextTokens();
+  const int window = effectiveContextWindow();
+  const int microThreshold = compactionPolicy_.microThresholdTokens(window);
+  const int fullThreshold = compactionPolicy_.fullThresholdTokens(window);
 
   QJsonObject usage;
   usage.insert(QStringLiteral("usedTokens"), used);
   usage.insert(QStringLiteral("maxTokens"), window);
   usage.insert(QStringLiteral("percent"),
                window > 0 ? (static_cast<double>(used) * 100.0 / window) : 0.0);
+  // 两个阈值一并下发：状态栏要画"什么时候会自动压缩"，不能只让引擎自己知道。
+  usage.insert(QStringLiteral("autoCompactThresholdTokens"), microThreshold);
+  usage.insert(QStringLiteral("fullCompactThresholdTokens"), fullThreshold);
+  if(!compactionSummary_.isEmpty()) {
+    usage.insert(QStringLiteral("compacted"), true);
+  }
   session_.contextUsage = usage;
 }
 
-int AgentRuntime::estimatedInputTokens() const
+int AgentRuntime::contextTokens() const
 {
-  int chars = 0;
-  for(const Message & message : messages_) {
-    for(const Part & part : message.parts) {
-      switch(part.kind) {
-        case PartKind::Text:
-          chars += part.text.text.size();
-          break;
-        case PartKind::Reasoning:
-          chars += part.reasoning.text.size();
-          break;
-        case PartKind::Tool:
-          chars += part.tool.output.size();
-          break;
-        default:
-          break;
-      }
+  // 估算走压缩模块的**同一条**路径：消息 + 工具声明 + 系统提示词。
+  // 早先只统计对话正文，工具 schema 与提示词（几千 token 的固定成本）
+  // 完全不计，窗口快满时会低估到压缩根本不触发。
+  return estimateContextTokens(messages_, effectiveToolSpecs(), effectiveSystemPrompt());
+}
+
+QList<ToolSpec> AgentRuntime::effectiveToolSpecs() const
+{
+  if(tools_ == nullptr) {
+    return {};
+  }
+  // 白名单非空时只声明这些工具：子代理的只读 profile 靠它收窄工具面。
+  return toolAllowlist_.isEmpty() ? tools_->specs() : tools_->specsFor(toolAllowlist_);
+}
+
+QString AgentRuntime::effectiveSystemPrompt() const
+{
+  SystemPromptInput promptInput;
+  promptInput.workspace = session_.workspace;
+  promptInput.cwd = session_.workspace.path;
+  promptInput.mode = session_.mode;
+  promptInput.permissionMode = permissionGate()->mode();
+  promptInput.appVersion = QStringLiteral(LYCODE_QT_VERSION);
+  promptInput.tools = effectiveToolSpecs();
+  promptInput.subagentType = subagentType_;
+  // 技能清单每次请求重新生成：用户中途加了 skill 不该要重启应用。
+  if(skills_ != nullptr) {
+    promptInput.skillsSection = skills_->promptSection();
+  }
+  promptInput.subagentDescription = subagentDescription_;
+  return SystemPromptBuilder::build(promptInput);
+}
+
+int AgentRuntime::effectiveContextWindow() const
+{
+  // 优先级：用户手工覆盖 > 模型元信息（已含设置页的按模型覆盖）> 保守默认。
+  if(contextWindowOverride_ > 0) {
+    return contextWindowOverride_;
+  }
+  if(providers_ != nullptr && model_.isValid()) {
+    ModelInfo info;
+    if(providers_->resolve(model_, &info) != nullptr && info.contextWindow > 0) {
+      return info.contextWindow;
     }
   }
-  // 工具 schema 与系统提示词也占预算，但变化不大，这里只统计对话正文，
-  // 并留出固定余量。精确 token 计数需要 provider 的 tokenizer，
-  // 而本地估算只用于压缩阈值判断，不用于计费。
-  return static_cast<int>(static_cast<double>(chars) / kCharsPerToken);
+  return 128000;
 }
 
 Usage AgentRuntime::lastTurnUsage() const

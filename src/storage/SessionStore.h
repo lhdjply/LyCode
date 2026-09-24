@@ -31,6 +31,21 @@ struct SessionSummary {
   QString lastMessagePreview;
 };
 
+/// 一条被上下文压缩归档掉的消息。
+///
+/// 压缩会把早期消息从**活动历史**里移除（否则上下文不会变小），但用户的原始
+/// 记录不该就此消失：归档表保留被移除消息的完整 JSON，供排查与将来的"展开原始
+/// 历史"。表结构刻意与 message 表解耦，归档只增不改，schema 演进互不影响。
+struct ArchivedMessage {
+  Id sessionId;
+  Id messageId;
+  /// 被归档时的完整消息 JSON（Message::toJson 的产物）。
+  QString data;
+  /// 归档原因，目前只有 context_compaction。
+  QString reason;
+  TimestampMs archivedAtMs = 0;
+};
+
 class SessionStore
 {
   public:
@@ -76,6 +91,18 @@ class SessionStore
     QList<Message> loadMessages(const Id & sessionId) const;
     /// 取最近 N 条消息，按时间正序返回。
     QList<Message> loadRecentMessages(const Id & sessionId, int limit) const;
+
+    // ── 上下文压缩归档 ──────────────────────────────────────────────────────
+    /// 把若干条消息从活动历史移入归档表（单事务）。
+    ///
+    /// 与 deleteMessage 的区别是**不丢数据**：消息 JSON 先写进 archived_message，
+    /// 再从 message 表删除（其 parts 由外键级联带走）。压缩必须走这条路径，
+    /// 否则一次压缩就把用户的早期记录永久删掉了。
+    bool archiveMessages(const QList<Message> & messages, const QString & reason = {});
+
+    /// 读取某会话被归档的消息（按归档顺序）。`reason` 为空表示不过滤。
+    QList<ArchivedMessage> loadArchivedMessages(const Id & sessionId,
+                                                const QString & reason = {}) const;
 
     // ── 维护 ────────────────────────────────────────────────────────────────
     /// 删除指定工作区下的全部会话。

@@ -90,6 +90,10 @@ class MainWindow : public QMainWindow
     void onPermissionResolved(const Id & requestId);
     void onTurnFinished(TurnResult result);
     void onFailed(const QString & message);
+    /// 上下文压缩的进展/结果提示（不是错误）。
+    void onCompactionNotice(const QString & message);
+    /// 消息列表被整体替换（压缩）：清空并重建对话流。
+    void onConversationReplaced();
     /// 子代理的会话状态变化：只更新列表，**不切换**当前会话。
     void onSubagentSessionChanged(const lycode::Session & session);
     void onSubagentFinished(const lycode::Id & childSessionId, bool ok);
@@ -101,6 +105,8 @@ class MainWindow : public QMainWindow
     void forgetWorkspaceRecords(const QString & path);
     /// 重新扫描技能目录并注入运行时。
     void rescanSkills();
+    /// 处理以 `/` 开头的斜杠命令（不发给模型）。
+    void handleSlashCommand(const QString & rawText);
 
     // ── 交互 ────────────────────────────────────────────────────────────────
     void onSendRequested();

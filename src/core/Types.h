@@ -211,6 +211,19 @@ enum class TimelineKind {
 QString toToken(TimelineKind kind);
 TimelineKind timelineKindFromToken(const QString & value);
 
+/// 上下文压缩在数据模型里用的稳定标记。
+///
+/// 集中放在 Types.h 而不是压缩模块里：SessionStore（归档原因）、
+/// ContextCompactor（合成消息的 metadata）与 UI（识别压缩行）三处都要用同一个
+/// 字面量，各写一份迟早会漂移。
+namespace compaction
+{
+/// Part::metadata 里的标记：这条 TextPart 是压缩摘要。
+inline constexpr const char * kKind = "context_compaction";
+/// SessionStore 的归档原因。
+inline constexpr const char * kReason = "context_compaction";
+}  // namespace compaction
+
 /// 时间线标记。用于在对话流中插入分隔行（压缩、fork、换模型等）。
 struct TimelinePart {
   TimelineKind kind = TimelineKind::Unknown;
@@ -278,6 +291,13 @@ struct Part {
   SubagentPart subagent;
   TimelinePart timeline;
   StepPart step;
+
+  /// 随 part 一起持久化的附加标记。
+  ///
+  /// 只放"重载时必须还原"的少量结构化信息（例如压缩摘要的 kind/summary），
+  /// 不放展示数据——展示数据各有专门的字段。没有标记时序列化不写出该键，
+  /// 老数据的体积不变。
+  QJsonObject metadata;
 
   static Part makeText(const QString & value);
   /// 附件（图片走这里，见 FilePart::isImage）。

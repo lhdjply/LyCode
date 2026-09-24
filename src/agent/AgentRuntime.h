@@ -33,6 +33,7 @@
 #include <QSet>
 #include <QString>
 
+#include "agent/ContextCompactor.h"
 #include "agent/PermissionGate.h"
 #include "core/Types.h"
 #include "storage/SessionStore.h"
@@ -159,6 +160,40 @@ class AgentRuntime : public QObject, public SubagentHost
       return subagentDepth_ > 0;
     }
 
+    // ── 上下文压缩 ──────────────────────────────────────────────────────────
+    /// 压缩策略（阈值、保护窗口等）。改完需要 remeasureContext() 刷新界面分母。
+    CompactionPolicy compactionPolicy() const
+    {
+      return compactionPolicy_;
+    }
+    void setCompactionPolicy(const CompactionPolicy & policy);
+    /// 手工覆盖上下文窗口（token）。0 = 用模型元信息里的值。
+    void setContextWindowOverride(int tokens);
+    int contextWindowOverride() const
+    {
+      return contextWindowOverride_;
+    }
+    /// 当前生效的上下文窗口（含用户覆盖），未知时 128k。
+    int effectiveContextWindow() const;
+    /// 最近一次全压缩得到的摘要；空表示这段历史没被压缩过。
+    QString compactionSummary() const
+    {
+      return compactionSummary_;
+    }
+
+    /// 手动触发上下文压缩（`/compact`）。
+    ///
+    /// 与自动触发共用同一条路径：先做一次模型摘要，成功后用合成消息替换掉早期
+    /// 历史，并把原始消息归档。**不必等到阈值**——用户显式要求就该照做。
+    /// 返回 false 表示当场就没法压缩（没有会话 / 消息太少 / 已有请求在飞）。
+    bool compactContextNow(QString * errorOut = nullptr);
+
+    /// 是否正在生成压缩摘要（在飞）。
+    bool compactionInFlight() const
+    {
+      return compactionInFlight_;
+    }
+
     /// 把本会话登记为某个父会话的子会话，并落盘。
     void adoptAsChild(const Id & parentSessionId, SessionKind kind, const QString & title);
 
@@ -225,7 +260,11 @@ class AgentRuntime : public QObject, public SubagentHost
       return toolCallCount_;
     }
     /// 估算的上下文 token 用量。
-    int estimatedInputTokens() const;
+    /// 口径 = 消息 + 工具声明 + 系统提示词，与压缩阈值判断用的是同一个值。
+    int estimatedInputTokens() const
+    {
+      return contextTokens();
+    }
 
     /// 最近一次模型调用的用量（找最后一条带用量的 assistant 消息）。
     /// 没有则返回全 0。用于状态栏展示"本轮"的缓存命中情况。
@@ -271,6 +310,12 @@ class AgentRuntime : public QObject, public SubagentHost
     void turnFinished(lycode::TurnResult result);
     /// 面向用户的失败提示（已本地化）。
     void failed(const QString & message);
+    /// 上下文压缩的进展/结果提示（已本地化）。
+    /// 与 failed 分开：压缩失败不是 turn 失败，界面上不该显示成一次错误。
+    void compactionNotice(const QString & message);
+    /// 消息列表被**整体替换**（目前只有上下文压缩会这样做）。
+    /// UI 收到后必须自己重建对话流——增量信号描述不了"删掉一段、插入一段"。
+    void conversationReplaced();
 
   private:
     // ── turn 流程 ───────────────────────────────────────────────────────────
@@ -346,6 +391,23 @@ class AgentRuntime : public QObject, public SubagentHost
     void persistMessage(const Message & message);
     void persistSession();
     void refreshContextUsage();
+
+    // ── 上下文压缩 ──────────────────────────────────────────────────────────
+    /// 本会话当前生效的工具声明（含白名单收窄）。估算与请求都走它，
+    /// 保证"估算的输入"与"真正发出去的输入"是同一份。
+    QList<ToolSpec> effectiveToolSpecs() const;
+    /// 本会话当前生效的系统提示词。
+    QString effectiveSystemPrompt() const;
+    /// 当前下发给模型的输入估算（token）。
+    int contextTokens() const;
+    /// 每个模型步开始前的自动压缩检查。
+    void autoCompactIfNeeded();
+    /// 发起一次摘要请求（异步）。`force` 表示用户显式要求（不看阈值）。
+    bool startCompactionSummary(bool force, QString * errorOut);
+    /// 摘要返回后落地：归档早期消息、用合成消息替换、通知界面。
+    void applyCompactionSummary(const QString & summary);
+    /// 放弃本次压缩（摘要失败/无内容），恢复状态并告知原因。
+    void abortCompactionSummary(const QString & reason);
     /// 中断收尾：取消工具与权限请求，把未终态的 part 标记为已取消。
     void teardownAfterAbort();
 
@@ -397,6 +459,30 @@ class AgentRuntime : public QObject, public SubagentHost
     QSet<Id> ownPendingPermissions_;
     /// 标题生成请求是否在飞。避免首条消息后连开多个请求。
     bool titleGenerationInFlight_ = false;
+
+    // ── 上下文压缩状态 ──────────────────────────────────────────────────────
+    CompactionPolicy compactionPolicy_;
+    /// 用户手工覆盖的上下文窗口（0 = 用模型元信息）。
+    int contextWindowOverride_ = 0;
+    /// 最近一次全压缩的摘要。恢复自合成消息，换会话时随之清空。
+    QString compactionSummary_;
+    /// 摘要请求是否在飞。避免同一步发起两次压缩（那会白花一次模型调用）。
+    bool compactionInFlight_ = false;
+    /// 摘要请求流；需要显式 abort（换会话/中断时）。
+    ModelStream * compactionStream_ = nullptr;
+    /// 已算好、等待摘要返回后落地的压缩方案。
+    FullCompaction pendingCompaction_;
+    /// 摘要已生成、但**还不能立刻应用**时暂存在这里。
+    ///
+    /// 为什么需要暂存：压缩会把消息列表换成"摘要 + 尾部"，而流式中的 assistant
+    /// 占位消息很可能落在被换掉的那一段里（调用工具时流会因工具批次而短暂停止，
+    /// 此时该轮首条 assistant 消息可能还在历史里）。直接替换会让正在流式的
+    /// 消息凭空消失，增量无处可落，turn 永远收不了尾。
+    /// 因此摘要到达时如果本轮的流还活着，就只记录，等下一个模型步开始前
+    /// （那时占位消息还没建）再统一应用。
+    QString deferredCompactionSummary_;
+    /// 是否已经就"接近上限"提醒过用户一次（避免每个模型步都刷同一条提示）。
+    bool compactionWarned_ = false;
 
     /// 子代理身份（非空表示这是子代理运行时）。
     QString subagentType_;

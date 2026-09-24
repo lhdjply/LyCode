@@ -544,6 +544,18 @@ bool SessionStore::ensureSchema()
     // (sequence IS NULL) 是表达式索引，SQLite 3.9+ 支持；EXPLAIN QUERY PLAN
     // 实测会走 idx_message_session_order。
     QStringLiteral(
+    "CREATE TABLE IF NOT EXISTS archived_message ("
+    "message_id TEXT PRIMARY KEY,"
+    "session_id TEXT NOT NULL,"
+    "data TEXT NOT NULL,"
+    "reason TEXT NOT NULL DEFAULT '',"
+    "archived_at_ms INTEGER NOT NULL DEFAULT 0)"),
+    // 归档表刻意**不设外键**：它要活过会话/消息的删除（"我压缩掉的历史去哪了"
+    // 应当在会话还在时始终可查），级联删除反而会让归档跟着消失。
+    QStringLiteral(
+    "CREATE INDEX IF NOT EXISTS idx_archived_message_session ON archived_message("
+    "session_id, archived_at_ms)"),
+    QStringLiteral(
     "CREATE INDEX IF NOT EXISTS idx_message_session_order ON message("
     "session_id, (sequence IS NULL), sequence, created_at_ms)"),
     QStringLiteral(
@@ -1084,6 +1096,141 @@ bool SessionStore::deleteMessage(const Id & messageId)
 
   qCDebug(log) << "deleteMessage id=" << messageId << "耗时" << timer.elapsed() << "ms";
   return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 上下文压缩归档
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool SessionStore::archiveMessages(const QList<Message> & messages, const QString & reason)
+{
+  if(!isOpen()) {
+    lastError_ = QStringLiteral("archiveMessages: 数据库未打开");
+    qCWarning(log) << lastError_;
+    return false;
+  }
+  if(messages.isEmpty()) {
+    return true;   // 无事可做不是错误（压缩可能没有可裁剪的区间）
+  }
+
+  const QString normalizedReason =
+    reason.isEmpty() ? QString::fromLatin1(compaction::kReason) : reason;
+
+  QElapsedTimer timer;
+  timer.start();
+
+  // 单事务：归档写入与活动历史删除必须一起生效。分两次提交的话，
+  // 中途失败就会出现"消息已从历史删掉但没进归档"的永久数据丢失。
+  TransactionGuard transaction(database_);
+  if(!transaction.isActive()) {
+    setError(QStringLiteral("archiveMessages: 无法开启事务"));
+    return false;
+  }
+
+  const QString insertSql = QStringLiteral(
+                              "INSERT INTO archived_message (message_id, session_id, data, reason, "
+                              "archived_at_ms) VALUES (?,?,?,?,?) "
+                              "ON CONFLICT(message_id) DO UPDATE SET "
+                              "data=excluded.data, reason=excluded.reason, "
+                              "archived_at_ms=excluded.archived_at_ms");
+
+  // 逐个处理而不是拼一条多值 INSERT：占位符数量随消息数变化，
+  // 动态拼 SQL 属于本层禁止的形态。压缩不是热路径，逐条足够。
+  QString sessionId;
+  for(const Message & message : messages) {
+    if(message.id.isEmpty() || message.sessionId.isEmpty()) {
+      lastError_ = QStringLiteral("archiveMessages: message.id / message.sessionId 不能为空");
+      qCWarning(log) << lastError_;
+      return false;   // 守卫析构 → rollback
+    }
+    // 一次压缩只可能来自同一个会话；跨会话传进来说明调用方拼错了，
+    // 与其静默按最后一条的会话计数，不如直接失败。
+    if(sessionId.isEmpty()) {
+      sessionId = message.sessionId;
+    }
+    else if(sessionId != message.sessionId) {
+      lastError_ = QStringLiteral("archiveMessages: 不允许跨会话批量归档");
+      qCWarning(log) << lastError_;
+      return false;
+    }
+
+    const QVariantList bindings = {
+      notNullText(message.id),
+      notNullText(message.sessionId),
+      notNullText(QString::fromUtf8(json::toBytes(message.toJson()))),
+      notNullText(normalizedReason),
+      static_cast<qint64>(nowMs()),
+    };
+    QSqlQuery query(database_);
+    if(!runQuery(query, insertSql, bindings, QStringLiteral("archiveMessages/insert"),
+                 &lastError_)) {
+      return false;
+    }
+
+    // part 由 ON DELETE CASCADE 带走。
+    QSqlQuery remove(database_);
+    if(!runQuery(remove, QStringLiteral("DELETE FROM message WHERE id = ?"), {message.id},
+                 QStringLiteral("archiveMessages/delete"), &lastError_)) {
+      return false;
+    }
+  }
+
+  {
+    QSqlQuery query(database_);
+    const QString sql = QStringLiteral(
+                          "UPDATE session SET "
+                          "message_count = (SELECT COUNT(*) FROM message WHERE session_id = ?), "
+                          "updated_at_ms = MAX(COALESCE(updated_at_ms, 0), ?) WHERE id = ?");
+    if(!runQuery(query, sql, {sessionId, static_cast<qint64>(nowMs()), sessionId},
+                 QStringLiteral("archiveMessages/session"), &lastError_)) {
+      return false;
+    }
+  }
+
+  if(!transaction.commit()) {
+    setError(QStringLiteral("archiveMessages: 提交事务失败"));
+    return false;
+  }
+
+  qCInfo(log) << "已归档消息; session=" << sessionId << "条数=" << messages.size()
+              << "原因=" << normalizedReason << "耗时" << timer.elapsed() << "ms";
+  return true;
+}
+
+QList<ArchivedMessage> SessionStore::loadArchivedMessages(const Id & sessionId,
+                                                          const QString & reason) const
+{
+  QList<ArchivedMessage> result;
+  if(!isOpen()) {
+    lastError_ = QStringLiteral("loadArchivedMessages: 数据库未打开");
+    qCWarning(log) << lastError_;
+    return result;
+  }
+
+  QString sql = QStringLiteral("SELECT message_id, session_id, data, reason, archived_at_ms "
+                               "FROM archived_message WHERE session_id = ?");
+  QVariantList bindings = {sessionId};
+  if(!reason.isEmpty()) {
+    sql += QStringLiteral(" AND reason = ?");
+    bindings.append(reason);
+  }
+  sql += QStringLiteral(" ORDER BY archived_at_ms, rowid");
+
+  QSqlQuery query(database_);
+  if(!runQuery(query, sql, bindings, QStringLiteral("loadArchivedMessages"), &lastError_)) {
+    return result;
+  }
+
+  while(query.next()) {
+    ArchivedMessage archived;
+    archived.messageId = query.value(0).toString();
+    archived.sessionId = query.value(1).toString();
+    archived.data = query.value(2).toString();
+    archived.reason = query.value(3).toString();
+    archived.archivedAtMs = query.value(4).toLongLong();
+    result.append(archived);
+  }
+  return result;
 }
 
 QList<Message> SessionStore::loadMessages(const Id & sessionId) const

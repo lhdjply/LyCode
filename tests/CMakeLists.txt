@@ -46,6 +46,7 @@ target_link_libraries(fake_mcp_server PRIVATE Qt6::Core)
 
 lycode_add_test(test_model_catalog)
 lycode_add_test(test_types)
+lycode_add_test(test_context_compactor)
 lycode_add_test(test_permission_gate)
 lycode_add_test(test_markdown)
 lycode_add_test(test_agent_runtime)

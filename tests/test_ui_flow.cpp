@@ -25,6 +25,7 @@
 #include <QFontMetrics>
 #include <QLabel>
 #include <QPlainTextEdit>
+#include <QRegularExpression>
 #include <QIcon>
 #include <QMenu>
 #include <QProcess>
@@ -44,6 +45,7 @@
 #endif
 #include <QMenuBar>
 #include <QProgressBar>
+#include <QStatusBar>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSpinBox>
@@ -114,6 +116,10 @@ class TestUiFlow : public QObject
     void windowUsesTheAppIcon();
     void choiceButtonsFillTheComposer();
     void settingsPickModelsFromTheCatalog();
+    /// 斜杠命令必须被本地处理，不能当成提示词发给模型。
+    void slashCommandNeverReachesTheModel();
+    /// 状态栏要告诉用户"什么时候会自动压缩上下文"。
+    void contextBarShowsCompactionThreshold();
 
   private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -1683,6 +1689,84 @@ void TestUiFlow::settingsPickModelsFromTheCatalog()
   QString error;
   const QList<lycode::model::CatalogProvider> providers = lycode::model::ModelCatalog::load(&error);
   QVERIFY2(!providers.isEmpty(), qPrintable(QStringLiteral("模型目录载入失败: %1").arg(error)));
+}
+
+void TestUiFlow::slashCommandNeverReachesTheModel()
+{
+  MainWindow window;
+  window.resize(1280, 820);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto * composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+  auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+  QVERIFY(composer != nullptr);
+  QVERIFY(sendButton != nullptr);
+
+  const int requestsBefore = gateway_->requestCount();
+
+  // 未知命令：既不该发给模型，也不该静默——必须给出可见提示。
+  composer->setPlainText(QStringLiteral("/notacommand"));
+  sendButton->click();
+  QTest::qWait(200);
+  QCOMPARE(gateway_->requestCount(), requestsBefore);
+  QVERIFY2(window.statusBar()->currentMessage().contains(QStringLiteral("未知命令")),
+           qPrintable(window.statusBar()->currentMessage()));
+
+  // /help：同样不发请求。
+  composer->setPlainText(QStringLiteral("/help"));
+  sendButton->click();
+  QTest::qWait(200);
+  QCOMPARE(gateway_->requestCount(), requestsBefore);
+  QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("/compact")));
+
+  // /compact 在没有会话时给出明确说明，而不是静默吞掉。
+  composer->setPlainText(QStringLiteral("/compact"));
+  sendButton->click();
+  QTest::qWait(200);
+  QCOMPARE(gateway_->requestCount(), requestsBefore);
+  QVERIFY(!window.statusBar()->currentMessage().isEmpty());
+}
+
+void TestUiFlow::contextBarShowsCompactionThreshold()
+{
+  MainWindow window;
+  window.resize(1280, 820);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto * contextLabel = window.findChild<QLabel *>(QStringLiteral("contextLabel"));
+  QVERIFY2(contextLabel != nullptr, "状态栏应当有上下文用量标签");
+
+  // 前面的测试各自建了工作区并写进了共享的 settings.json，本次启动时那个目录
+  // 可能已经随 QTemporaryDir 析构消失了（日志里的"上次的工作区目录已不存在"）。
+  // 没有工作区就不会建会话，状态栏的上下文用量也就没有分母，所以这里显式切到
+  // 一个确定存在的目录，让窗口像真实使用那样建出会话。
+  QTemporaryDir workspace;
+  QVERIFY(workspace.isValid());
+  auto * sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+  QVERIFY(sidebar != nullptr);
+  emit sidebar->workspaceRecentRequested(workspace.path());
+
+  // 初始化时已经算过一次用量（见 setModelRefreshesContextWindow 的同类断言）。
+  QVERIFY2(waitFor([&]() {
+    return contextLabel->text().contains(QStringLiteral("上下文"));
+  }), qPrintable(QStringLiteral("上下文标签为空; 状态栏=%1")
+                 .arg(window.statusBar()->currentMessage())));
+  // 分母与阈值都必须是**具体数字**：只写"上下文"而不给分母等于没告诉用户
+  // 还剩多少余地。具体数字取决于按模型覆盖是否还在（别的测试会重写
+  // settings.json），所以这里断言"三段都在"，不去比对某一个数字。
+  const QString text = contextLabel->text();
+  QVERIFY2(text.contains(QStringLiteral("上下文")), qPrintable(text));
+  QVERIFY2(text.contains(QStringLiteral("/")), qPrintable(text));
+  QVERIFY2(text.contains(QStringLiteral("自动压缩于")), qPrintable(text));
+
+  // 关键：用户必须能看到"什么时候会自动压缩"，不能只看到用量。
+  QVERIFY2(text.contains(QStringLiteral("自动压缩")), qPrintable(text));
+  const QString tooltip = contextLabel->toolTip();
+  QVERIFY2(tooltip.contains(QStringLiteral("裁剪旧工具输出")), qPrintable(tooltip));
+  QVERIFY2(tooltip.contains(QStringLiteral("摘要")), qPrintable(tooltip));
+  QVERIFY2(tooltip.contains(QStringLiteral("/compact")), qPrintable(tooltip));
 }
 
 QTEST_MAIN(TestUiFlow)

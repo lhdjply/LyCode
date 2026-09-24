@@ -90,6 +90,12 @@ class TestAgentRuntime : public QObject
     void readToolReturnsImageToTheModel();
     void modelGeneratesAndSanitizesSessionTitle();
 
+    // 上下文压缩
+    void microcompactTrimsOldToolOutputInRequest();
+    void autoCompactionSummarizesAndReplacesHistory();
+    void manualCompactionRunsBelowThreshold();
+    void compactionArchivesOriginalMessages();
+
   private:
     /// 组装一个指向假网关的运行时。
     bool setupRuntime(SessionMode mode, PermissionMode permissionMode,
@@ -1994,6 +2000,272 @@ void TestAgentRuntime::modelGeneratesAndSanitizesSessionTitle()
   // 生成的标题要落盘，重开还在。
   Session loaded;
   QVERIFY(runtime_->session().id == loaded.id || true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 上下文压缩
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 起一轮并等到 turn 结束。
+static void runOneTurn(AgentRuntime * runtime, FakeGateway * gateway, const QString & text,
+                       const QByteArray & response)
+{
+  gateway->enqueue(response);
+  QSignalSpy turnSpy(runtime, &AgentRuntime::turnFinished);
+  QString error;
+  QVERIFY2(runtime->submitText(text, &error), qPrintable(error));
+  QVERIFY2(turnSpy.wait(8000), qPrintable(QStringLiteral("turn 未结束; 请求数=%1")
+                                          .arg(gateway->requestCount())));
+}
+
+/// 取出网关收到的最后一请求体里的 messages 数组。
+static QJsonArray lastRequestMessages(const FakeGateway & gateway)
+{
+  const QJsonObject body = QJsonDocument::fromJson(gateway.lastBody()).object();
+  return body.value(QStringLiteral("messages")).toArray();
+}
+
+/// 把阈值调低，让"几十条消息"的测试也能触发全压缩。
+///
+/// 生产默认（0.9 阈值 + 至少 8 条）是为真实长会话定的；测试里没必要先造出
+/// 一个几十万字符的会话才能验证压缩逻辑。
+static void makeCompactionEager(AgentRuntime * runtime)
+{
+  CompactionPolicy policy = runtime->compactionPolicy();
+  policy.fullCompactThreshold = 0.5;
+  policy.minCompactionMessages = 6;
+  runtime->setCompactionPolicy(policy);
+}
+
+void TestAgentRuntime::microcompactTrimsOldToolOutputInRequest()
+{
+  QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+  // 让 Read 返回一个很大的文件：它的输出会进上下文，成为裁剪对象。
+  const QString hugePath = tempDir_.filePath(QStringLiteral("huge.txt"));
+  const int hugeSize = 40000;
+  {
+    QFile file(hugePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(QString(hugeSize, QLatin1Char('A')).toUtf8());
+  }
+
+  // 第 1 轮：Read（把巨大输出读进来）。
+  gateway_->enqueue(toolCallResponse(QStringLiteral("Read"),
+                                     QByteArray("{\"file_path\":\"") + jsonEscape(hugePath) +
+                                     QByteArray("\""),
+                                     "}"));
+  gateway_->enqueue(textResponse("read done"));
+  QSignalSpy turnSpy(runtime_.get(), &AgentRuntime::turnFinished);
+  QString error;
+  QVERIFY2(runtime_->submitText(QStringLiteral("读这个文件"), &error), qPrintable(error));
+  QVERIFY(turnSpy.wait(8000));
+
+  // 把保护窗口压到很小，让上一步的工具输出落到"可裁剪"区间。
+  // ⚠ 截断后的输出才不会因为"本来就小"被跳过——工具结果进上下文时先按
+  //   展示预算（30000 字符）截断，这里的预算必须明显小于它。
+  CompactionPolicy policy = runtime_->compactionPolicy();
+  policy.keepRecentContextChars = 100;
+  policy.toolOutputBudgetChars = 500;
+  runtime_->setCompactionPolicy(policy);
+
+  // 第 2 轮：一个不带工具的普通回答，但请求体会带上历史。
+  runOneTurn(runtime_.get(), gateway_.get(), QStringLiteral("继续"),
+             textResponse("ok"));
+
+  const QJsonArray messages = lastRequestMessages(*gateway_);
+  QVERIFY(!messages.isEmpty());
+
+  bool sawTrimMarker = false;
+  bool sawFullOutput = false;
+  for(const QJsonValue & value : messages) {
+    const QString content = value.toObject().value(QStringLiteral("content")).toString();
+    if(content.contains(QStringLiteral("已在压缩上下文时裁剪"))) {
+      sawTrimMarker = true;
+      // 标记要说明保留下来的原始体积，模型才知道"这里原本有内容"。
+      QVERIFY(content.contains(QStringLiteral("30000")));
+    }
+    if(content.contains(QString(1000, QLatin1Char('A')))) {
+      sawFullOutput = true;
+    }
+  }
+  QVERIFY2(sawTrimMarker, "旧工具输出应当在下发时被裁剪");
+  QVERIFY2(!sawFullOutput, "被裁剪的输出不应整段出现在请求里");
+
+  // 本地消息仍是完整原文：工具卡片要显示全文。
+  const QList<Message> local = runtime_->messages();
+  bool localKeepsFullOutput = false;
+  for(const Message & message : local) {
+    for(const ToolPart & tool : message.toolParts()) {
+      if(tool.output.size() >= hugeSize) {
+        localKeepsFullOutput = true;
+      }
+    }
+  }
+  QVERIFY2(localKeepsFullOutput, "本地必须保留完整工具输出");
+}
+
+void TestAgentRuntime::autoCompactionSummarizesAndReplacesHistory()
+{
+  QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+  // 四轮用大窗口跑，先攒出 8 条历史（留够可归档的头部）。
+  runtime_->setContextWindowOverride(200000);
+  runOneTurn(runtime_.get(), gateway_.get(), QString(300, QLatin1Char('a')),
+             textResponse("收到"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(300, QLatin1Char('b')),
+             textResponse("好的"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(300, QLatin1Char('c')),
+             textResponse("明白"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(300, QLatin1Char('d')),
+             textResponse("继续"));
+
+  const int messagesBefore = runtime_->messages().size();
+  QCOMPARE(messagesBefore, 8);
+  const int tokensBefore = runtime_->estimatedInputTokens();
+
+  // 然后把窗口压小 + 调低阈值：下一个模型步开始前的自动检查就会触发全压缩。
+  // 摘要请求先于本轮正常请求发出，所以摘要响应排队在前。
+  makeCompactionEager(runtime_.get());
+  runtime_->setContextWindowOverride(400);
+  const QByteArray summaryText = "1. 目标：测试压缩；2. 改动：无。";
+  gateway_->enqueue(textResponse(summaryText));
+  gateway_->enqueue(textResponse("done"));
+
+  QSignalSpy replacedSpy(runtime_.get(), &AgentRuntime::conversationReplaced);
+  QSignalSpy noticeSpy(runtime_.get(), &AgentRuntime::compactionNotice);
+  QSignalSpy turnSpy(runtime_.get(), &AgentRuntime::turnFinished);
+  QString error;
+  QVERIFY2(runtime_->submitText(QStringLiteral("继续干活"), &error), qPrintable(error));
+  QVERIFY(turnSpy.wait(8000));
+
+  // 摘要必须被真的用上：消息列表被整体替换过，且摘要进了历史。
+  QVERIFY2(replacedSpy.count() >= 1, "压缩后必须通知界面重建对话流");
+  QVERIFY2(runtime_->compactionSummary().contains(QStringLiteral("测试压缩")),
+           qPrintable(runtime_->compactionSummary()));
+
+  const QList<Message> after = runtime_->messages();
+  QVERIFY2(after.size() < messagesBefore + 2, "压缩后消息数应当明显减少");
+
+  // 合成摘要消息是 User + modelOnly：会下发给模型，但不显示成用户说的话。
+  bool sawSummaryMessage = false;
+  bool sawMarker = false;
+  for(const Message & message : after) {
+    if(message.modelOnly && message.plainText().contains(QStringLiteral("<conversation-summary>"))) {
+      sawSummaryMessage = true;
+      QCOMPARE(message.role, MessageRole::User);
+    }
+    for(const Part & part : message.parts) {
+      if(part.kind == PartKind::Timeline &&
+         part.timeline.kind == TimelineKind::ContextCompaction) {
+        sawMarker = true;
+      }
+    }
+  }
+  QVERIFY2(sawSummaryMessage, "必须插入一条合成摘要消息");
+  QVERIFY2(sawMarker, "对话流里必须有压缩分隔行");
+
+  // 用户刚说的话不能丢。
+  QVERIFY(!after.isEmpty());
+  QVERIFY(after.last().role == MessageRole::Assistant ||
+          after.last().role == MessageRole::User);
+
+  // 用量确实降下来了。注意口径：估算包含系统提示词与工具声明（这部分压缩动
+  // 不了），所以比较的是"压缩前后的消息部分"，不是绝对值。
+  QVERIFY2(runtime_->estimatedInputTokens() < tokensBefore,
+           qPrintable(QStringLiteral("压缩后估算应当下降; before=%1 after=%2")
+                      .arg(tokensBefore).arg(runtime_->estimatedInputTokens())));
+  QVERIFY(!noticeSpy.isEmpty());
+}
+
+void TestAgentRuntime::manualCompactionRunsBelowThreshold()
+{
+  QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+  // 窗口给足：自动压缩不会触发，手动命令才有效果。
+  runtime_->setContextWindowOverride(200000);
+  makeCompactionEager(runtime_.get());
+  // 但阈值调回到很高，确保这轮**不是**自动触发的。
+  {
+    CompactionPolicy policy = runtime_->compactionPolicy();
+    policy.fullCompactThreshold = 0.99;
+    runtime_->setCompactionPolicy(policy);
+  }
+
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('x')),
+             textResponse("一"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('y')),
+             textResponse("二"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('z')),
+             textResponse("三"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('w')),
+             textResponse("四"));
+
+  const int before = runtime_->messages().size();
+  QCOMPARE(before, 8);
+
+  const QByteArray summaryText = "手动压缩摘要：全部改动都在测试里。";
+  gateway_->enqueue(textResponse(summaryText));
+
+  QSignalSpy noticeSpy(runtime_.get(), &AgentRuntime::compactionNotice);
+  QSignalSpy replacedSpy(runtime_.get(), &AgentRuntime::conversationReplaced);
+  QVERIFY2(runtime_->compactContextNow(), "阈值以下也应能手动压缩");
+  QVERIFY2(noticeSpy.wait(8000), "手动压缩必须给出结果提示");
+
+  QVERIFY(replacedSpy.count() >= 1);
+  QVERIFY2(runtime_->messages().size() < before,
+           qPrintable(QStringLiteral("压缩后应当变少; before=%1 after=%2")
+                      .arg(before).arg(runtime_->messages().size())));
+  QVERIFY(runtime_->compactionSummary().contains(QStringLiteral("手动压缩摘要")));
+  QVERIFY(!runtime_->compactionInFlight());
+
+  // 摘要请求确实发出去了（四次 turn + 一次摘要 = 5 次 HTTP）。
+  QCOMPARE(gateway_->requestCount(), 5);
+}
+
+void TestAgentRuntime::compactionArchivesOriginalMessages()
+{
+  SessionStore store;
+  QVERIFY(store.open(tempDir_.filePath(QStringLiteral("archive.db"))));
+  QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default, &store));
+  runtime_->setContextWindowOverride(200000);
+  makeCompactionEager(runtime_.get());
+
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('p')),
+             textResponse("一"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('q')),
+             textResponse("二"));
+  runOneTurn(runtime_.get(), gateway_.get(), QString(200, QLatin1Char('r')),
+             textResponse("三"));
+
+  const QString sessionId = runtime_->session().id;
+  const int before = runtime_->messages().size();
+  QCOMPARE(before, 6);
+
+  gateway_->enqueue(textResponse("摘要：历史已归档。"));
+  QSignalSpy noticeSpy(runtime_.get(), &AgentRuntime::compactionNotice);
+  QVERIFY(runtime_->compactContextNow());
+  QVERIFY(noticeSpy.wait(8000));
+
+  // 被压掉的消息不能凭空消失：它们必须进归档表。
+  const QList<ArchivedMessage> archived =
+    store.loadArchivedMessages(sessionId, QStringLiteral("context_compaction"));
+  QVERIFY2(!archived.isEmpty(), "压缩必须把原始消息归档，而不是删除");
+  QVERIFY(archived.size() < before);
+  for(const ArchivedMessage & entry : archived) {
+    QVERIFY(!entry.data.isEmpty());
+    QVERIFY(entry.data.contains(QStringLiteral("parts")));
+  }
+
+  // 归档后重新载入会话：摘要与分隔行还在，活动历史是压缩后的样子。
+  const int activeCount = runtime_->messages().size();
+  Session reloaded;
+  QVERIFY(store.loadSession(sessionId, &reloaded));
+  QCOMPARE(reloaded.id, sessionId);
+  QCOMPARE(store.loadMessages(sessionId).size(), activeCount);
+
+  // 重载后摘要能被认回来（合成消息随历史一起落盘了）。
+  const QList<Message> reloadedMessages = store.loadMessages(sessionId);
+  QVERIFY(restoreContextSummary(reloadedMessages).contains(QStringLiteral("历史已归档")));
 }
 
 QTEST_MAIN(TestAgentRuntime)

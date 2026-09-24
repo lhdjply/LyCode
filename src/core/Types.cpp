@@ -675,6 +675,11 @@ QJsonObject Part::toJson() const
         break;
       }
   }
+
+  // 只在非空时写出：老数据的形状与体积保持不变（见 Types.h 的字段说明）。
+  if(!metadata.isEmpty()) {
+    result.insert(QStringLiteral("metadata"), metadata);
+  }
   return result;
 }
 
@@ -789,6 +794,7 @@ Part Part::fromJson(const QJsonObject & value)
         break;
       }
   }
+  part.metadata = json::object(value, QStringLiteral("metadata"));
   return part;
 }
 

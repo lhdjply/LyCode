@@ -98,6 +98,10 @@ QString compactTokens(int value)
   return QString::number(value);
 }
 
+/// 状态栏的上下文文案：分母 + 自动压缩阈值。
+///
+/// 阈值必须显示出来：用户看到进度条涨到某个位置时会自动压缩，不该靠猜。
+/// 分母未知（新会话、模型没配好）时退回只显示"上下文"。
 QString contextUsageText(const QJsonObject & usage)
 {
   const int used = json::integer(usage, QStringLiteral("usedTokens"));
@@ -105,7 +109,38 @@ QString contextUsageText(const QJsonObject & usage)
   if(max <= 0) {
     return {};
   }
+  const int threshold = json::integer(usage, QStringLiteral("autoCompactThresholdTokens"));
+  if(threshold > 0) {
+    return QStringLiteral("上下文 %1 / %2 · 自动压缩于 %3")
+           .arg(compactTokens(used), compactTokens(max), compactTokens(threshold));
+  }
   return QStringLiteral("上下文 %1 / %2").arg(compactTokens(used), compactTokens(max));
+}
+
+/// 上下文进度的悬浮说明：把两个阈值与"当前做过压缩"讲清楚。
+QString contextTooltipText(const QJsonObject & usage)
+{
+  const int used = json::integer(usage, QStringLiteral("usedTokens"));
+  const int max = json::integer(usage, QStringLiteral("maxTokens"));
+  if(max <= 0) {
+    return {};
+  }
+  const int micro = json::integer(usage, QStringLiteral("autoCompactThresholdTokens"));
+  const int full = json::integer(usage, QStringLiteral("fullCompactThresholdTokens"));
+
+  QStringList lines;
+  lines.append(QStringLiteral("已用 %1 / %2 tokens").arg(used).arg(max));
+  if(micro > 0) {
+    lines.append(QStringLiteral("· 达到 %1 起：下发时裁剪旧工具输出（不调模型）").arg(micro));
+  }
+  if(full > 0) {
+    lines.append(QStringLiteral("· 达到 %1 起：调用模型生成摘要，替换较早的历史").arg(full));
+  }
+  if(json::boolean(usage, QStringLiteral("compacted"))) {
+    lines.append(QStringLiteral("· 本会话已经压缩过上下文，原始消息保存在归档里"));
+  }
+  lines.append(QStringLiteral("输入 /compact 可立即压缩。"));
+  return lines.join(QLatin1Char('\n'));
 }
 
 /// 用量明细文案。字段口径见 Usage 的注释：
@@ -360,7 +395,8 @@ void MainWindow::buildUi()
   composer_ = new QPlainTextEdit;
   composer_->setObjectName(QStringLiteral("composer"));
   composer_->setPlaceholderText(
-    QStringLiteral("描述你想完成的任务…（Enter 发送，Shift+Enter 换行，可粘贴图片）"));
+    QStringLiteral("描述你想完成的任务…（Enter 发送，Shift+Enter 换行，可粘贴图片）\n"
+                   "输入 /compact 压缩上下文，/help 查看命令"));
   composer_->setFixedHeight(96);
   composer_->installEventFilter(this);
   // 拖入图片文件即可附加。
@@ -581,6 +617,11 @@ void MainWindow::wireRuntime()
           &MainWindow::onPermissionResolved);
   connect(&runtime_, &AgentRuntime::turnFinished, this, &MainWindow::onTurnFinished);
   connect(&runtime_, &AgentRuntime::failed, this, &MainWindow::onFailed);
+  // 压缩提示刻意不复用 onFailed：压缩失败不属于 turn 失败，
+  // 显示成错误会让用户以为这轮对话出问题了。
+  connect(&runtime_, &AgentRuntime::compactionNotice, this, &MainWindow::onCompactionNotice);
+  connect(&runtime_, &AgentRuntime::conversationReplaced, this,
+          &MainWindow::onConversationReplaced);
   connect(&runtime_, &AgentRuntime::subagentSessionChanged, this,
           &MainWindow::onSubagentSessionChanged);
   connect(&runtime_, &AgentRuntime::subagentFinished, this,
@@ -832,6 +873,8 @@ void MainWindow::refreshContextUsage()
 
   contextBar_->setValue(qBound(0, percent, 100));
   contextLabel_->setText(contextUsageText(usage));
+  contextLabel_->setToolTip(contextTooltipText(usage));
+  contextBar_->setToolTip(contextLabel_->toolTip());
 
   const Palette & palette = Theme::instance().palette();
   QColor chunk = palette.brand;
@@ -1436,6 +1479,24 @@ void MainWindow::onFailed(const QString & message)
   qCWarning(log) << "运行时失败:" << message;
 }
 
+void MainWindow::onCompactionNotice(const QString & message)
+{
+  setStatusMessage(message);
+  qCInfo(log) << "上下文压缩:" << message;
+}
+
+void MainWindow::onConversationReplaced()
+{
+  // 压缩把一段历史换成了"摘要 + 分隔行"，这种删一段插一段的变化没法用
+  // 增量信号表达（partAppended 只能追加）。整条对话流重建是最省事也最不会
+  // 出错的做法：消息数量级是几十条，重建代价可以忽略。
+  conversation_->clear();
+  for(const Message & message : runtime_.messages()) {
+    conversation_->addMessage(message);
+  }
+  qCDebug(log) << "对话流已按压缩后的消息列表重建; 消息数=" << runtime_.messages().size();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 权限
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1671,8 +1732,52 @@ void MainWindow::refreshChoices()
   qCDebug(log) << "已显示选项按钮; 数量=" << choices.size();
 }
 
+void MainWindow::handleSlashCommand(const QString & rawText)
+{
+  const QString firstLine = rawText.section(QLatin1Char('\n'), 0, 0).trimmed();
+  const QString verb = firstLine.section(QLatin1Char(' '), 0, 0).toLower();
+
+  if(verb == QStringLiteral("/compact")) {
+    if(!runtime_.hasSession()) {
+      setStatusMessage(QStringLiteral("还没有会话，无法压缩上下文。"));
+      return;
+    }
+    // 用户敲下命令就意味着"立刻做"：不看阈值，也不等下一个模型步。
+    QString error;
+    if(!runtime_.compactContextNow(&error)) {
+      setStatusMessage(error);
+      return;
+    }
+    // 命令本身不该留在输入框里：压缩成功后输入框该是干净的，可以直接继续提问。
+    composer_->clear();
+    pendingAttachments_.clear();
+    refreshAttachmentStrip();
+    setStatusMessage(QStringLiteral("正在压缩上下文…"));
+    return;
+  }
+
+  if(verb == QStringLiteral("/help")) {
+    composer_->clear();
+    setStatusMessage(QStringLiteral("命令：/compact 压缩上下文，/help 查看这条说明。"));
+    return;
+  }
+
+  // 未知命令：**不发给模型**。把它当普通文本发出去只会浪费一次调用，
+  // 而且用户会以为自己敲的命令生效了。
+  setStatusMessage(QStringLiteral("未知命令：%1（可用 /compact、/help）").arg(verb));
+}
+
 void MainWindow::onSendRequested()
 {
+  // 斜杠命令先处理：它们不该被当作提示词发给模型，也不该等 MCP 握手。
+  {
+    const QString command = composer_->toPlainText().trimmed();
+    if(command.startsWith(QLatin1Char('/'))) {
+      handleSlashCommand(command);
+      return;
+    }
+  }
+
   // MCP 服务器还在握手时先等它就绪再发第一次请求。
   //
   // 为什么值得等：工具声明是**每次请求重新构建**的，所以第一次请求如果赶在
