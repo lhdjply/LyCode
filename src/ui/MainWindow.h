@@ -33,6 +33,7 @@ class QHBoxLayout;
 #include "tools/Tool.h"
 #include "ui/AppConfig.h"
 
+class QActionGroup;
 class QComboBox;
 class QLabel;
 class QPlainTextEdit;
@@ -129,6 +130,8 @@ class MainWindow : public QMainWindow
     void buildMenus();
     void wireRuntime();
     void applyTheme();
+    /// 把 settings_.themeMode 同步到「视图 → 主题」那三个互斥勾选项上。
+    void syncThemeMenuChecks();
     void applySettingsToUi();
     void loadWorkspaceSessions();
     void refreshModelCombo();
@@ -162,6 +165,11 @@ class MainWindow : public QMainWindow
     /// 等待展示的权限请求队列。UI 一次只展示一个，避免弹窗风暴。
     QList<PermissionRequest> permissionQueue_;
     QHash<Id, PermissionRequest> permissionRequests_;
+
+    // ── 菜单 ────────────────────────────────────────────────────────────────
+    /// 「视图 → 主题」的互斥组。必须留成员：设置对话框里改了主题后要同步勾选，
+    /// 否则菜单仍显示旧主题选中，与实际配色矛盾（用户报的就是这个）。
+    QActionGroup * themeGroup_ = nullptr;
 
     // ── 控件 ────────────────────────────────────────────────────────────────
     QSplitter * splitter_ = nullptr;

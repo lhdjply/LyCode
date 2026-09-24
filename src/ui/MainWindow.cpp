@@ -572,8 +572,8 @@ void MainWindow::buildMenus()
   QMenu * viewMenu = menuBar()->addMenu(QCoreApplication::translate("ui::MainWindow", "View"));
 
   // 主题切换做成互斥项，当前项打勾，避免用户不知道现在是哪一档。
-  auto * themeGroup = new QActionGroup(this);
-  themeGroup->setExclusive(true);
+  themeGroup_ = new QActionGroup(this);
+  themeGroup_->setExclusive(true);
   struct ThemeEntry {
     const char * label;
     ThemeMode mode;
@@ -585,8 +585,12 @@ void MainWindow::buildMenus()
       }) {
     QAction * action = viewMenu->addAction(QString::fromUtf8(entry.label));
     action->setCheckable(true);
+    // data 存档位、objectName 用档位 token：前者供 syncThemeMenuChecks() 定位，
+    // 后者让界面测试能直接找到这一项，而不必按文案（文案会随语言变）去猜。
+    action->setData(static_cast<int>(entry.mode));
+    action->setObjectName(QStringLiteral("themeAction_") + toToken(entry.mode));
     action->setChecked(settings_.themeMode == entry.mode);
-    themeGroup->addAction(action);
+    themeGroup_->addAction(action);
     const ThemeMode mode = entry.mode;
     connect(action, &QAction::triggered, this, [this, mode]() {
       settings_.themeMode = mode;
@@ -727,6 +731,27 @@ void MainWindow::applyTheme()
     QStringLiteral("QProgressBar { background-color: %1; border: none; border-radius: 3px; }"
                    "QProgressBar::chunk { background-color: %2; border-radius: 3px; }")
     .arg(Theme::css(palette.surface), Theme::css(palette.brand)));
+
+  // 主题的入口有两个（视图菜单、设置对话框），但状态只有 settings_.themeMode
+  // 一处。这里统一收口：只要主题重新应用，菜单勾选就跟着 settings_ 对齐，
+  // 从设置里改主题后菜单不会还停在旧档位上。
+  syncThemeMenuChecks();
+}
+
+void MainWindow::syncThemeMenuChecks()
+{
+  if(themeGroup_ == nullptr) {
+    return;   // buildMenus() 之前被调用（构造早期的 applyTheme）时无菜单可同步
+  }
+  const int wanted = static_cast<int>(settings_.themeMode);
+  for(QAction * action : themeGroup_->actions()) {
+    if(action->data().toInt() == wanted) {
+      // 互斥组会把其余项自动取消勾选；已是目标项时 setChecked(true) 无副作用。
+      action->setChecked(true);
+      continue;
+    }
+    action->setChecked(false);
+  }
 }
 
 void MainWindow::applySettingsToUi()

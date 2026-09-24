@@ -16,6 +16,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QDialog>
 #include <QGroupBox>
 #include <QDir>
 #include <QFile>
@@ -118,6 +119,8 @@ class TestUiFlow : public QObject
     void windowUsesTheAppIcon();
     void choiceButtonsFillTheComposer();
     void settingsPickModelsFromTheCatalog();
+    /// 在设置里切换主题后，「视图 → 主题」的勾选必须跟着变。
+    void themeMenuCheckFollowsSettingsDialog();
     /// 斜杠命令必须被本地处理，不能当成提示词发给模型。
     void slashCommandNeverReachesTheModel();
     /// 状态栏要告诉用户"什么时候会自动压缩上下文"。
@@ -1702,6 +1705,57 @@ void TestUiFlow::settingsPickModelsFromTheCatalog()
   QString error;
   const QList<lycode::model::CatalogProvider> providers = lycode::model::ModelCatalog::load(&error);
   QVERIFY2(!providers.isEmpty(), qPrintable(QStringLiteral("模型目录载入失败: %1").arg(error)));
+}
+
+void TestUiFlow::themeMenuCheckFollowsSettingsDialog()
+{
+  // 用户诉求："在设置中切换主题颜色后，菜单栏的选项没有更新"。
+  //
+  // 主题有两个入口：视图菜单里那三个互斥勾选项，和设置对话框里的下拉框。
+  // 状态只有 settings_.themeMode 一处，所以从设置里改完，菜单的勾选必须同步，
+  // 否则菜单还显示旧主题被选中——用户会以为设置没生效。
+  MainWindow window;
+  window.show();
+  QVERIFY(waitFor([&]() {
+    return window.isVisible();
+  }, 5000));
+
+  auto * darkAction = window.findChild<QAction *>(QStringLiteral("themeAction_dark"));
+  auto * lightAction = window.findChild<QAction *>(QStringLiteral("themeAction_light"));
+  QVERIFY2(darkAction != nullptr, "视图菜单里应当能找到「深色」主题项");
+  QVERIFY2(lightAction != nullptr, "视图菜单里应当能找到「浅色」主题项");
+
+  // 测试配置里 themeMode 写的是 dark，所以起点必须是深色打勾。
+  QVERIFY2(darkAction->isChecked(), "初始主题为深色时，菜单里的深色项应当打勾");
+  QVERIFY2(!lightAction->isChecked(), "深色生效时，浅色项不该打勾");
+
+  auto * settingsAction = window.findChild<QAction *>(QStringLiteral("settingsAction"));
+  QVERIFY(settingsAction != nullptr);
+
+  // 与 settingsPickModelsFromTheCatalog() 同样的理由：设置对话框是 exec() 模态，
+  // trigger() 会一直阻塞到对话框关掉，所以交互必须在 singleShot 回调里做。
+  bool switched = false;
+  QTimer::singleShot(300, [&]() {
+    auto * modal = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+    if(modal == nullptr) {
+      return;
+    }
+    auto * themeCombo = modal->findChild<QComboBox *>(QStringLiteral("themeModeCombo"));
+    if(themeCombo != nullptr) {
+      const int index = themeCombo->findData(static_cast<int>(ThemeMode::Light));
+      if(index >= 0) {
+        themeCombo->setCurrentIndex(index);   // 与用户操作一致：改下拉即实时预览
+        switched = true;
+      }
+    }
+    modal->accept();
+  });
+
+  settingsAction->trigger();   // 阻塞，直到上面的 lambda 关掉对话框
+
+  QVERIFY2(switched, "设置对话框里应当能把主题切到浅色");
+  QVERIFY2(lightAction->isChecked(), "在设置里切成浅色后，菜单里的浅色项必须打勾");
+  QVERIFY2(!darkAction->isChecked(), "在设置里切成浅色后，菜单里的深色项必须取消勾选");
 }
 
 void TestUiFlow::slashCommandNeverReachesTheModel()
