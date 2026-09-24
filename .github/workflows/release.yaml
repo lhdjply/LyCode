@@ -214,12 +214,10 @@ jobs:
         # runner 镜像不再自带 Inno Setup（2025-09 起移除），且 ChineseSimplified.isl
         # 要求 6.5.0+，所以这里自行探测并保证版本。
         #
-        # 只查 PATH 和固定路径不够：预装的 Inno 没有 choco 的 shim（Install-BinFile
-        # 只在走 choco 包脚本时装），Get-Command 找不到。所以按注册表 → PATH → 有界搜索。
-        function Find-Iscc {
-          $found = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
-          if ($found) { return $found }
-
+        # 版本必须从**注册表**读：ISCC.exe 是 GUI 子系统程序，`ISCC /?` 不写 stdout，
+        # 用 `& $iscc /?` 捕获输出只会拿到空串。注册表的 DisplayVersion 才是可靠的
+        # 版本来源（choco 包自己也靠 Get-UninstallRegistryKey 'Inno Setup*' 定位）。
+        function Find-IsccInstall {
           $roots = @(
             'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
             'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
@@ -230,35 +228,53 @@ jobs:
             foreach ($entry in $entries) {
               if ($entry.InstallLocation) {
                 $candidate = Join-Path $entry.InstallLocation 'ISCC.exe'
-                if (Test-Path $candidate) { return $candidate }
+                if (Test-Path $candidate) {
+                  # DisplayVersion 不保证是干净的 x.y.z，转 [version] 要防抛异常。
+                  $parsed = $null
+                  if ($entry.DisplayVersion) {
+                    [void] [version]::TryParse($entry.DisplayVersion, [ref] $parsed)
+                  }
+                  return [pscustomobject]@{ Path = $candidate; Version = $parsed }
+                }
               }
             }
-          }
-
-          foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
-            if (-not $base -or -not (Test-Path $base)) { continue }
-            $hit = Get-ChildItem -Path $base -Filter 'ISCC.exe' -Recurse -Depth 3 `
-                                 -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($hit) { return $hit.FullName }
           }
           return $null
         }
 
-        function Get-IsccVersion([string] $path) {
-          if (-not $path -or -not (Test-Path $path)) { return $null }
-          $text = (& $path /? 2>&1 | Out-String)
-          if($text -match '(\d+)\.(\d+)\.(\d+)') {
-            return [version] "$($Matches[1]).$($Matches[2]).$($Matches[3])"
+        # 兜底：按路径找 ISCC.exe，并尝试从 exe 的文件版本读版本号。
+        function Find-IsccByPath {
+          $candidates = @()
+          $onPath = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
+          if ($onPath) { $candidates += $onPath }
+          if ($env:ChocolateyInstall) { $candidates += "$env:ChocolateyInstall\bin\ISCC.exe" }
+          foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+            if (-not $base -or -not (Test-Path $base)) { continue }
+            $hit = Get-ChildItem -Path $base -Filter 'ISCC.exe' -Recurse -Depth 3 `
+                                 -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) { $candidates += $hit.FullName }
+          }
+          foreach ($candidate in $candidates) {
+            if (-not (Test-Path $candidate)) { continue }
+            $fileVersion = $null
+            try {
+              $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($candidate)
+              if ($info.FileVersion) {
+                $parsed = $null
+                if ([version]::TryParse($info.FileVersion, [ref] $parsed)) { $fileVersion = $parsed }
+              }
+            } catch { }
+            return [pscustomobject]@{ Path = $candidate; Version = $fileVersion }
           }
           return $null
         }
 
         $minVersion = [version] '6.5.0'
-        $iscc = Find-Iscc
-        $current = Get-IsccVersion $iscc
-        Write-Host "ISCC 探测结果：$(if($iscc){$iscc}else{'未找到'})，版本 $(if($current){$current}else{'未知'})"
+        $found = Find-IsccInstall
+        if (-not $found) { $found = Find-IsccByPath }
+        Write-Host "ISCC 探测结果：$(if($found){$found.Path}else{'未找到'})，版本 $(if($found -and $found.Version){$found.Version}else{'未知'})"
 
-        if (-not $current -or $current -lt $minVersion) {
+        if (-not $found -or -not $found.Version -or $found.Version -lt $minVersion) {
           Write-Host "安装/升级 Inno Setup 6…"
           # 已装但版本过低时 choco 会拒绝重装，所以要 --force。
           choco install innosetup -y --no-progress --force
@@ -266,19 +282,21 @@ jobs:
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1641 -and $LASTEXITCODE -ne 3010) {
             throw "choco install innosetup 失败，退出码 $LASTEXITCODE"
           }
-          $iscc = Find-Iscc
-          $current = Get-IsccVersion $iscc
+          # 优先用注册表（choco 装完必然写 DisplayVersion）；读不到就用文件版本兜底。
+          $found = Find-IsccInstall
+          if (-not $found) { $found = Find-IsccByPath }
         }
 
-        if (-not $iscc) {
-          throw "找不到 ISCC.exe（PATH、注册表、Program Files 都没找到）。"
+        if (-not $found) {
+          throw "找不到 ISCC.exe（注册表、PATH、Program Files 都没找到）。"
         }
-        if (-not $current -or $current -lt $minVersion) {
-          throw "ISCC 版本 $(if($current){$current}else{'未知'}) 低于要求的 $minVersion（ChineseSimplified.isl 需要 6.5.0+）。"
+        # 版本仍然未知时**不阻断**：ISCC 能跑就行，版本检查只是拦"明确过低"的情况。
+        if ($found.Version -and $found.Version -lt $minVersion) {
+          throw "ISCC 版本 $($found.Version) 低于要求的 $minVersion（ChineseSimplified.isl 需要 6.5.0+）。"
         }
-        Write-Host "使用 ISCC：$iscc（版本 $current）"
+        Write-Host "使用 ISCC：$($found.Path)，版本 $(if($found.Version){$found.Version}else{'未知'})"
 
-        & $iscc "/DMyAppVersion=$ver" `
+        & $found.Path "/DMyAppVersion=$ver" `
                 "/DMyArch=${{ matrix.config.arch }}" `
                 "/DMyArchAllowed=${{ matrix.config.arch_allowed }}" `
                 "/DMySourceDir=$src" `
