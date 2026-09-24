@@ -37,6 +37,16 @@ class ProviderRegistry : public QObject
     /// 返回 nullptr 表示选择无效（provider 不存在或未配置）。
     ModelProvider * resolve(const ModelSelection & selection, ModelInfo * infoOut = nullptr) const;
 
+    /// 这个选择现在还能不能用（能不能真的发出去）。
+    ///
+    /// 与 resolve() 的区别：**还会检查模型是否仍在该 provider 的模型列表里**。
+    /// 持久化下来的模型选择（settings 的 lastModel / workspaceLastModel）会随
+    /// 用户编辑 Provider 而过期：删掉一个 Provider 重建后，旧 id 就成了悬空引用。
+    /// 那时 resolve() 仍然返回 nullptr（provider 不存在），但若只是模型名被改，
+    /// resolve() 会照样成功——而它发出去的请求会被服务端拒掉。
+    /// 判定"要不要回退到别的模型"必须用这个更严的口径。
+    bool isUsable(const ModelSelection & selection) const;
+
     QStringList providerIds() const;
     QList<ProviderConfig> configurations() const;
 

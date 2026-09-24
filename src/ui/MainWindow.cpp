@@ -713,7 +713,17 @@ void MainWindow::applySettingsToUi()
   // 顺序很重要：currentModel_ 必须先定下来。refreshModelCombo() 内部会调用
   // refreshReasoningCombo()，而后者要靠 currentModel_ 去查模型能力；
   // 反过来的话思考档位下拉会因为"没有当前模型"而被判为不可见（实测踩到）。
+  const ModelSelection remembered = settings_.modelForWorkspace(workspace_.key());
   currentModel_ = effectiveModelSelection();
+
+  // 记住的选择已失效时**立刻写回**纠正后的值。不写回的话每次启动都要重新回退
+  // 一遍、每次都带着一个指向已删除 Provider 的陈旧选择，而用户完全看不出来
+  // （下拉框显示的是对的）。
+  if(currentModel_.isValid() && !providers_.isUsable(remembered)) {
+    settings_.rememberModelForWorkspace(workspace_.key(), currentModel_);
+    saveSettings();
+  }
+
   refreshModelCombo();
 
   suppressModeSignal_ = true;
@@ -927,10 +937,19 @@ void MainWindow::setStatusMessage(const QString & message)
 ModelSelection MainWindow::effectiveModelSelection() const
 {
   ModelSelection selection = settings_.modelForWorkspace(workspace_.key());
-  if(selection.isValid()) {
+  // ⚠ 不能只判 isValid()（那只是"两个字段非空"）。持久化下来的选择会随用户
+  // 编辑 Provider 而过期：删掉一个 Provider 再重建，或改了模型列表，旧值就成了
+  // 悬空引用。只判非空会让它一路带进会话，第一次发消息才在运行时炸出
+  // "找不到可用的模型：<已消失的 providerId>"，而模型下拉框里显示的却是对的
+  // （它是按当前注册表重建的）——界面与实际用的模型不一致，最难查的一类问题。
+  if(providers_.isUsable(selection)) {
     return selection;
   }
-  // 没有任何记录时取第一个可用模型，避免用户一进来就卡在"未选模型"。
+  if(selection.isValid()) {
+    qCWarning(log) << "记住的模型选择已失效，回退到第一个可用模型; 旧值="
+                   << selection.displayValue();
+  }
+  // 没有记录、或记录已失效时取第一个可用模型，避免用户一进来就卡在"未选模型"。
   const QList<ModelInfo> models = providers_.allModels();
   if(!models.isEmpty()) {
     ModelSelection fallback;
@@ -1050,10 +1069,25 @@ void MainWindow::onSessionSelected(const Id & sessionId)
 
   activeSessionId_ = sessionId;
 
-  const ModelSelection selection = runtime_.session().providerId.isEmpty()
-                                   ? effectiveModelSelection()
-                                   : ModelSelection{runtime_.session().providerId,
-                                                    runtime_.session().modelId, {}};
+  // 会话把自己的模型选择**存在库里**（session.providerId / modelId），所以它同样
+  // 会随用户删改 Provider 而过期——旧代码只判"两个字段非空"，于是打开一条老会话
+  // 就带着已消失的 provider 一路用下去，直到发消息才在运行时炸掉。
+  // 这里按当前注册表重新判定，失效就回退，并把回退结果写回**这条会话**，
+  // 免得下次打开又重来一遍。
+  ModelSelection sessionModel;
+  sessionModel.providerId = runtime_.session().providerId;
+  sessionModel.modelId = runtime_.session().modelId;
+  ModelSelection selection = sessionModel;
+  if(!providers_.isUsable(sessionModel)) {
+    if(sessionModel.isValid()) {
+      qCWarning(log) << "该会话记住的模型已失效，回退到可用模型; session=" << sessionId
+                     << "旧值=" << sessionModel.displayValue();
+    }
+    selection = effectiveModelSelection();
+    if(selection.isValid()) {
+      runtime_.setModel(selection);   // 同时落盘到这条会话
+    }
+  }
   currentModel_ = selection;
   refreshReasoningCombo();
 
@@ -1920,11 +1954,19 @@ void MainWindow::onSettingsRequested()
   // 覆盖改了 → 上下文窗口可能变了 → 必须重新测量并通知 UI。
   // 少了这一步，用户改完"上下文窗口"后界面仍显示旧值（只能等下一个 turn
   // 结束才刷新），看起来就像设置没生效。
-  // 覆盖改了 → 上下文窗口可能变了 → 必须重新测量并通知 UI。
-  // 少了这一步，用户改完"上下文窗口"后界面仍显示旧值（只能等下一个 turn
-  // 结束才刷新），看起来就像设置没生效。
   runtime_.remeasureContext();
   applySettingsToUi();
+
+  // ⚠ 还要把**当前会话**的模型对齐到界面上显示的那个。
+  // 用户在设置里删掉了正在用的 Provider 时，applySettingsToUi() 会把下拉框回退
+  // 到第一个可用模型，但活动会话的 model_ 仍是那个已消失的 provider——
+  // 界面显示 A、实际用 B，下一次发送就会失败。setModel 对未变更的选择是幂等的，
+  // 所以这里无条件对齐是安全的。
+  if(runtime_.hasSession() && currentModel_.isValid() &&
+     (currentModel_.providerId != runtime_.session().providerId ||
+      currentModel_.modelId != runtime_.session().modelId)) {
+    runtime_.setModel(currentModel_);
+  }
   saveSettings();
 
   // MCP 与 Skills 的配置也在这一页里，改完要立刻生效：

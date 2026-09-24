@@ -96,6 +96,9 @@ class TestAgentRuntime : public QObject
     void manualCompactionRunsBelowThreshold();
     void compactionArchivesOriginalMessages();
 
+    /// 模型选择的"还能不能用"判定（悬空 Provider / 改过的模型名）。
+    void registryUsabilityRejectsStaleSelections();
+
   private:
     /// 组装一个指向假网关的运行时。
     bool setupRuntime(SessionMode mode, PermissionMode permissionMode,
@@ -2000,6 +2003,46 @@ void TestAgentRuntime::modelGeneratesAndSanitizesSessionTitle()
   // 生成的标题要落盘，重开还在。
   Session loaded;
   QVERIFY(runtime_->session().id == loaded.id || true);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 模型选择的有效性
+// ─────────────────────────────────────────────────────────────────────────────
+
+void TestAgentRuntime::registryUsabilityRejectsStaleSelections()
+{
+  configureProviders();   // provider "test"，模型 test-model / wide-model
+
+  ModelSelection valid;
+  valid.providerId = QStringLiteral("test");
+  valid.modelId = QStringLiteral("test-model");
+  QVERIFY(providers_->isUsable(valid));
+  // 思考档位不参与判定：它只是同一次请求的参数。
+  ModelSelection withLevel = valid;
+  withLevel.reasoningLevel = QStringLiteral("high");
+  QVERIFY(providers_->isUsable(withLevel));
+
+  // Provider 被删掉/改名后的残留：这就是状态栏那条
+  // "找不到可用的模型：provider_xxx/..." 的来源。
+  ModelSelection dangling;
+  dangling.providerId = QStringLiteral("provider_deleted_one");
+  dangling.modelId = QStringLiteral("deepseek-flash");
+  QVERIFY(!providers_->isUsable(dangling));
+  QVERIFY(providers_->resolve(dangling) == nullptr);
+
+  // Provider 还在、模型名已被改掉：resolve 会成功（它不查模型列表），
+  // 但请求会被服务端拒——所以要拦在这里。
+  ModelSelection renamed;
+  renamed.providerId = QStringLiteral("test");
+  renamed.modelId = QStringLiteral("test-model-renamed");
+  QVERIFY(!providers_->isUsable(renamed));
+
+  // 缺字段的选择当然不可用。
+  ModelSelection empty;
+  QVERIFY(!providers_->isUsable(empty));
+  ModelSelection half;
+  half.providerId = QStringLiteral("test");
+  QVERIFY(!providers_->isUsable(half));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@
 #include <QMenu>
 #include <QProcess>
 #include "storage/SessionStore.h"
+#include "core/Ids.h"
 #include "tools/BackgroundTaskRegistry.h"
 #include "ui/AppConfig.h"
 
@@ -120,6 +121,10 @@ class TestUiFlow : public QObject
     void slashCommandNeverReachesTheModel();
     /// 状态栏要告诉用户"什么时候会自动压缩上下文"。
     void contextBarShowsCompactionThreshold();
+    /// 记住的模型选择指向已删除的 Provider 时必须回退，而不是带着悬空引用去发请求。
+    void staleRememberedModelFallsBackToAUsableOne();
+    /// 打开一条"记着已失效模型"的旧会话时同样要自动纠正（并把纠正结果写回该会话）。
+    void openingSessionWithStaleModelHealsItself();
 
   private:
     /// 截图输出目录（构建目录下的 ui-screenshots）。
@@ -1767,6 +1772,157 @@ void TestUiFlow::contextBarShowsCompactionThreshold()
   QVERIFY2(tooltip.contains(QStringLiteral("裁剪旧工具输出")), qPrintable(tooltip));
   QVERIFY2(tooltip.contains(QStringLiteral("摘要")), qPrintable(tooltip));
   QVERIFY2(tooltip.contains(QStringLiteral("/compact")), qPrintable(tooltip));
+}
+
+/// 复现用户报的那个状态栏错误：
+///   "找不到可用的模型：provider_qxp7kszfmxyyadyj5jqpa5az/deepseek-flash$high"
+///
+/// 成因是**持久化的模型选择悬空**：用户删掉/重建过 Provider，settings.json 里的
+/// lastModel 与 workspaceLastModel 还指向已经不存在的 providerId。旧代码只判
+/// `isValid()`（两个字段非空），于是把它当成有效选择带进会话；第一次发消息才在
+/// 运行时炸掉，而模型下拉框显示的是对的（按当前注册表重建）。
+void TestUiFlow::staleRememberedModelFallsBackToAUsableOne()
+{
+  const QString settingsPath = dataDir_->path() + QStringLiteral("/settings.json");
+  QFile file(settingsPath);
+  QVERIFY2(file.open(QIODevice::ReadOnly), qPrintable(file.errorString()));
+  const QByteArray original = file.readAll();
+  file.close();
+
+  QJsonObject settings = QJsonDocument::fromJson(original).object();
+  QTemporaryDir workspace;
+  QVERIFY(workspace.isValid());
+  QVERIFY(QDir().mkpath(workspace.path()));
+
+  // 指向一个**不存在**的 provider（正如删掉重建之后的残留）。
+  const QString stale = QStringLiteral("provider_deleted_one/deepseek-flash$high");
+  settings.insert(QStringLiteral("lastWorkspace"), workspace.path());
+  settings.insert(QStringLiteral("lastModel"), stale);
+
+  QJsonObject workspaceLastModel;
+  workspaceLastModel.insert(workspace.path(), stale);
+  settings.insert(QStringLiteral("workspaceLastModel"), workspaceLastModel);
+
+  QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
+  file.close();
+
+  const int requestsBefore = gateway_->requestCount();
+  gateway_->enqueue(textResponse("好的"));
+
+  MainWindow window;
+  window.resize(1280, 820);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto * composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+  auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+  QVERIFY(composer != nullptr);
+  QVERIFY(sendButton != nullptr);
+
+  composer->setPlainText(QStringLiteral("在吗"));
+  sendButton->click();
+
+  // 这一步以前会失败：会话带着悬空选择被创建，第一次模型请求就解析不到 provider。
+  QVERIFY2(waitFor([&]() {
+    return gateway_->requestCount() > requestsBefore;
+  }), qPrintable(QStringLiteral("模型请求始终没有发出去; 状态栏=%1")
+                 .arg(window.statusBar()->currentMessage())));
+
+  // 请求里必须是**真实存在**的模型，而不是那个已消失的 provider 下的名字。
+  const QJsonObject body = QJsonDocument::fromJson(gateway_->lastBody()).object();
+  const QString requestedModel = body.value(QStringLiteral("model")).toString();
+  QVERIFY2(requestedModel == QStringLiteral("smoke-model"),
+           qPrintable(QStringLiteral("请求用了错误的模型: %1").arg(requestedModel)));
+  QVERIFY2(!window.statusBar()->currentMessage().contains(QStringLiteral("不可用")),
+           qPrintable(window.statusBar()->currentMessage()));
+
+  // 纠正后的选择要写回设置，否则每次启动都要重新回退一次。
+  QFile reread(settingsPath);
+  QVERIFY(reread.open(QIODevice::ReadOnly));
+  const QJsonObject saved = QJsonDocument::fromJson(reread.readAll()).object();
+  reread.close();
+  QVERIFY2(saved.value(QStringLiteral("lastModel")).toString().startsWith(
+             QStringLiteral("smoke/")),
+           qPrintable(saved.value(QStringLiteral("lastModel")).toString()));
+
+  // 还原设置：这条测试改写了共享文件，不能把后面的测试带偏。
+  QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  file.write(original);
+  file.close();
+}
+
+/// 打开一条"记着已失效模型"的旧会话。
+///
+/// 这条路径比 staleRememberedModelFallsBackToAUsableOne 更接近用户实际遭遇：
+/// 启动时会自动恢复工作区里最近的会话，而**会话把 providerId/modelId 存在
+/// 自己身上**。用户在设置里删掉那个 Provider 之后，这条会话就再也发不出消息，
+/// 报错是"找不到可用的模型：<已消失的 providerId>"。
+void TestUiFlow::openingSessionWithStaleModelHealsItself()
+{
+  const QString workspacePath = dataDir_->path() + QStringLiteral("/stale-session-workspace");
+  QVERIFY(QDir().mkpath(workspacePath));
+
+  // 直接造一条"模型已失效"的会话，并让它成为该工作区最近的一条。
+  SessionStore store;
+  QVERIFY(store.open());
+  Session session;
+  session.id = newSessionId();
+  session.workspace.path = workspacePath;
+  session.mode = SessionMode::Build;
+  session.status = SessionStatus::CompletedSuccess;
+  session.kind = SessionKind::Interactive;
+  session.providerId = QStringLiteral("provider_deleted_one");
+  session.modelId = QStringLiteral("deepseek-flash");
+  session.createdAtMs = nowMs();
+  session.updatedAtMs = nowMs();
+  QVERIFY(store.saveSession(session));
+  store.close();
+
+  // 让应用启动时就落在这个工作区：openSessionOrCreate() 会自动打开上面那条会话。
+  const QString settingsPath = dataDir_->path() + QStringLiteral("/settings.json");
+  QFile file(settingsPath);
+  QVERIFY(file.open(QIODevice::ReadOnly));
+  const QByteArray original = file.readAll();
+  file.close();
+  QJsonObject settings = QJsonDocument::fromJson(original).object();
+  settings.insert(QStringLiteral("lastWorkspace"), workspacePath);
+  QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  file.write(QJsonDocument(settings).toJson(QJsonDocument::Indented));
+  file.close();
+
+  const int requestsBefore = gateway_->requestCount();
+  gateway_->enqueue(textResponse("这条会话还能用"));
+
+  MainWindow window;
+  window.resize(1280, 820);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto * composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+  auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+  QVERIFY(composer != nullptr && sendButton != nullptr);
+
+  composer->setPlainText(QStringLiteral("继续"));
+  sendButton->click();
+  QVERIFY2(waitFor([&]() {
+    return gateway_->requestCount() > requestsBefore;
+  }), qPrintable(QStringLiteral("这条旧会话的请求发不出去; 状态栏=%1")
+                 .arg(window.statusBar()->currentMessage())));
+
+  // 纠正结果要写回**这条会话**，否则下次打开又得重来一遍。
+  SessionStore reread;
+  QVERIFY(reread.open());
+  Session healed;
+  QVERIFY(reread.loadSession(session.id, &healed));
+  QCOMPARE(healed.providerId, QStringLiteral("smoke"));
+  QCOMPARE(healed.modelId, QStringLiteral("smoke-model"));
+  reread.close();
+
+  // 还原设置，别把后面的测试带偏。
+  QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+  file.write(original);
+  file.close();
 }
 
 QTEST_MAIN(TestUiFlow)

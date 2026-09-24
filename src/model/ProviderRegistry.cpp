@@ -132,6 +132,26 @@ ModelProvider * ProviderRegistry::resolve(const ModelSelection & selection, Mode
   return found;
 }
 
+bool ProviderRegistry::isUsable(const ModelSelection & selection) const
+{
+  if(!selection.isValid()) {
+    return false;
+  }
+  ModelProvider * found = provider(selection.providerId);
+  if(found == nullptr) {
+    return false;   // Provider 已被删除/改名：旧选择成了悬空引用
+  }
+  if(!found->configuration().isUsable()) {
+    return false;   // 存在但没配全（缺 apiKey / 被禁用）
+  }
+  const QStringList models = found->configuration().models;
+  if(models.isEmpty()) {
+    // 没声明模型列表时没有"存在性"可判，交给 provider 自己决定。
+    return true;
+  }
+  return models.contains(selection.modelId);
+}
+
 void ProviderRegistry::setModelOverrides(
   const QHash<QString, ModelOptionOverride> & overrides)
 {

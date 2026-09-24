@@ -717,8 +717,12 @@ void AgentRuntime::runModelStep()
   ModelInfo info;
   ModelProvider * provider = providers_->resolve(model_, &info);
   if(provider == nullptr) {
+    // 这里刻意**不回显 model_.displayValue()**：它通常指向一个已经不存在的
+    // provider（用户删掉/重建过 Provider，而持久化的选择还留在配置里），把那个
+    // 内部 id 摆给用户看只会把人引向一个不存在的东西。给出可行动的下一步。
     completeTurn(TurnResult::Failed,
-                 QStringLiteral("找不到可用的模型：") + model_.displayValue());
+                 QStringLiteral("当前会话用的模型已不可用（Provider 被删除或未配置完整）。"
+                                "请在底部模型下拉框里重新选一个模型后再发送。"));
     return;
   }
 
