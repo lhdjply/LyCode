@@ -59,6 +59,12 @@ struct CompactionPolicy {
 /// 先估算一段文本的 token 数，再累加。
 int estimateTextTokens(const QString & text);
 
+/// 按**同一个字符/token 比**估算一段字符数对应的 token 数（0 字符 → 0）。
+///
+/// 单独给出这个入口，是为了让"流式生成中的实时用量"不必先拼出一个字符串再量长度：
+/// 状态栏每秒都要算一次，字符数直接来自已累积的 part。
+int estimateCharCountTokens(int chars);
+
 /// 估算当前会话真正会下发给模型的上下文体积（token）。
 ///
 /// 计入：正文、思考、工具输出，以及工具声明与系统提示词——它们同样占窗口，

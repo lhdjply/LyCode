@@ -119,6 +119,8 @@ class TestUiFlow : public QObject
     void streamedReasoningArrivesAsACollapsedBlock();
     /// 工具卡片默认收起、状态变化不自动展开，表头整行可点（拖选文字除外）。
     void toolCardStaysCollapsedUntilClicked();
+    /// 状态栏的 token 用量必须随流式生成实时刷新，结束后换回精确值。
+    void statusBarUsageUpdatesWhileStreaming();
     void workspaceExpansionIsPersisted();
     void switchingWorkspaceKeepsTreeOrderStable();
     void topButtonCreatesWorkspaceNotSession();
@@ -1323,6 +1325,81 @@ void TestUiFlow::toolCardStaysCollapsedUntilClicked()
   QVERIFY2(!card.isExpanded(), "在标题上拖选文字不应切换展开状态");
 
   card.close();
+}
+
+void TestUiFlow::statusBarUsageUpdatesWhileStreaming()
+{
+  // 用户报过："底部 token 使用没有实时刷新"。根因是状态栏读的会话快照只在 turn
+  // 结束时更新，provider 的 usage 也要等一次请求收尾才报回来。
+  // 这条测试用**慢速流**（帧之间隔 400ms）把生成过程拉长，验证：
+  //   1. 生成期间状态栏就在动（output 带 `~` 估算标记，上下文用量在涨）；
+  //   2. 整轮结束后换回精确值（不再带 `~`）。
+  MainWindow window;
+  window.resize(1280, 820);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto * composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+  auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+  auto * usageLabel = window.findChild<QLabel *>(QStringLiteral("usageLabel"));
+  auto * contextLabel = window.findChild<QLabel *>(QStringLiteral("contextLabel"));
+  QVERIFY(composer != nullptr && sendButton != nullptr && usageLabel != nullptr &&
+          contextLabel != nullptr);
+
+  auto * sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+  QVERIFY(sidebar != nullptr);
+  QTemporaryDir workspace;
+  QVERIFY(workspace.isValid());
+  emit sidebar->workspaceRecentRequested(workspace.path());
+  QVERIFY(waitFor([&]() {
+    return sendButton->isEnabled();
+  }, 3000));
+
+  const QString contextIdle = contextLabel->text();
+  QVERIFY2(!contextIdle.isEmpty(), "空闲时也该有上下文用量文案");
+
+  // 五帧、每帧 400ms：整轮约 2 秒，足以跨过状态栏 1 秒的刷新周期。
+  QList<QByteArray> frames;
+  for(int index = 0; index < 5; ++index) {
+    frames.append(QByteArray("data: {\"choices\":[{\"delta\":{\"content\":\"") +
+                  QByteArray(120, 'x') + QByteArray("\"}}]}\n\n"));
+  }
+  frames.append("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n");
+  frames.append("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
+                "\"total_tokens\":120}}\n\n");
+  frames.append("data: [DONE]\n\n");
+  gateway_->enqueueSlow(frames, 400);
+
+  composer->setPlainText(QStringLiteral("写点东西"));
+  sendButton->click();
+
+  // ① 生成中：output 必须已经带上估算标记，上下文用量必须已经比空闲时大。
+  QVERIFY2(waitFor([&]() {
+    return usageLabel->text().contains(QLatin1Char('~'));
+  }, 5000),
+  qPrintable(QStringLiteral("生成过程中状态栏应当显示估算的 output，实际：%1")
+             .arg(usageLabel->text())));
+  QVERIFY2(waitFor([&]() {
+    return contextLabel->text() != contextIdle;
+  }, 5000),
+  qPrintable(QStringLiteral("生成过程中上下文用量应当实时增长，实际：%1").arg(contextLabel->text())));
+
+  // 截下生成中的状态栏作为证据（从整窗截图裁剪：单独 grab 子控件拿不到祖先样式表）。
+  {
+    const QPixmap shot = window.grab();
+    const QString path = screenshotDir() + QStringLiteral("/19-usage-live.png");
+    QVERIFY2(shot.copy(0, shot.height() - 28, shot.width(), 28).save(path), qPrintable(path));
+  }
+
+  // ② 结束后：换回精确值，估算标记必须消失，且不是重复计数（20 而不是 40）。
+  QVERIFY(waitFor([&]() {
+    return sendButton->isEnabled();
+  }, 15000));
+  QVERIFY2(!usageLabel->text().contains(QLatin1Char('~')),
+           qPrintable(QStringLiteral("结束后不该再有估算标记，实际：%1").arg(usageLabel->text())));
+  QVERIFY2(usageLabel->text().contains(QStringLiteral("output 20")),
+           qPrintable(QStringLiteral("结束后的 output 必须是 provider 报的精确值，实际：%1")
+                      .arg(usageLabel->text())));
 }
 
 void TestUiFlow::streamedReasoningArrivesAsACollapsedBlock()

@@ -69,6 +69,9 @@ constexpr double kContextWarnPercent = 75.0;
 constexpr double kContextCriticalPercent = 90.0;
 /// 用量与运行时长刷新间隔。
 constexpr int kTickIntervalMs = 1000;
+/// 生成中的刷新间隔。1 秒一跳会让人以为状态栏卡住了；生成时本来就是"数字在涨"
+/// 的场景，刷勤一点（4 次/秒）才有实时感，代价只是几行文本的重绘。
+constexpr int kStreamingTickIntervalMs = 250;
 
 QString runStateText(RunState state)
 {
@@ -153,16 +156,21 @@ QString contextTooltipText(const QJsonObject & usage)
 /// 用量明细文案。字段口径见 Usage 的注释：
 ///   未缓存 = 真正要模型从头处理的输入；缓存读 = 命中缓存的部分；
 ///   输出 = 生成的 token；命中率分母不含"写入缓存"（那部分本来没机会命中）。
-QString usageBreakdownText(const Usage & usage)
+///
+/// `outputEstimated` 为真时给 output 加 `~`：生成过程中 provider 还没结算这部分，
+/// 数字是按流式正文估算的（口径见 AgentRuntime::pendingOutputTokenEstimate）。
+QString usageBreakdownText(const Usage & usage, bool outputEstimated)
 {
+  const QString output = outputEstimated
+                         ? QStringLiteral("~%1").arg(compactTokens(usage.outputTokens))
+                         : compactTokens(usage.outputTokens);
   return QCoreApplication::translate("ui::MainWindow", "Cached %1% · uncached %2 · cache read %3 · output %4")
          .arg(qRound(usage.cacheHitRate() * 100.0))
-         .arg(compactTokens(usage.inputTokens), compactTokens(usage.cacheReadTokens),
-              compactTokens(usage.outputTokens));
+         .arg(compactTokens(usage.inputTokens), compactTokens(usage.cacheReadTokens), output);
 }
 
 /// 用量明细的悬浮说明：给出精确数字与口径，避免缩写带来的歧义。
-QString usageTooltipText(const Usage & cumulative, const Usage & lastTurn)
+QString usageTooltipText(const Usage & cumulative, const Usage & lastTurn, bool outputEstimated)
 {
   const auto block = [](const QString & title, const Usage & usage) {
     return QCoreApplication::translate("ui::MainWindow",
@@ -175,10 +183,19 @@ QString usageTooltipText(const Usage & cumulative, const Usage & lastTurn)
            .arg(qRound(usage.cacheHitRate() * 100.0));
   };
 
-  return QCoreApplication::translate("ui::MainWindow",
-                                     "Cache hit rate = cache read / (cache read + uncached input).\nThe denominator excludes cache writes: a first write never had a chance to hit.\n\n%1\n\n%2")
-         .arg(block(QCoreApplication::translate("ui::MainWindow", "This session (cumulative)"), cumulative),
-              block(QCoreApplication::translate("ui::MainWindow", "Last turn"), lastTurn));
+  const QString text =
+    QCoreApplication::translate("ui::MainWindow",
+                                "Cache hit rate = cache read / (cache read + uncached input).\nThe denominator excludes cache writes: a first write never had a chance to hit.\n\n%1\n\n%2")
+    .arg(block(QCoreApplication::translate("ui::MainWindow", "This session (cumulative)"), cumulative),
+         block(QCoreApplication::translate("ui::MainWindow", "Last turn"), lastTurn));
+
+  if(!outputEstimated) {
+    return text;
+  }
+  // 估算值必须说明白，否则用户会拿它跟 provider 的账单对不上。
+  return text + QLatin1Char('\n') +
+         QCoreApplication::translate("ui::MainWindow",
+                                     "Generating: the output count is an estimate (~3 characters per token) and is replaced by the reported value when the turn ends.");
 }
 
 }  // namespace
@@ -336,7 +353,8 @@ MainWindow::MainWindow(QWidget * parent) : QMainWindow(parent)
   }
 
   // 运行时长与用量的低频刷新。放在定时器里而不是每次增量都算，
-  // 避免高频更新状态栏造成不必要的重绘。
+  // 避免高频更新状态栏造成不必要的重绘；生成中会自动切到更短的间隔
+  //（见 onRunStateChanged），否则用户会以为数字卡住了。
   usageTimer_ = new QTimer(this);
   usageTimer_->setInterval(kTickIntervalMs);
   connect(usageTimer_, &QTimer::timeout, this, [this]() {
@@ -916,7 +934,10 @@ void MainWindow::loadWorkspaceSessions()
 
 void MainWindow::refreshContextUsage()
 {
-  QJsonObject usage = runtime_.session().contextUsage;
+  // ⚠ 取**实时**估算，而不是 session().contextUsage 那个快照：后者只在建会话/
+  // 载入/压缩/换模型/turn 结束时重算，生成过程中一直是上一轮的旧值。
+  // 状态栏每秒调一次这里，才能看到上下文随流式正文一起涨。
+  QJsonObject usage = runtime_.hasSession() ? runtime_.liveContextUsage() : QJsonObject{};
 
   // 没有会话时 session 里没有用量快照，但用户仍然需要看到"改完设置到底生效没有"。
   // 用有效模型元信息（含覆盖）兜底展示分母，已用记为 0。
@@ -952,10 +973,22 @@ void MainWindow::refreshContextUsage()
 
   // 用量明细：始终显示四个字段（哪怕是 0），这样用户能确认这些指标存在、
   // 也能一眼看出某次请求是否命中了缓存。
-  const Usage cumulative = runtime_.session().cumulativeUsage;
+  //
+  // 生成过程中把本轮的在途用量一起算上（provider 已经结算的部分），输出 token 再
+  // 补上正在流式生成那部分的估算——否则整轮跑完之前，这里显示的还是上一轮的数字。
+  Usage cumulative = runtime_.session().cumulativeUsage;
+  bool outputEstimated = false;
+  if(runtime_.isRunning()) {
+    cumulative += runtime_.pendingTurnUsage();
+    const int pending = runtime_.pendingOutputTokenEstimate();
+    if(pending > 0) {
+      cumulative.outputTokens += pending;
+      outputEstimated = true;
+    }
+  }
   const Usage lastTurn = runtime_.lastTurnUsage();
-  usageLabel_->setText(usageBreakdownText(cumulative));
-  usageLabel_->setToolTip(usageTooltipText(cumulative, lastTurn));
+  usageLabel_->setText(usageBreakdownText(cumulative, outputEstimated));
+  usageLabel_->setToolTip(usageTooltipText(cumulative, lastTurn, outputEstimated));
 }
 
 void MainWindow::refreshRunState()
@@ -1458,6 +1491,16 @@ void MainWindow::onRunStateChanged(RunState state)
     turnTimer_.invalidate();
   }
   refreshRunState();
+
+  // 生成中把刷新间隔调短：用量数字要跟着流式正文走，1 秒一跳不像"实时"。
+  if(usageTimer_ != nullptr) {
+    const bool running = state != RunState::Idle && state != RunState::Failed;
+    usageTimer_->setInterval(running ? kStreamingTickIntervalMs : kTickIntervalMs);
+  }
+
+  // 相位一变就刷一次用量：定时器只负责"生成中持续刷新"，
+  // 让用户等最多一个周期才看到"已经进入生成中"没有必要。
+  refreshContextUsage();
 }
 
 void MainWindow::onTurnFinished(TurnResult result)

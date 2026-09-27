@@ -36,6 +36,7 @@
 
 using namespace lycode;
 using lycode::test::FakeGateway;
+using lycode::test::chunkedTextResponse;
 using lycode::test::jsonEscape;
 using lycode::test::textResponse;
 using lycode::test::multiToolCallResponse;
@@ -67,6 +68,8 @@ class TestAgentRuntime : public QObject
     void httpErrorFailsTheTurn();
     void reasoningLevelReachesProviderRequest();
     void contextWindowOverrideDrivesUsage();
+    /// 状态栏的实时口径：生成过程中上下文用量与 output 估算就必须动起来。
+    void liveUsageGrowsWhileStreaming();
     void setModelRefreshesContextWindow();
     void reloadRestoresPersistedConversation();
     void openAiUsageIsNormalizedToUncached();
@@ -751,6 +754,61 @@ void TestAgentRuntime::contextWindowOverrideDrivesUsage()
   QVERIFY(percent <= 100.0);
 
   providers_->setModelOverrides({});
+}
+
+void TestAgentRuntime::liveUsageGrowsWhileStreaming()
+{
+  // 用户报过："底部 token 使用没有实时刷新"。原因是状态栏读的是
+  // session().contextUsage / cumulativeUsage 这两个快照，而它们只在 turn 结束时
+  // 才更新；provider 的 usage 又要等一次请求收尾才报回来。
+  // 这条测试盯住新加的实时口径：liveContextUsage() 与 pendingOutputTokenEstimate()
+  // 在**流式过程中**就必须反映已经生成的内容。
+  QVERIFY(setupRuntime(SessionMode::Build, PermissionMode::Default));
+
+  gateway_->enqueue(chunkedTextResponse({QByteArray(300, 'a'), QByteArray(300, 'b')}));
+
+  // 在增量信号里采样：这时正文已经写进 part，但 turn 还没结束。
+  QList<int> usedSamples;
+  QList<int> estimateSamples;
+  connect(runtime_.get(), &AgentRuntime::deltaAppended, this,
+  [this, &usedSamples, &estimateSamples](const Id &, const Id &, const QString &, bool) {
+    usedSamples.append(json::integer(runtime_->liveContextUsage(),
+                                     QStringLiteral("usedTokens")));
+    estimateSamples.append(runtime_->pendingOutputTokenEstimate());
+  });
+
+  const int usedBefore = json::integer(runtime_->liveContextUsage(),
+                                       QStringLiteral("usedTokens"));
+
+  QSignalSpy finishedSpy(runtime_.get(), &AgentRuntime::turnFinished);
+  QString error;
+  QVERIFY2(runtime_->submitText(QStringLiteral("hi"), &error), qPrintable(error));
+  QVERIFY(finishedSpy.wait(6000));
+
+  // 两个正文增量各采样一次。
+  QCOMPARE(usedSamples.size(), 2);
+  QVERIFY2(usedSamples.at(0) > usedBefore,
+           qPrintable(QStringLiteral("生成中就该反映已写入的正文; before=%1 after=%2")
+                      .arg(usedBefore)
+                      .arg(usedSamples.at(0))));
+  QVERIFY2(usedSamples.at(1) > usedSamples.at(0), "正文越多，上下文估算越大");
+
+  // 生成中的 output 估算必须随增量增长，否则状态栏的数字还是冻着的。
+  QVERIFY2(estimateSamples.at(0) > 0, "第一次正文增量之后就该有估算值");
+  QVERIFY2(estimateSamples.at(1) > estimateSamples.at(0), "估算值必须随增量增长");
+
+  // 结束后在途计数必须归零：状态栏会把它加在累计值上，留着就是重复计数。
+  QCOMPARE(runtime_->pendingTurnUsage().effectiveTotal(), 0);
+  QCOMPARE(runtime_->pendingOutputTokenEstimate(), 0);
+  // 精确值来自 provider（prompt 100 / completion 20），累计量必须只加一次。
+  QCOMPARE(runtime_->session().cumulativeUsage.outputTokens, 20);
+  QCOMPARE(runtime_->session().cumulativeUsage.inputTokens, 100);
+  // turn 结束时写进会话快照的值必须与实时估算一致（结束后状态栏读的是那个快照）。
+  const int usedAfter = json::integer(runtime_->liveContextUsage(),
+                                      QStringLiteral("usedTokens"));
+  QVERIFY2(usedAfter >= usedSamples.constLast(), "结束后不能比流式期间的估算还小");
+  QCOMPARE(json::integer(runtime_->session().contextUsage, QStringLiteral("usedTokens")),
+           usedAfter);
 }
 
 void TestAgentRuntime::setModelRefreshesContextWindow()

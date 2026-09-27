@@ -270,6 +270,28 @@ class AgentRuntime : public QObject, public SubagentHost
     /// 没有则返回全 0。用于状态栏展示"本轮"的缓存命中情况。
     Usage lastTurnUsage() const;
 
+    /// 上下文用量的**实时**快照：按"现在"的消息重新估算，不落盘、不发信号。
+    ///
+    /// 与 `session().contextUsage` 的区别：后者只在建会话/载入/压缩/换模型/turn 结束时
+    /// 重算，因此生成过程中一直是上一轮的旧值。状态栏每秒取一次这里的值，
+    /// 才能看到上下文随流式正文增长。
+    QJsonObject liveContextUsage() const;
+
+    /// 本轮到目前为止、provider 已经结算回来的用量（turn 结束后归零）。
+    ///
+    /// 状态栏把它加在会话累计用量上：否则整轮跑完之前，状态栏显示的还是上一轮的数字。
+    Usage pendingTurnUsage() const
+    {
+      return turnUsage_;
+    }
+
+    /// 本轮正在流式生成、provider 尚未结算的输出 token **估算**。
+    ///
+    /// provider 的 usage 往往要等一次请求收尾才报回来（OpenAI 兼容流是最后一个 chunk），
+    /// 所以生成过程中只能按已累积的正文/思考字符数估算（与压缩阈值同一个口径，
+    /// 约 3 字符/token）。UI 必须把它标成估算值（`~`），不能当精确值展示。
+    int pendingOutputTokenEstimate() const;
+
     /// 安全上限：单个 turn 内允许的模型步数。
     /// 设为很大是为了不成为常规任务的瓶颈，只用于防御失控循环。
     static constexpr int kMaxModelStepsPerTurn = 200;

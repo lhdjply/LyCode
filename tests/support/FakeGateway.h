@@ -16,8 +16,12 @@
 #include <QJsonObject>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
+
+#include <memory>
 
 namespace lycode::test
 {
@@ -49,6 +53,19 @@ class FakeGateway : public QObject
       responses_.append({statusCode, sseBody});
     }
 
+    /// 追加一段**逐帧、按间隔**下发的响应（chunked 传输）。
+    ///
+    /// 一次性写完整个 body 时，所有 SSE 事件会在同一个事件循环里处理完，测试永远
+    /// 看不到中间态；而"生成过程中状态栏有没有实时刷新"恰恰只能靠中间态验证。
+    /// 这里每帧之间留出间隔，让界面（状态栏的 1 秒定时器）有机会跑起来。
+    void enqueueSlow(const QList<QByteArray> & frames, int intervalMs)
+    {
+      Response response;
+      response.frames = frames;
+      response.intervalMs = intervalMs;
+      responses_.append(response);
+    }
+
     int requestCount() const
     {
       return requestCount_;
@@ -68,7 +85,48 @@ class FakeGateway : public QObject
     struct Response {
       int status = 200;
       QByteArray body;
+      /// 非空时按帧下发（见 enqueueSlow），忽略 body。
+      QList<QByteArray> frames;
+      int intervalMs = 0;
     };
+
+    /// chunked 逐帧写出。帧之间按 intervalMs 等待，收尾再发结束块并断开。
+    void streamFrames(QTcpSocket * socket, const Response & response)
+    {
+      QByteArray header;
+      header += "HTTP/1.1 200 OK\r\n";
+      header += "Content-Type: text/event-stream\r\n";
+      // 没有 Content-Length，靠 chunked 让客户端知道"后面还有"。
+      // QNetworkAccessManager 会透明解码，Provider 那边不需要任何特殊处理。
+      header += "Transfer-Encoding: chunked\r\n";
+      header += "Connection: close\r\n\r\n";
+      socket->write(header);
+      socket->flush();
+
+      // socket 是 QTimer 的 context：连接提前断掉时后续帧自动不再触发，
+      // QPointer 再兜一层，避免写已经析构的 socket。
+      QPointer<QTcpSocket> guard(socket);
+      const auto frames = std::make_shared<QList<QByteArray>>(response.frames);
+      const int interval = response.intervalMs;
+      for(int index = 0; index < frames->size(); ++index) {
+        QTimer::singleShot(interval * (index + 1), socket, [guard, frames, index]() {
+          if(guard == nullptr) {
+            return;
+          }
+          const QByteArray & frame = frames->at(index);
+          guard->write(QByteArray::number(frame.size(), 16) + "\r\n" + frame + "\r\n");
+          guard->flush();
+        });
+      }
+      QTimer::singleShot(interval * (frames->size() + 1), socket, [guard]() {
+        if(guard == nullptr) {
+          return;
+        }
+        guard->write("0\r\n\r\n");
+        guard->flush();
+        guard->disconnectFromHost();
+      });
+    }
 
     void onConnection()
     {
@@ -108,6 +166,11 @@ class FakeGateway : public QObject
                                     ? Response{200, QByteArray()}
                                     :
                                     responses_.takeFirst();
+
+          if(!response.frames.isEmpty() && response.intervalMs > 0) {
+            streamFrames(socket, response);
+            return;
+          }
 
           const QByteArray payload = response.body;
           QByteArray out;
@@ -165,6 +228,25 @@ inline QByteArray textResponse(const QByteArray & text)
   body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
   body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + jsonStringEscape(text) +
           "\"}}]}\n\n";
+  body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+  body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
+          "\"total_tokens\":120}}\n\n";
+  body += "data: [DONE]\n\n";
+  return body;
+}
+
+/// 把正文拆成多个增量下发的流式响应。
+///
+/// 用于验证"流式过程中界面就在刷新"：一次性下发的 textResponse 只有一个增量，
+/// 采样点只有一个，量不出"随增量增长"。
+inline QByteArray chunkedTextResponse(const QList<QByteArray> & chunks)
+{
+  QByteArray body;
+  body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
+  for(const QByteArray & chunk : chunks) {
+    body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + jsonStringEscape(chunk) +
+            "\"}}]}\n\n";
+  }
   body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
   body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
           "\"total_tokens\":120}}\n\n";

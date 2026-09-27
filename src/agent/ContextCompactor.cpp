@@ -72,12 +72,17 @@ int CompactionPolicy::fullThresholdTokens(int contextWindow) const
 // 估算
 // ─────────────────────────────────────────────────────────────────────────────
 
-int estimateTextTokens(const QString & text)
+int estimateCharCountTokens(int chars)
 {
-  if(text.isEmpty()) {
+  if(chars <= 0) {
     return 0;
   }
-  return static_cast<int>(static_cast<double>(text.size()) / kCharsPerToken) + 1;
+  return static_cast<int>(static_cast<double>(chars) / kCharsPerToken) + 1;
+}
+
+int estimateTextTokens(const QString & text)
+{
+  return estimateCharCountTokens(text.size());
 }
 
 int estimateContextTokens(const QList<Message> & messages, const QList<ToolSpec> & tools,

@@ -2099,6 +2099,10 @@ void AgentRuntime::completeTurn(TurnResult result, const QString & errorMessage)
               << "inputTokens=" << turnUsage_.inputTokens
               << "outputTokens=" << turnUsage_.outputTokens;
 
+  // 本轮用量已经加进 cumulativeUsage，在途计数必须清掉：状态栏会把
+  // pendingTurnUsage() 与累计值相加，留着就会把同一份用量算两遍。
+  turnUsage_ = Usage{};
+
   if(!errorMessage.isEmpty() && result == TurnResult::Failed) {
     emit failed(errorMessage);
   }
@@ -2209,6 +2213,11 @@ void AgentRuntime::persistSession()
 
 void AgentRuntime::refreshContextUsage()
 {
+  session_.contextUsage = liveContextUsage();
+}
+
+QJsonObject AgentRuntime::liveContextUsage() const
+{
   const int used = contextTokens();
   const int window = effectiveContextWindow();
   const int microThreshold = compactionPolicy_.microThresholdTokens(window);
@@ -2225,7 +2234,36 @@ void AgentRuntime::refreshContextUsage()
   if(!compactionSummary_.isEmpty()) {
     usage.insert(QStringLiteral("compacted"), true);
   }
-  session_.contextUsage = usage;
+  return usage;
+}
+
+int AgentRuntime::pendingOutputTokenEstimate() const
+{
+  // 只有"模型正在流式输出"这一相位才有估算可言：
+  //   * 工具执行期间 phase 已切到 ExecutingTools，此时上一次请求的用量已由 provider
+  //     结算进 turnUsage_，再按消息正文估一遍就会把同一个数字算两遍；
+  //   * Idle/终态下没有在途内容。
+  if(phase_ != TurnPhase::Streaming || currentAssistantMessageId_.isEmpty()) {
+    return 0;
+  }
+  // 只估算**当前仍在流式**的那条 assistant 消息：之前模型步的用量已经由 provider
+  // 结算进 turnUsage_ 了，再算一遍就会把状态栏的数字灌大。
+  int chars = 0;
+  for(const Message & message : messages_) {
+    if(message.id != currentAssistantMessageId_) {
+      continue;
+    }
+    for(const Part & part : message.parts) {
+      if(part.kind == PartKind::Text) {
+        chars += part.text.text.size();
+      }
+      else if(part.kind == PartKind::Reasoning) {
+        chars += part.reasoning.text.size();
+      }
+    }
+    break;
+  }
+  return estimateCharCountTokens(chars);
 }
 
 int AgentRuntime::contextTokens() const
