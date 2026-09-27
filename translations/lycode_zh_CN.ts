@@ -833,62 +833,67 @@ output_path: %3
 <context>
     <name>ui::ConversationView</name>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="32"/>
+        <location filename="../src/ui/ConversationView.cpp" line="34"/>
         <source>You</source>
         <translation>你</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="36"/>
+        <location filename="../src/ui/ConversationView.cpp" line="38"/>
         <source>System</source>
         <translation>系统</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="38"/>
+        <location filename="../src/ui/ConversationView.cpp" line="40"/>
         <source>Unknown</source>
         <translation>未知</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="45"/>
+        <location filename="../src/ui/ConversationView.cpp" line="47"/>
         <source>Waiting</source>
         <translation>等待中</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="47"/>
+        <location filename="../src/ui/ConversationView.cpp" line="49"/>
         <source>Generating</source>
         <translation>生成中</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="51"/>
+        <location filename="../src/ui/ConversationView.cpp" line="53"/>
         <source>Interrupted</source>
         <translation>已中断</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="53"/>
+        <location filename="../src/ui/ConversationView.cpp" line="55"/>
         <source>Failed</source>
         <translation>失败</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="267"/>
+        <location filename="../src/ui/ConversationView.cpp" line="289"/>
+        <source>Expand or collapse reasoning</source>
+        <translation>展开或收起思考过程</translation>
+    </message>
+    <message>
+        <location filename="../src/ui/ConversationView.cpp" line="291"/>
         <source>Reasoning</source>
         <translation>思考过程</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="325"/>
+        <location filename="../src/ui/ConversationView.cpp" line="357"/>
         <source>Image</source>
         <translation>图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="343"/>
+        <location filename="../src/ui/ConversationView.cpp" line="375"/>
         <source>Artifacts:</source>
         <translation>产物：</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="352"/>
+        <location filename="../src/ui/ConversationView.cpp" line="384"/>
         <source>Subagents:</source>
         <translation>子代理：</translation>
     </message>
     <message>
-        <location filename="../src/ui/ConversationView.cpp" line="578"/>
+        <location filename="../src/ui/ConversationView.cpp" line="679"/>
         <source>Start a new session
 
 Describe what you want to get done in this workspace. LyCode will read code, run commands, and make the changes.</source>
@@ -977,7 +982,7 @@ Open it with the system application instead.</source>
     </message>
     <message>
         <location filename="../src/ui/MainWindow.cpp" line="85"/>
-        <location filename="../src/ui/MainWindow.cpp" line="1942"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1948"/>
         <source>Interrupting…</source>
         <translation>正在中断…</translation>
     </message>
@@ -1261,7 +1266,7 @@ Type /compact to compact the context, /help for commands</source>
         <translation>还没有可用的模型。请在「设置 → 模型」中添加一个模型并填写模型列表。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2052"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2058"/>
         <source>No usable model right now — check the Base URL and API key.</source>
         <translation>当前没有可用的模型，请检查 Base URL 与 API Key。</translation>
     </message>
@@ -1428,63 +1433,63 @@ The workspace directory itself and the files inside it will **not** be deleted.<
         <translation>移除这张图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1841"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1847"/>
         <source>No session yet, so there is nothing to compact.</source>
         <translation>还没有会话，无法压缩上下文。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1854"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1860"/>
         <source>Compacting the context…</source>
         <translation>正在压缩上下文…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1860"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1866"/>
         <source>Commands: /compact compacts the context, /help shows this note.</source>
         <translation>命令：/compact 压缩上下文，/help 查看这条说明。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1867"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1873"/>
         <source>Unknown command: %1 (available: /compact, /help)</source>
         <translation>未知命令：%1（可用 /compact、/help）</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="1895"/>
-        <location filename="../src/ui/MainWindow.cpp" line="2047"/>
+        <location filename="../src/ui/MainWindow.cpp" line="1901"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2053"/>
         <source>Connecting to MCP servers…</source>
         <translation>正在连接 MCP 服务器…</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2056"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2062"/>
         <source>Settings saved.</source>
         <translation>设置已保存。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2066"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2072"/>
         <source>Interface language changed. Reopen the app for it to take full effect.</source>
         <translation>界面语言已切换。重新打开应用后完全生效。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2082"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2088"/>
         <source>Interface language</source>
         <translation>界面语言</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2083"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2089"/>
         <source>The interface language has been changed. Restart now to apply it?</source>
         <translation>界面语言已更改。是否立即重启以应用？</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2096"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2102"/>
         <source>Could not restart automatically. Please close and reopen the app.</source>
         <translation>无法自动重启，请手动关闭并重新打开应用。</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2108"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2114"/>
         <source>Failed to save settings: </source>
         <translation>设置保存失败：</translation>
     </message>
     <message>
-        <location filename="../src/ui/MainWindow.cpp" line="2161"/>
+        <location filename="../src/ui/MainWindow.cpp" line="2167"/>
         <source>pasted-image.png</source>
         <translation>粘贴的图片.png</translation>
     </message>
@@ -2333,134 +2338,134 @@ Use &quot;Open Workspace…&quot; above to pick a directory.</source>
 <context>
     <name>ui::ToolCallWidget</name>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="103"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="112"/>
         <source>Expand or collapse details</source>
         <translation>展开或收起详情</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="114"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="123"/>
         <source>Tool status</source>
         <translation>工具状态</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="141"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="157"/>
         <source>Arguments</source>
         <translation>入参</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="148"/>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="335"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="164"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="351"/>
         <source>Output</source>
         <translation>输出</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="157"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="173"/>
         <source>Changes</source>
         <translation>改动</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="244"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="260"/>
         <source>Receiving arguments</source>
         <translation>接收参数中</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="246"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="262"/>
         <source>Awaiting approval</source>
         <translation>等待确认</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="248"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="264"/>
         <source>Running</source>
         <translation>执行中</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="250"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="266"/>
         <source>Succeeded</source>
         <translation>成功</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="252"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="268"/>
         <source>Failed</source>
         <translation>失败</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="254"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="270"/>
         <source>Cancelled</source>
         <translation>已取消</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="256"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="272"/>
         <source>Unknown</source>
         <translation>未知</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="266"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="282"/>
         <source>(unnamed tool)</source>
         <translation>(未命名工具)</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="333"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="349"/>
         <source>Error</source>
         <translation>错误</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="351"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="367"/>
         <source>Receiving call arguments…</source>
         <translation>正在接收调用参数…</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="354"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="370"/>
         <source>It runs only after you approve.</source>
         <translation>等待你确认后才会执行。</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="357"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="373"/>
         <source>Running…</source>
         <translation>正在执行…</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="360"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="376"/>
         <source>This call was cancelled and produced no output.</source>
         <translation>该调用已取消，未产生输出。</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="364"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="380"/>
         <source>Succeeded with no output.</source>
         <translation>执行成功，无输出。</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="367"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="383"/>
         <source>Failed with no error details.</source>
         <translation>执行失败，无错误详情。</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="422"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="471"/>
         <source>Changes  +%1  −%2</source>
         <translation>改动  +%1  −%2</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="442"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="491"/>
         <source>View file  %1  ▸</source>
         <translation>查看文件  %1  ▸</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="444"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="493"/>
         <source>Click to view the full content: %1</source>
         <translation>点击查看完整内容：%1</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="474"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="523"/>
         <source>Click to view the original image (%1)</source>
         <translation>点击查看原图（%1）</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="475"/>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="484"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="524"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="533"/>
         <source>Image</source>
         <translation>图片</translation>
     </message>
     <message>
-        <location filename="../src/ui/ToolCallWidget.cpp" line="493"/>
+        <location filename="../src/ui/ToolCallWidget.cpp" line="542"/>
         <source>The image could not be decoded: %1</source>
         <translation>图片无法解码：%1</translation>
     </message>

@@ -76,6 +76,7 @@ using namespace lycode::ui;
 using lycode::test::FakeGateway;
 using lycode::test::jsonEscape;
 using lycode::test::multiToolCallResponse;
+using lycode::test::reasoningTextResponse;
 using lycode::test::textResponse;
 using lycode::test::textResponseWithCache;
 using lycode::test::toolCallResponse;
@@ -112,6 +113,12 @@ class TestUiFlow : public QObject
     void workspacePurgeDeletesSessionsButKeepsFiles();
     void attachesImageAndSendsIt();
     void conversationRendersHighlightedCode();
+    /// 思考块必须是可折叠的：历史消息默认收起，流式结束后自动收起，用户点击优先。
+    void reasoningBlockCollapsesAndExpands();
+    /// 真实链路上的推理增量必须渲染成思考块，并在整轮结束后自动收起。
+    void streamedReasoningArrivesAsACollapsedBlock();
+    /// 工具卡片默认收起、状态变化不自动展开，表头整行可点（拖选文字除外）。
+    void toolCardStaysCollapsedUntilClicked();
     void workspaceExpansionIsPersisted();
     void switchingWorkspaceKeepsTreeOrderStable();
     void topButtonCreatesWorkspaceNotSession();
@@ -1163,6 +1170,210 @@ void TestUiFlow::conversationRendersHighlightedCode()
   // 需要确认观感时看截图。
 
   view.close();
+}
+
+void TestUiFlow::reasoningBlockCollapsesAndExpands()
+{
+  // 用户报过："每个思考过程的输出内容都无法折叠展开"——原来只有一个静态的
+  // 「Reasoning」说明行，正文永远铺开，长思考会把整轮回答顶下去。
+  // 这条测试钉住三件事：标题行可点、历史消息默认收起、流式结束后自动收起。
+  ConversationView view;
+  view.setStyleSheet(Theme::instance().styleSheet());
+  view.resize(760, 900);
+  view.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&view));
+
+  // ── 历史消息（已经结束的一轮）：思考块默认收起，点一下才展开 ──────────────
+  Message history;
+  history.id = QStringLiteral("msg_history");
+  history.sessionId = QStringLiteral("session_x");
+  history.role = MessageRole::Assistant;
+  history.status = MessageStatus::Complete;
+  const Part historyReasoning =
+    Part::makeReasoning(QStringLiteral("先看 README，再找入口。\n第二步：确认构建方式。"));
+  history.parts.append(historyReasoning);
+  history.parts.append(Part::makeText(QStringLiteral("我已经读完 README。")));
+  view.addMessage(history);
+
+  auto * toggle = view.findChild<QToolButton *>(QStringLiteral("reasoningToggle"));
+  QVERIFY2(toggle != nullptr, "思考块必须有一个可点击的标题行");
+  QCOMPARE(toggle->text(), QStringLiteral("Reasoning"));
+  QVERIFY2(toggle->isCheckable(), "标题行必须是一个可开合的控件");
+  QVERIFY2(toggle->isEnabled(), "标题行必须是可用的");
+  QVERIFY2(!toggle->toolTip().isEmpty(), "标题行应当说明它可以展开/收起");
+  QVERIFY2(!toggle->isChecked(), "历史消息里的思考块默认应当收起");
+
+  auto * body = view.findChild<QTextBrowser *>(QStringLiteral("reasoningBody"));
+  QVERIFY2(body != nullptr, "思考正文应当是可折叠的独立控件");
+  QVERIFY2(!body->isVisible(), "收起状态下思考正文不占版面");
+  // 收起只是不显示，内容必须还在：展开后要能立刻看到完整思考。
+  QVERIFY2(body->toPlainText().contains(QStringLiteral("先看 README")),
+           "收起状态下也应当保留思考内容");
+
+  QTest::mouseClick(toggle, Qt::LeftButton);
+  QVERIFY2(toggle->isChecked(), "点击标题行应当展开思考块");
+  QVERIFY2(body->isVisible(), "展开后必须看得到思考正文");
+  QVERIFY2(toggle->arrowType() == Qt::DownArrow, "展开时箭头应当朝下");
+  QTest::mouseClick(toggle, Qt::LeftButton);
+  QVERIFY2(!toggle->isChecked() && !body->isVisible(), "再次点击应当收起");
+  QVERIFY2(toggle->arrowType() == Qt::RightArrow, "收起时箭头应当朝右");
+
+  // ── 正在流式的一轮：思考时展开，正文一开始就自动收起 ──────────────────────
+  Message live;
+  live.id = QStringLiteral("msg_live");
+  live.sessionId = QStringLiteral("session_x");
+  live.role = MessageRole::Assistant;
+  live.status = MessageStatus::Streaming;
+  // 真实链路：先建出空的思考块与正文块，内容再逐块流式追加。
+  const Part liveReasoning = Part::makeReasoning(QString());
+  const Part liveText = Part::makeText(QString());
+  live.parts.append(liveReasoning);
+  live.parts.append(liveText);
+  view.addMessage(live);
+
+  view.appendDelta(live.id, liveReasoning.id, QStringLiteral("正在分析调用链……"), true);
+
+  auto * liveToggle = view.findChildren<QToolButton *>(QStringLiteral("reasoningToggle")).last();
+  QVERIFY2(liveToggle != toggle, "两个思考块必须是各自独立的控件");
+  QVERIFY2(liveToggle->isChecked(), "思考流式进行中应当保持展开");
+
+  // 正文增量到达 = 这段思考结束，自动收起让位给正文（用户没手动动过它）。
+  view.appendDelta(live.id, liveText.id, QStringLiteral("结论如下。"), false);
+  QVERIFY2(!liveToggle->isChecked(), "思考结束后应当自动收起");
+
+  // 自动收起之后用户仍然可以自己点开，并且这次点击会被记住。
+  liveToggle->click();
+  QVERIFY2(liveToggle->isChecked(), "自动收起之后必须还能手动展开");
+
+  // 整轮结束（终态刷新）不能把用户刚点开的块又收回去。
+  Message finished = live;
+  finished.status = MessageStatus::Complete;
+  for(Part & part : finished.parts) {
+    // 终态刷新会用 part 里的文本重排一次，这里按真实链路把累积内容补齐。
+    if(part.kind == PartKind::Text) {
+      part.text.text = QStringLiteral("结论如下。");
+    }
+    else if(part.kind == PartKind::Reasoning) {
+      part.reasoning.text = QStringLiteral("正在分析调用链……");
+    }
+  }
+  view.applyMessage(finished);
+  QVERIFY2(liveToggle->isChecked(), "用户手动展开的思考块不应被终态刷新重新收起");
+  QVERIFY2(liveToggle->arrowType() == Qt::DownArrow, "手动展开后箭头应当朝下");
+
+  const QString shot = screenshotDir() + QStringLiteral("/13-reasoning-collapse.png");
+  QVERIFY2(view.grab().save(shot), qPrintable(shot));
+
+  view.close();
+}
+
+void TestUiFlow::toolCardStaysCollapsedUntilClicked()
+{
+  // 用户报过："工具调用也默认是折叠吧"——卡片确实是默认收起的，但状态从
+  //「等待批准」进入「执行中」时会自动展开一次，而执行结束后没有对应的收起，
+  // 于是一轮任务里跑过的卡片最后全开着。另外表头只设了手型光标，
+  // 只有那个十几像素的箭头真的能点。这条测试把两件事都钉住。
+  Part part = Part::makeTool(QStringLiteral("Bash"), QStringLiteral("call_collapse"));
+  part.tool.state = ToolState::PendingApproval;
+  part.tool.title = QStringLiteral("Bash: cmake --build build");
+
+  ToolCallWidget card(part);
+  card.resize(640, 240);
+  card.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&card));
+
+  auto * body = card.findChild<QWidget *>(QStringLiteral("toolCardBody"));
+  auto * title = card.findChild<QLabel *>(QStringLiteral("toolCardTitle"));
+  auto * meta = card.findChild<QLabel *>(QStringLiteral("toolCardMeta"));
+  QVERIFY(body != nullptr && title != nullptr && meta != nullptr);
+  QVERIFY2(!card.isExpanded(), "工具卡片默认必须收起");
+  QVERIFY2(!body->isVisible(), "收起状态下主体不占版面");
+
+  // 批准后进入执行中、以及执行完成：都不许自动展开。
+  part.tool.state = ToolState::Running;
+  part.tool.output = QStringLiteral("编译中……");
+  card.applyPart(part);
+  QVERIFY2(!card.isExpanded(), "状态进入「执行中」也不该自动展开");
+
+  part.tool.state = ToolState::Success;
+  part.tool.output = QStringLiteral("构建完成");
+  card.applyPart(part);
+  QVERIFY2(!card.isExpanded(), "执行结束后同样不该自动展开");
+  QVERIFY2(body->isHidden(), "收起状态在状态刷新后必须保持");
+
+  // 点标题（摘要在这一行）应当展开：用户点的就是这一行，不是那个小箭头。
+  QTest::mouseClick(title, Qt::LeftButton);
+  QVERIFY2(card.isExpanded(), "点工具卡片表头应当展开");
+  QVERIFY2(body->isVisible(), "展开后必须看得到入参/输出");
+  QTest::mouseClick(title, Qt::LeftButton);
+  QVERIFY2(!card.isExpanded(), "再点一次应当收起");
+
+  // 表头里没有文字交互的标签（耗时等）也要能点：它们会把按下事件冒泡给头部。
+  QTest::mouseClick(meta, Qt::LeftButton);
+  QVERIFY2(card.isExpanded(), "点表头任意位置都应当能开合");
+  QTest::mouseClick(meta, Qt::LeftButton);
+  QVERIFY2(!card.isExpanded(), "表头任意位置再点一次应当收起");
+
+  // 在标题上拖动是"选文字"，不是"点击"：不能顺手把卡片开合掉。
+  const QPoint from(4, title->height() / 2);
+  const QPoint to(from.x() + 60, from.y());
+  QTest::mousePress(title, Qt::LeftButton, Qt::NoModifier, from);
+  QTest::mouseMove(title, to, 10);
+  QTest::mouseRelease(title, Qt::LeftButton, Qt::NoModifier, to);
+  QVERIFY2(!card.isExpanded(), "在标题上拖选文字不应切换展开状态");
+
+  card.close();
+}
+
+void TestUiFlow::streamedReasoningArrivesAsACollapsedBlock()
+{
+  // 上一条测试直接驱动 ConversationView；这条走真实链路
+  //（provider 的 SSE → AgentRuntime → MainWindow → 对话流），确认推理增量真的
+  // 被渲染成思考块，而不是被当成正文或干脆丢掉。
+  MainWindow window;
+  window.resize(1280, 820);
+  window.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+  auto * composer = window.findChild<QPlainTextEdit *>(QStringLiteral("composer"));
+  auto * sendButton = window.findChild<QPushButton *>(QStringLiteral("sendButton"));
+  auto * conversation = window.findChild<ConversationView *>(QStringLiteral("conversation"));
+  QVERIFY(composer != nullptr && sendButton != nullptr && conversation != nullptr);
+
+  // 前面的测试会把最近工作区指向已析构的临时目录，这里显式切到一个存在的目录，
+  // 否则不会建会话，发送按钮是禁用的。
+  auto * sidebar = window.findChild<SidebarPanel *>(QStringLiteral("sidebar"));
+  QVERIFY(sidebar != nullptr);
+  QTemporaryDir workspace;
+  QVERIFY(workspace.isValid());
+  emit sidebar->workspaceRecentRequested(workspace.path());
+  QVERIFY(waitFor([&]() {
+    return sendButton->isEnabled();
+  }, 3000));
+
+  const QByteArray reasoning = QStringLiteral("先确认构建目录，再定位入口。").toUtf8();
+  gateway_->enqueue(reasoningTextResponse(reasoning, QStringLiteral("我看完了。").toUtf8()));
+
+  const int before = conversation->messageCount();
+  composer->setPlainText(QStringLiteral("看一下这个仓库"));
+  sendButton->click();
+  QVERIFY2(waitFor([&]() {
+    return conversation->messageCount() >= before + 2 && sendButton->isEnabled();
+  }, 15000),
+  "发送后应当收到回复");
+
+  auto * toggle = conversation->findChild<QToolButton *>(QStringLiteral("reasoningToggle"));
+  QVERIFY2(toggle != nullptr, "模型下发的思考内容必须在对话流里渲染成思考块");
+  auto * body = conversation->findChild<QTextBrowser *>(QStringLiteral("reasoningBody"));
+  QVERIFY(body != nullptr);
+  QVERIFY2(body->toPlainText().contains(QString::fromUtf8(reasoning)),
+           qPrintable(QStringLiteral("思考正文里应当有完整推理内容，实际：%1")
+                      .arg(body->toPlainText())));
+  QVERIFY2(!toggle->isChecked(), "整轮结束后思考块应当已经自动收起");
+
+  // 收起的块必须能再点开——这正是用户报的那一点。
+  toggle->click();
+  QVERIFY2(toggle->isChecked() && body->isVisible(), "点亮标题行后必须看得到思考正文");
 }
 
 void TestUiFlow::workspaceExpansionIsPersisted()

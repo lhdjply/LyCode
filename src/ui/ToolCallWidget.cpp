@@ -5,12 +5,14 @@
 #include "ui/FileViewerDialog.h"
 #include "ui/Theme.h"
 
+#include <QApplication>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLoggingCategory>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QToolButton>
@@ -92,7 +94,14 @@ void ToolCallWidget::buildUi()
   root->setSizeConstraint(QLayout::SetMinimumSize);
 
   // ── 头部 ────────────────────────────────────────────────────────────────
-  auto * header = new QHBoxLayout;
+  // 头部是一个独立容器（而不是直接挂进 root 的 QHBoxLayout）：整行都要能点开合，
+  // 需要有一个控件来承接子标签冒泡上来的点击。
+  header_ = new QWidget;
+  header_->setObjectName(QStringLiteral("toolCardHeader"));
+  header_->setCursor(Qt::PointingHandCursor);
+  header_->installEventFilter(this);
+
+  auto * header = new QHBoxLayout(header_);
   header->setContentsMargins(0, 0, 0, 0);
   header->setSpacing(8);
 
@@ -112,28 +121,35 @@ void ToolCallWidget::buildUi()
   // 状态灯：用一个圆点字符而不是自绘，避免引入额外绘制代码。
   stateDot_ = new QLabel(QStringLiteral("\u25CF"));
   stateDot_->setToolTip(QCoreApplication::translate("ui::ToolCallWidget", "Tool status"));
+  stateDot_->installEventFilter(this);
   header->addWidget(stateDot_);
 
   nameLabel_ = new QLabel;
+  nameLabel_->setObjectName(QStringLiteral("toolCardName"));
   nameLabel_->setFont(Theme::instance().font(FontRole::Mono));
+  nameLabel_->installEventFilter(this);
   header->addWidget(nameLabel_);
 
   titleLabel_ = new QLabel;
+  titleLabel_->setObjectName(QStringLiteral("toolCardTitle"));
+  // 标题保持可选中：在它上面拖动仍然是选文字，只有"点一下"才开合卡片
+  //（见 eventFilter 里的按下/抬起位置比较）。
   titleLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
   titleLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  titleLabel_->installEventFilter(this);
   header->addWidget(titleLabel_, 1);
 
   metaLabel_ = new QLabel;
+  metaLabel_->setObjectName(QStringLiteral("toolCardMeta"));
   metaLabel_->setFont(Theme::instance().font(FontRole::UiXs));
+  metaLabel_->installEventFilter(this);
   header->addWidget(metaLabel_);
 
-  // 头部整行可点，扩大点击目标（箭头本身太小）。
-  setCursor(Qt::PointingHandCursor);
-
-  root->addLayout(header);
+  root->addWidget(header_);
 
   // ── 主体 ────────────────────────────────────────────────────────────────
   body_ = new QWidget;
+  body_->setObjectName(QStringLiteral("toolCardBody"));
   auto * bodyLayout = new QVBoxLayout(body_);
   bodyLayout->setContentsMargins(0, 4, 0, 0);
   bodyLayout->setSpacing(4);
@@ -377,8 +393,41 @@ void ToolCallWidget::refreshBodies()
   syncFileLink();
 }
 
+bool ToolCallWidget::isHeaderHitTarget(const QObject * watched) const
+{
+  return watched == header_ || watched == stateDot_ || watched == nameLabel_ ||
+         watched == titleLabel_ || watched == metaLabel_;
+}
+
 bool ToolCallWidget::eventFilter(QObject * watched, QEvent * event)
 {
+  // 头部整行可点：箭头只有十几像素，用户点的是工具名/摘要那一行。
+  // 只处理按下/抬起两种鼠标事件——其它事件（绘制、主题变化等）原样放行。
+  if(isHeaderHitTarget(watched) &&
+     (event->type() == QEvent::MouseButtonPress ||
+      event->type() == QEvent::MouseButtonRelease)) {
+    auto * mouse = static_cast<QMouseEvent *>(event);
+    if(mouse->button() == Qt::LeftButton) {
+      if(event->type() == QEvent::MouseButtonPress) {
+        headerPressed_ = true;
+        headerPressPos_ = mouse->position().toPoint();
+        // 标题要留给"拖选文字"，所以它的按下事件不能吞；其余区域直接收下，
+        // 保证抬起事件一定回到头部（否则点击会被判成落在卡片空白处）。
+        return watched != titleLabel_;
+      }
+      if(headerPressed_) {
+        headerPressed_ = false;
+        // 拖动超过阈值 = 在选文字，不是点击；此时不改展开状态。
+        const bool clicked = (mouse->position().toPoint() - headerPressPos_).manhattanLength() <=
+                             QApplication::startDragDistance();
+        if(clicked) {
+          setExpanded(!isExpanded());
+        }
+        return true;
+      }
+    }
+  }
+
   if(event->type() == QEvent::MouseButtonRelease) {
     auto * label = qobject_cast<QLabel *>(watched);
     if(label != nullptr && label->objectName() == QLatin1String("toolImage")) {
@@ -510,7 +559,6 @@ void ToolCallWidget::applyPart(const Part & part)
     return;
   }
 
-  const ToolState previousState = part_.tool.state;
   part_ = part;
   if(callId_.isEmpty()) {
     callId_ = part.tool.callId;
@@ -519,12 +567,9 @@ void ToolCallWidget::applyPart(const Part & part)
   refreshHeader();
   refreshBodies();
 
-  // 状态从"等待确认"进入"执行中"时自动展开一次：
-  // 这是用户最需要看到细节的时刻。之后不再自动改变用户的展开选择。
-  if(previousState == ToolState::PendingApproval && part_.tool.state == ToolState::Running &&
-     !isExpanded()) {
-    setExpanded(true);
-  }
+  // ⚠ 刻意**不**在状态变化时自动展开或收起（例如"等待批准 → 执行中"）：
+  // 一次任务里工具卡片往往十几张，自动展开会把正文顶出屏幕；而系统去改用户
+  // 刚刚点开的卡片同样让人困惑。展开与否只由用户决定（见 ToolCallWidget.h）。
 }
 
 }  // namespace lycode::ui

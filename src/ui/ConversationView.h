@@ -13,9 +13,16 @@
 //
 // ── 自动滚动 ────────────────────────────────────────────────────────────
 // 只在用户本来就贴着底部时自动跟随。用户向上翻阅历史时不得抢走滚动位置。
+//
+// ── 思考块 ──────────────────────────────────────────────────────────────
+// 每个 Reasoning part 渲染成「可折叠的思考块」：头部一行（箭头 + 标题）整行可点。
+// 默认状态跟着生命周期走：流式中展开（看得到模型在想什么），思考结束
+//（正文开始、工具调用开始、或整轮结束）自动收起，把版面让给正文。
+// 用户手动开合过的块会被记住，后续的自动收起不再改写它。
 #pragma once
 
 #include <QHash>
+#include <QSet>
 #include <QWidget>
 
 #include "core/Types.h"
@@ -23,6 +30,7 @@
 class QLabel;
 class QScrollArea;
 class QTextBrowser;
+class QToolButton;
 class QVBoxLayout;
 
 namespace lycode::ui
@@ -64,6 +72,12 @@ class MessageWidget : public QWidget
     /// 用累积的 Markdown 源做终态排版。
     void renderRichText(const Id & partId);
 
+    /// 展开/收起一个思考块。`userInitiated` 表示这次变更来自用户点击——
+    /// 被用户动过的块不再由「思考结束自动收起」改写，否则用户刚点开又被收回去。
+    void setReasoningExpanded(const Id & partId, bool expanded, bool userInitiated);
+    /// 收起当前正在流式的那个思考块（如果有），表示这一段思考已经结束。
+    void collapseActiveReasoning();
+
     Message message_;
 
     QLabel * roleLabel_ = nullptr;
@@ -77,6 +91,13 @@ class MessageWidget : public QWidget
     QHash<Id, QString> richSources_;
     /// partId → 工具卡片。
     QHash<Id, ToolCallWidget *> toolViews_;
+    /// partId → 思考块的折叠按钮 / 正文控件。
+    QHash<Id, QToolButton *> reasoningToggles_;
+    QHash<Id, QWidget *> reasoningBodies_;
+    /// 被用户手动开合过的思考块：自动收起必须让位于用户的选择。
+    QSet<Id> reasoningUserToggled_;
+    /// 当前仍在流式接收的思考块。思考结束后它会被自动收起。
+    Id activeReasoningPartId_;
     /// 已经建过控件的 part 集合，防止重复插入。
     QHash<Id, bool> renderedParts_;
 };

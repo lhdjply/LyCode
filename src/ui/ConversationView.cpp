@@ -10,8 +10,10 @@
 #include <QScrollArea>
 #include <QAbstractTextDocumentLayout>
 #include <QScrollBar>
+#include <QSignalBlocker>
 #include <QTextBrowser>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QCoreApplication>
 
@@ -243,6 +245,8 @@ QTextBrowser * MessageWidget::createRichTextView(bool reasoning)
   auto * view = new RichTextView;
 
   if(reasoning) {
+    // objectName 让测试能直接取到"思考正文"这个控件（正文视图有多个）。
+    view->setObjectName(QStringLiteral("reasoningBody"));
     const Palette & palette = Theme::instance().palette();
     view->setStyleSheet(QStringLiteral("color: %1;").arg(Theme::css(palette.foregroundSubtle)));
   }
@@ -262,25 +266,53 @@ void MessageWidget::buildPartWidget(const Part & part)
     case PartKind::Text:
     case PartKind::Reasoning: {
         const bool reasoning = part.kind == PartKind::Reasoning;
-        if(reasoning) {
-          // 思考内容折在一条弱化的说明行下，避免抢占正文注意力。
-          auto * caption = new QLabel(QCoreApplication::translate("ui::ConversationView", "Reasoning"));
-          caption->setFont(Theme::instance().font(FontRole::UiXs));
-          caption->setStyleSheet(QStringLiteral("color: %1;")
-                                 .arg(Theme::css(Theme::instance().palette()
-                                                 .foregroundSubtlest)));
-          caption->setProperty("partCaptionFor", part.id);
-          addPartWidget(caption);
-        }
         QTextBrowser * view = createRichTextView(reasoning);
         richViews_.insert(part.id, view);
         richSources_.insert(part.id, reasoning ? part.reasoning.text : part.text.text);
+
+        if(!reasoning) {
+          addPartWidget(view);
+          renderRichText(part.id);
+          break;
+        }
+
+        // 思考内容折在一条可点击的标题行下，避免抢占正文注意力。
+        // 标题行用 QToolButton 而不是 QLabel + 单独箭头：整行文字都是点击目标
+        //（箭头本身只有十来个像素，很难点中）。
+        auto * toggle = new QToolButton;
+        toggle->setObjectName(QStringLiteral("reasoningToggle"));
+        toggle->setAutoRaise(true);
+        toggle->setCheckable(true);
+        toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        toggle->setFont(Theme::instance().font(FontRole::UiXs));
+        toggle->setCursor(Qt::PointingHandCursor);
+        toggle->setToolTip(QCoreApplication::translate("ui::ConversationView",
+                                                       "Expand or collapse reasoning"));
+        toggle->setText(QCoreApplication::translate("ui::ConversationView", "Reasoning"));
+        toggle->setStyleSheet(QStringLiteral("QToolButton { color: %1; }")
+                              .arg(Theme::css(Theme::instance().palette()
+                                              .foregroundSubtlest)));
+        // 只连 clicked：它只在用户真的点/按空格时发出，程序性 setChecked 不会触发，
+        // 这样「自动收起」就不会被误记成用户操作。
+        connect(toggle, &QToolButton::clicked, this, [this, partId = part.id, toggle]() {
+          setReasoningExpanded(partId, toggle->isChecked(), true);
+        });
+
+        reasoningToggles_.insert(part.id, toggle);
+        reasoningBodies_.insert(part.id, view);
+        addPartWidget(toggle);
         addPartWidget(view);
         renderRichText(part.id);
+
+        // 默认状态：还在流式的消息展开，历史消息（含刚加载的旧会话）直接收起。
+        setReasoningExpanded(part.id, message_.status == MessageStatus::Streaming, false);
         break;
       }
 
     case PartKind::Tool: {
+        // 工具调用开始 = 这一段思考结束，先把它收起来再挂卡片，
+        // 否则思考正文会一直占着版面直到本轮回答结束。
+        collapseActiveReasoning();
         auto * card = new ToolCallWidget(part, this);
         toolViews_.insert(part.tool.callId, card);
         addPartWidget(card);
@@ -410,16 +442,63 @@ void MessageWidget::renderRichText(const Id & partId)
   view->setHtml(Markdown::toHtml(source, style));
 }
 
+void MessageWidget::setReasoningExpanded(const Id & partId, bool expanded, bool userInitiated)
+{
+  QToolButton * toggle = reasoningToggles_.value(partId, nullptr);
+  QWidget * body = reasoningBodies_.value(partId, nullptr);
+  if(toggle == nullptr || body == nullptr) {
+    return;
+  }
+  if(userInitiated) {
+    reasoningUserToggled_.insert(partId);
+  }
+  if(toggle->isChecked() != expanded) {
+    // 程序性折叠不该被当成用户操作（并且挡掉 toggle→setChecked→toggled 的回环）。
+    const QSignalBlocker blocker(toggle);
+    toggle->setChecked(expanded);
+  }
+  toggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+  body->setVisible(expanded);
+}
+
+void MessageWidget::collapseActiveReasoning()
+{
+  if(activeReasoningPartId_.isEmpty()) {
+    return;
+  }
+  const Id partId = activeReasoningPartId_;
+  activeReasoningPartId_.clear();
+  // 用户手动开着的（或手动点开的）块不动它。
+  if(!reasoningUserToggled_.contains(partId)) {
+    setReasoningExpanded(partId, false, false);
+  }
+}
+
 void MessageWidget::appendDelta(const Id & partId, const QString & delta, bool reasoning)
 {
-  Q_UNUSED(reasoning)
-
   if(!richSources_.contains(partId)) {
     // 增量先于控件到达（例如 partAppended 还没处理）：补建控件。
     Part placeholder;
     placeholder.id = partId;
     placeholder.kind = reasoning ? PartKind::Reasoning : PartKind::Text;
     buildPartWidget(placeholder);
+  }
+
+  if(reasoning) {
+    // 同一轮里可能有多段思考（思考 → 工具 → 再思考）。新的一段开始时把上一段
+    // 收起来，任何时刻最多只有一个思考块是展开的。
+    if(!activeReasoningPartId_.isEmpty() && activeReasoningPartId_ != partId) {
+      collapseActiveReasoning();
+    }
+    activeReasoningPartId_ = partId;
+    // 思考进行中保持展开，用户已经手动收起过的不再抢回来。
+    if(!reasoningUserToggled_.contains(partId)) {
+      setReasoningExpanded(partId, true, false);
+    }
+  }
+  else {
+    // 正文开始 = 这一段思考结束，让位给正文。
+    collapseActiveReasoning();
   }
 
   richSources_[partId] += delta;
@@ -439,6 +518,8 @@ void MessageWidget::appendDelta(const Id & partId, const QString & delta, bool r
 void MessageWidget::applyPart(const Part & part)
 {
   if(part.kind == PartKind::Tool) {
+    // 工具卡片一旦出现（哪怕是别的 part 刷新出来的），本段思考就该收起。
+    collapseActiveReasoning();
     if(ToolCallWidget * card = toolViews_.value(part.tool.callId, nullptr)) {
       card->applyPart(part);
       renderedParts_.insert(part.id, true);
@@ -499,6 +580,17 @@ void MessageWidget::applyMessage(const Message & message)
       }
     }
   }
+
+  // 本轮结束（完成 / 失败 / 被中断）时把所有思考块收起来：答案已经定型，
+  // 思考内容留在版面上只会把正文往下推。用户手动开着的块不受影响。
+  if(message_.status != MessageStatus::Streaming) {
+    activeReasoningPartId_.clear();
+    for(auto it = reasoningToggles_.constBegin(); it != reasoningToggles_.constEnd(); ++it) {
+      if(!reasoningUserToggled_.contains(it.key())) {
+        setReasoningExpanded(it.key(), false, false);
+      }
+    }
+  }
 }
 
 void MessageWidget::refreshHeader()
@@ -546,6 +638,15 @@ void MessageWidget::refreshTheme()
   for(auto it = richSources_.constBegin(); it != richSources_.constEnd(); ++it) {
     renderRichText(it.key());
   }
+
+  // 思考块标题是自绘的 QToolButton，配色与字号不会跟着全局样式表走，单独刷一次。
+  const QString toggleStyle = QStringLiteral("QToolButton { color: %1; }")
+                              .arg(Theme::css(Theme::instance().palette().foregroundSubtlest));
+  for(QToolButton * toggle : std::as_const(reasoningToggles_)) {
+    toggle->setFont(Theme::instance().font(FontRole::UiXs));
+    toggle->setStyleSheet(toggleStyle);
+  }
+
   refreshHeader();
 }
 

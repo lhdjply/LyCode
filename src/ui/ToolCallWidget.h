@@ -4,6 +4,13 @@
 //   头部：状态灯 + 工具名 + 一行摘要 + 耗时 + 展开箭头
 //   主体：入参（等宽）与输出（等宽、限高、可滚动）
 //
+// ── 折叠行为 ────────────────────────────────────────────────────────────
+// **默认收起，并且不会自己展开**：一次任务里工具卡片往往十几张，自动展开会把
+// 正文顶出屏幕。状态变化（等待批准 → 执行中 → 成功/失败）只更新头部，
+// 不碰用户的展开选择。
+// 头部**整行可点**（不是只有那个十几像素的箭头）：标题上拖动仍是选文字，
+// 只有"点一下"才切换。
+//
 // 状态灯的颜色严格按 ToolState 语义取令牌，不做装饰性用色：
 //   InputStreaming / PendingApproval → warning（等待中）
 //   Running                          → warning（进行中）
@@ -13,6 +20,7 @@
 #pragma once
 
 #include <QFrame>
+#include <QPoint>
 #include <QString>
 
 #include "core/Types.h"
@@ -55,7 +63,7 @@ class ToolCallWidget : public QFrame
     void setExpanded(bool expanded);
 
   protected:
-    /// 点击图片缩略图打开查看器。
+    /// 点击头部任意位置开合卡片；点击图片缩略图打开查看器。
     bool eventFilter(QObject * watched, QEvent * event) override;
 
   private:
@@ -67,6 +75,9 @@ class ToolCallWidget : public QFrame
     /// 打开第 index 张图片的查看器。
     void openImageViewer(QWidget * source);
 
+    /// 这个对象是否属于"点它应当开合卡片"的头部区域。
+    bool isHeaderHitTarget(const QObject * watched) const;
+
     /// 状态灯的颜色。
     QColor stateColor() const;
     /// 状态的中文文案。
@@ -75,11 +86,15 @@ class ToolCallWidget : public QFrame
     Part part_;
     QString callId_;
 
+    QWidget * header_ = nullptr;
     QToolButton * toggleButton_ = nullptr;
     QLabel * stateDot_ = nullptr;
     QLabel * nameLabel_ = nullptr;
     QLabel * titleLabel_ = nullptr;
     QLabel * metaLabel_ = nullptr;
+    /// 头部一次点击的起点：用来区分"点一下"与"在标题上拖选文字"。
+    QPoint headerPressPos_;
+    bool headerPressed_ = false;
 
     QWidget * body_ = nullptr;
     QLabel * inputCaption_ = nullptr;

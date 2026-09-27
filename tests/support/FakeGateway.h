@@ -172,6 +172,25 @@ inline QByteArray textResponse(const QByteArray & text)
   return body;
 }
 
+/// 带思考内容的流式响应（OpenAI 兼容协议的 `delta.reasoning_content`）。
+///
+/// 用于验证会话视图里的「思考块」走的是真实链路：思考增量先到（块展开并在流式
+/// 追加），正文增量随后到达（这段思考结束），整轮结束时块已经收起。
+inline QByteArray reasoningTextResponse(const QByteArray & reasoning, const QByteArray & text)
+{
+  QByteArray body;
+  body += "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n";
+  body += "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"" +
+          jsonStringEscape(reasoning) + "\"}}]}\n\n";
+  body += "data: {\"choices\":[{\"delta\":{\"content\":\"" + jsonStringEscape(text) +
+          "\"}}]}\n\n";
+  body += "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+  body += "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":20,"
+          "\"total_tokens\":120}}\n\n";
+  body += "data: [DONE]\n\n";
+  return body;
+}
+
 /// 纯文本流式响应，并带上缓存用量明细。
 ///
 /// 用于验证"prompt_tokens 含缓存、Usage::inputTokens 约定为不含缓存"这条归一：
